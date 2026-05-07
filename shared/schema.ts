@@ -110,6 +110,41 @@ export type PurchaseOrder = {
   tax: number;
   landedCost: number;
   status: 'recibido' | 'en_transito' | 'pendiente';
+  currency: 'COP' | 'USD';
+  paymentMethod: string;
+  expectedDate?: string;
+  receivedDate?: string;
+  notes?: string;
+  items: PurchaseOrderItem[];
+};
+
+export type PurchaseOrderItem = {
+  material: string;
+  sku?: string;
+  category: string;
+  qty: number;
+  unitCost: number;
+  subtotal: number;
+  expectedUse?: string;
+};
+
+export type IncomeDetail = {
+  id: string;
+  orderName: string;
+  date: string;
+  month: string;
+  channel: string;
+  customerType: 'nuevo' | 'recurrente' | 'vip' | 'b2b';
+  product: string;
+  sku: string;
+  qty: number;
+  grossRevenue: number;
+  discounts: number;
+  shipping: number;
+  refunds: number;
+  netRevenue: number;
+  paymentStatus: 'paid' | 'pending' | 'refunded' | 'partially_refunded';
+  fulfillmentStatus: 'fulfilled' | 'unfulfilled' | 'partial';
 };
 
 export type Expense = {
@@ -177,4 +212,26 @@ export type IntegrationPhase = {
   status: 'planificado' | 'en_progreso' | 'completado';
   bullets: string[];
   requiresCredentials?: string[];
+};
+
+export type RestockRecommendation = {
+  id: string;
+  material: string;
+  category: 'hardware' | 'distillate' | 'packaging';
+  currentStock: number;
+  unit: string;
+  avgDailyUsage: number;
+  daysOnHand: number;
+  leadTimeDays: number;
+  reorderPoint: number;
+  targetCoverDays: number;
+  recommendedQty: number;
+  estimatedUnitCost: number;
+  estimatedCost: number;
+  suggestedOrderDate: string;
+  latestSafeOrderDate: string;
+  monthCashImpact: number;
+  risk: 'crítico' | 'alto' | 'medio' | 'bajo';
+  balanceNote: string;
+  productsImpacted: string[];
 };

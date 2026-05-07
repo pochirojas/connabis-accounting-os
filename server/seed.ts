@@ -2,6 +2,7 @@ import type {
   Channel, MonthlyRow, YearSummary, DashboardKPIs,
   Product, MaterialCost, PurchaseOrder, Expense, Alert, IntegrationPhase,
   DailyPerformance, GlossaryTerm, CostBreakdownItem, AccountingSuggestion,
+  IncomeDetail, RestockRecommendation,
 } from '@shared/schema';
 
 // ----- Channel split (Shopify) -----
@@ -143,12 +144,73 @@ export const materials: MaterialCost[] = [
 
 // ----- Purchase orders -----
 export const purchaseOrders: PurchaseOrder[] = [
-  { id: 'po1', date: '2026-04-08', supplier: 'Noids Hardware MX',     category: 'Cartuchos 2.25mL',  qty: 200, unitCost: 6_356.26, shipping: 350_000, tax: 241_538, landedCost: 1_862_790, status: 'recibido' },
-  { id: 'po2', date: '2026-04-12', supplier: 'Noids Hardware MX',     category: 'Desechables 4mL',   qty: 120, unitCost: 23_273.81, shipping: 480_000, tax: 530_563, landedCost: 3_803_420, status: 'recibido' },
-  { id: 'po3', date: '2026-04-15', supplier: 'EU Distillates Ltd',    category: 'THCO 100g',         qty: 1,   unitCost: 309_674,   shipping: 220_000, tax:  60_335, landedCost:    590_009, status: 'recibido' },
-  { id: 'po4', date: '2026-04-22', supplier: 'EU Distillates Ltd',    category: 'HHC 250g',          qty: 1,   unitCost: 556_133,   shipping: 220_000, tax:  90_341, landedCost:    866_474, status: 'recibido' },
-  { id: 'po5', date: '2026-05-02', supplier: 'Empaque & Etiqueta CO', category: 'Empaque jeringas',  qty: 500, unitCost: 4_200,     shipping:  60_000, tax: 199_500, landedCost:  2_359_500, status: 'en_transito' },
-  { id: 'po6', date: '2026-05-05', supplier: 'Noids Hardware MX',     category: 'Cartuchos 1mL',     qty: 250, unitCost: 5_968.28,  shipping: 320_000, tax: 195_469, landedCost:  2_007_539, status: 'pendiente' },
+  {
+    id: 'po1', date: '2026-04-08', supplier: 'Noids Hardware MX', category: 'Cartuchos 2.25mL', qty: 200,
+    unitCost: 6_356.26, shipping: 350_000, tax: 241_538, landedCost: 1_862_790, status: 'recibido',
+    currency: 'COP', paymentMethod: 'Transferencia bancaria', expectedDate: '2026-04-17', receivedDate: '2026-04-18',
+    notes: 'Seed basado en estructura Material Manager. En Phase 2 se copiarán estados, adjuntos e invoice real.',
+    items: [
+      { material: 'Cartucho Cerámico 2.25mL', sku: 'MAT-CART-225', category: 'hardware', qty: 200, unitCost: 6_356.26, subtotal: 1_271_252, expectedUse: 'Cartuchos reutilizables XXX / THCO 2.25mL' },
+    ],
+  },
+  {
+    id: 'po2', date: '2026-04-12', supplier: 'Noids Hardware MX', category: 'Desechables 4mL', qty: 120,
+    unitCost: 23_273.81, shipping: 480_000, tax: 530_563, landedCost: 3_803_420, status: 'recibido',
+    currency: 'COP', paymentMethod: 'Transferencia bancaria', expectedDate: '2026-04-22', receivedDate: '2026-04-23',
+    notes: 'Hardware más sensible para margen; revisar mínimo rentable antes de campañas.',
+    items: [
+      { material: 'Desechable Cerámico 4mL', sku: 'MAT-DISP-4ML', category: 'hardware', qty: 120, unitCost: 23_273.81, subtotal: 2_792_857, expectedUse: 'Desechables XXX / THCO ULTRA' },
+    ],
+  },
+  {
+    id: 'po3', date: '2026-04-15', supplier: 'EU Distillates Ltd', category: 'THCO 100g', qty: 1,
+    unitCost: 309_674, shipping: 220_000, tax: 60_335, landedCost: 590_009, status: 'recibido',
+    currency: 'USD', paymentMethod: 'Wise / USD', expectedDate: '2026-04-26', receivedDate: '2026-04-28',
+    notes: 'Registrar TRM y costo aterrizado por gramo para variant.cost.',
+    items: [
+      { material: 'Distilado THCO', sku: 'MAT-THCO-100G', category: 'distillate', qty: 100, unitCost: 3_096.74, subtotal: 309_674, expectedUse: 'Recargas THCO ULTRA / THCO MAX / cartuchos THCO' },
+    ],
+  },
+  {
+    id: 'po4', date: '2026-04-22', supplier: 'EU Distillates Ltd', category: 'HHC 250g', qty: 1,
+    unitCost: 556_133, shipping: 220_000, tax: 90_341, landedCost: 866_474, status: 'recibido',
+    currency: 'USD', paymentMethod: 'Wise / USD', expectedDate: '2026-05-03', receivedDate: '2026-05-04',
+    notes: 'Compra grande que puede verse como gasto del mes si no se capitaliza a inventario.',
+    items: [
+      { material: 'Distilado HHC', sku: 'MAT-HHC-250G', category: 'distillate', qty: 250, unitCost: 2_224.53, subtotal: 556_133, expectedUse: 'HHC MAX y formulaciones base' },
+    ],
+  },
+  {
+    id: 'po5', date: '2026-05-02', supplier: 'Empaque & Etiqueta CO', category: 'Empaque jeringas', qty: 500,
+    unitCost: 4_200, shipping: 60_000, tax: 199_500, landedCost: 2_359_500, status: 'en_transito',
+    currency: 'COP', paymentMethod: 'Bancolombia débito', expectedDate: '2026-05-12',
+    notes: 'Debe conectarse a BOM de recargas para que el costo por unidad suba automáticamente.',
+    items: [
+      { material: 'Caja + etiqueta jeringa', sku: 'MAT-PACK-SYR', category: 'packaging', qty: 500, unitCost: 4_200, subtotal: 2_100_000, expectedUse: 'Todas las recargas en jeringa' },
+    ],
+  },
+  {
+    id: 'po6', date: '2026-05-05', supplier: 'Noids Hardware MX', category: 'Cartuchos 1mL', qty: 250,
+    unitCost: 5_968.28, shipping: 320_000, tax: 195_469, landedCost: 2_007_539, status: 'pendiente',
+    currency: 'COP', paymentMethod: 'Pendiente aprobación', expectedDate: '2026-05-20',
+    notes: 'Aprobar solo si forecast de ventas justifica caja y no descuadra cierre mensual.',
+    items: [
+      { material: 'Cartucho Cerámico 1mL', sku: 'MAT-CART-1ML', category: 'hardware', qty: 250, unitCost: 5_968.28, subtotal: 1_492_070, expectedUse: 'Cartuchos reutilizables 1mL activos' },
+    ],
+  },
+];
+
+// ----- Income detail (Shopify orders seed until Admin API sync) -----
+export const incomeDetails: IncomeDetail[] = [
+  { id: 'o1', orderName: '#CC-1841', date: '2026-04-20', month: '2026-04', channel: 'Online Store', customerType: 'recurrente', product: 'Recarga XXX en Jeringa Uso Diurno', sku: 'REC-XXX-DIA', qty: 2, grossRevenue: 460_000, discounts: 46_000, shipping: 12_000, refunds: 0, netRevenue: 426_000, paymentStatus: 'paid', fulfillmentStatus: 'fulfilled' },
+  { id: 'o2', orderName: '#CC-1846', date: '2026-04-20', month: '2026-04', channel: 'Draft Orders', customerType: 'vip', product: 'Cartucho Reutilizable Cerámica 2.25mL XXX', sku: 'CART-225-XXX', qty: 1, grossRevenue: 165_000, discounts: 0, shipping: 0, refunds: 0, netRevenue: 165_000, paymentStatus: 'paid', fulfillmentStatus: 'fulfilled' },
+  { id: 'o3', orderName: '#CC-1872', date: '2026-04-26', month: '2026-04', channel: 'Online Store', customerType: 'recurrente', product: 'Recarga THCO ULTRA en Jeringa Uso Diurno', sku: 'REC-THCO-ULTRA-DIA', qty: 3, grossRevenue: 735_000, discounts: 73_500, shipping: 12_000, refunds: 0, netRevenue: 673_500, paymentStatus: 'paid', fulfillmentStatus: 'fulfilled' },
+  { id: 'o4', orderName: '#CC-1888', date: '2026-04-29', month: '2026-04', channel: 'Online Store', customerType: 'nuevo', product: 'Recarga XXX en Jeringa Uso Diurno', sku: 'REC-XXX-DIA', qty: 3, grossRevenue: 690_000, discounts: 103_500, shipping: 12_000, refunds: 0, netRevenue: 598_500, paymentStatus: 'paid', fulfillmentStatus: 'fulfilled' },
+  { id: 'o5', orderName: '#CC-1894', date: '2026-04-30', month: '2026-04', channel: 'Shopify Mobile', customerType: 'recurrente', product: 'Desechable Cerámica 4mL THCO ULTRA', sku: 'DISP-4ML-THCO-ULTRA', qty: 3, grossRevenue: 645_000, discounts: 64_500, shipping: 0, refunds: 0, netRevenue: 580_500, paymentStatus: 'paid', fulfillmentStatus: 'partial' },
+  { id: 'o6', orderName: '#CC-1902', date: '2026-05-03', month: '2026-05', channel: 'Online Store', customerType: 'nuevo', product: 'Water Soluble CBD', sku: 'WS-CBD', qty: 2, grossRevenue: 170_000, discounts: 0, shipping: 12_000, refunds: 0, netRevenue: 182_000, paymentStatus: 'paid', fulfillmentStatus: 'fulfilled' },
+  { id: 'o7', orderName: '#CC-1905', date: '2026-05-03', month: '2026-05', channel: 'Draft Orders', customerType: 'b2b', product: 'Recarga D8 ULTRA en Jeringa', sku: 'REC-D8-ULTRA', qty: 4, grossRevenue: 840_000, discounts: 126_000, shipping: 0, refunds: 0, netRevenue: 714_000, paymentStatus: 'paid', fulfillmentStatus: 'unfulfilled' },
+  { id: 'o8', orderName: '#CC-1908', date: '2026-03-22', month: '2026-03', channel: 'Online Store', customerType: 'recurrente', product: 'Desechable Cerámica 4mL XXX', sku: 'DISP-4ML-XXX', qty: 3, grossRevenue: 585_000, discounts: 0, shipping: 12_000, refunds: 0, netRevenue: 597_000, paymentStatus: 'paid', fulfillmentStatus: 'fulfilled' },
+  { id: 'o9', orderName: '#CC-1761', date: '2026-03-09', month: '2026-03', channel: 'Online Store', customerType: 'nuevo', product: 'Melena de León Orgánica', sku: 'WELL-LION-MANE', qty: 3, grossRevenue: 285_000, discounts: 28_500, shipping: 12_000, refunds: 0, netRevenue: 268_500, paymentStatus: 'paid', fulfillmentStatus: 'fulfilled' },
 ];
 
 // ----- Expenses (sample, sourced from sheet bridge) -----
@@ -180,6 +242,58 @@ export const dailyPerformance: DailyPerformance[] = [
   { date: '2026-04-29', month: '2026-04', orders: 13, revenue: 1_860_000, expenses: 940_000, profit: 920_000, aov: 143_077, topProduct: 'Recarga XXX en Jeringa Uso Diurno', topProductRevenue: 690_000, topProductUnits: 3, note: 'Urgencia por cierre de oferta' },
   { date: '2026-04-30', month: '2026-04', orders: 14, revenue: 1_970_000, expenses: 4_620_000, profit: -2_650_000, aov: 140_714, topProduct: 'Desechable Cerámica 4mL THCO ULTRA', topProductRevenue: 645_000, topProductUnits: 3, note: 'Mejor día comercial; pérdida contable por carga de gastos/POs' },
   { date: '2026-05-03', month: '2026-05', orders: 5, revenue: 690_000, expenses: 1_004_370, profit: -314_370, aov: 138_000, topProduct: 'Water Soluble CBD', topProductRevenue: 170_000, topProductUnits: 2, note: 'Ingresos de mayo aún no reconciliados en Sheet' },
+];
+
+// ----- Restock recommendations (seeded model for Phase 2 purchasing logic) -----
+export const restockRecommendations: RestockRecommendation[] = [
+  {
+    id: 'rs1', material: 'Cartucho Cerámico 1mL', category: 'hardware', currentStock: 46, unit: 'unidades',
+    avgDailyUsage: 4.8, daysOnHand: 9.6, leadTimeDays: 14, reorderPoint: 82, targetCoverDays: 45,
+    recommendedQty: 175, estimatedUnitCost: 5_968.28, estimatedCost: 1_044_449, suggestedOrderDate: '2026-05-08',
+    latestSafeOrderDate: '2026-05-10', monthCashImpact: 1_364_449, risk: 'crítico',
+    balanceNote: 'Comprar antes del 10-may evita ruptura, pero conviene partir pago/anticipo si mayo sigue con ingresos incompletos.',
+    productsImpacted: ['Cartucho Reutilizable Cerámica 1mL XXX', 'Cartucho Reutilizable Cerámica 1mL HHC MAX'],
+  },
+  {
+    id: 'rs2', material: 'Caja + etiqueta jeringa', category: 'packaging', currentStock: 118, unit: 'sets',
+    avgDailyUsage: 7.2, daysOnHand: 16.4, leadTimeDays: 8, reorderPoint: 88, targetCoverDays: 50,
+    recommendedQty: 300, estimatedUnitCost: 4_200, estimatedCost: 1_260_000, suggestedOrderDate: '2026-05-13',
+    latestSafeOrderDate: '2026-05-19', monthCashImpact: 1_320_000, risk: 'alto',
+    balanceNote: 'Mejor comprar después de registrar ingresos reales de mayo; afecta todas las recargas.',
+    productsImpacted: ['Recarga XXX', 'Recarga THCO ULTRA', 'Recarga THCO MAX', 'Recarga D8 ULTRA'],
+  },
+  {
+    id: 'rs3', material: 'Distilado THCO', category: 'distillate', currentStock: 68, unit: 'gramos',
+    avgDailyUsage: 3.1, daysOnHand: 21.9, leadTimeDays: 18, reorderPoint: 86, targetCoverDays: 60,
+    recommendedQty: 120, estimatedUnitCost: 3_096.74, estimatedCost: 371_609, suggestedOrderDate: '2026-05-14',
+    latestSafeOrderDate: '2026-05-17', monthCashImpact: 591_609, risk: 'alto',
+    balanceNote: 'Costo unitario bajo frente a hardware, pero lead time largo; aprobar si THCO mantiene velocidad de abril.',
+    productsImpacted: ['Recarga THCO ULTRA', 'Recarga THCO MAX', 'Desechable Cerámica 4mL THCO ULTRA'],
+  },
+  {
+    id: 'rs4', material: 'Desechable Cerámico 4mL', category: 'hardware', currentStock: 72, unit: 'unidades',
+    avgDailyUsage: 2.2, daysOnHand: 32.7, leadTimeDays: 15, reorderPoint: 55, targetCoverDays: 45,
+    recommendedQty: 40, estimatedUnitCost: 23_273.81, estimatedCost: 930_952, suggestedOrderDate: '2026-05-24',
+    latestSafeOrderDate: '2026-06-02', monthCashImpact: 1_250_952, risk: 'medio',
+    balanceNote: 'No comprar antes de validar margen por SKU; es el hardware que más presiona descuento máximo rentable.',
+    productsImpacted: ['Desechable Cerámica 4mL XXX', 'Desechable Cerámica 4mL THCO ULTRA'],
+  },
+  {
+    id: 'rs5', material: 'Distilado HHC', category: 'distillate', currentStock: 142, unit: 'gramos',
+    avgDailyUsage: 2.4, daysOnHand: 59.2, leadTimeDays: 18, reorderPoint: 73, targetCoverDays: 60,
+    recommendedQty: 0, estimatedUnitCost: 2_224.53, estimatedCost: 0, suggestedOrderDate: '2026-06-18',
+    latestSafeOrderDate: '2026-06-28', monthCashImpact: 0, risk: 'bajo',
+    balanceNote: 'Stock sano; no inmovilizar caja en mayo salvo que una campaña HHC suba la velocidad diaria.',
+    productsImpacted: ['Cartucho Reutilizable Cerámica 1mL HHC MAX'],
+  },
+  {
+    id: 'rs6', material: 'Cartucho Cerámico 2.25mL', category: 'hardware', currentStock: 91, unit: 'unidades',
+    avgDailyUsage: 2.9, daysOnHand: 31.4, leadTimeDays: 14, reorderPoint: 58, targetCoverDays: 45,
+    recommendedQty: 50, estimatedUnitCost: 6_356.26, estimatedCost: 317_813, suggestedOrderDate: '2026-05-28',
+    latestSafeOrderDate: '2026-06-05', monthCashImpact: 667_813, risk: 'medio',
+    balanceNote: 'Puede esperar al cierre de mes si no hay campaña agresiva de cartuchos.',
+    productsImpacted: ['Cartucho Reutilizable Cerámica 2.25mL XXX', 'Cartucho Reutilizable Cerámica 2.25mL THCO ULTRA'],
+  },
 ];
 
 // ----- Alerts -----

@@ -9,14 +9,20 @@ import type { MaterialCost, PurchaseOrder } from '@shared/schema';
 import { formatCOP, formatDate, formatNumber } from '@/lib/format';
 import { KpiCard } from '@/components/kpi-card';
 import { Boxes, Truck, Package2, FileBarChart } from 'lucide-react';
+import { useMemo, useState } from 'react';
 
 export default function Inventario() {
   const materials = useQuery<MaterialCost[]>({ queryKey: ['/api/materials'] });
   const pos = useQuery<PurchaseOrder[]>({ queryKey: ['/api/purchase-orders'] });
+  const [selectedPoId, setSelectedPoId] = useState('po1');
 
   const totalSpend = (pos.data ?? []).reduce((s, p) => s + p.landedCost, 0);
   const inTransit = (pos.data ?? []).filter(p => p.status === 'en_transito').length;
   const pending = (pos.data ?? []).filter(p => p.status === 'pendiente').length;
+  const selectedPO = useMemo(
+    () => (pos.data ?? []).find(p => p.id === selectedPoId) ?? (pos.data ?? [])[0],
+    [pos.data, selectedPoId],
+  );
 
   return (
     <Layout title="Inventario & Compras" subtitle="Phase 2: copiar exactamente Material Manager y eventualmente reemplazarlo">
@@ -96,7 +102,7 @@ export default function Inventario() {
         </Card>
       </section>
 
-      <section className="mt-6">
+      <section className="mt-6 grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_420px] gap-4">
         <Card className="p-5 bg-card border-card-border" data-testid="card-purchase-orders">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -105,6 +111,7 @@ export default function Inventario() {
             </div>
             <Badge variant="outline" className="text-[11px]">{pos.data?.length ?? 0} órdenes</Badge>
           </div>
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -121,7 +128,15 @@ export default function Inventario() {
             </TableHeader>
             <TableBody>
               {(pos.data ?? []).map(p => (
-                <TableRow key={p.id} data-testid={`row-po-${p.id}`}>
+                <TableRow
+                  key={p.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedPoId(p.id)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setSelectedPoId(p.id); }}
+                  className={`cursor-pointer transition-colors hover:bg-muted/35 ${selectedPO?.id === p.id ? 'bg-accent/8' : ''}`}
+                  data-testid={`row-po-${p.id}`}
+                >
                   <TableCell className="text-sm tabular">{formatDate(p.date)}</TableCell>
                   <TableCell className="text-[13px] font-medium">{p.supplier}</TableCell>
                   <TableCell><Badge variant="outline" className="text-[10.5px]">{p.category}</Badge></TableCell>
@@ -139,8 +154,82 @@ export default function Inventario() {
               ))}
             </TableBody>
           </Table>
+          </div>
+        </Card>
+
+        <Card className="p-5 bg-card border-card-border" data-testid="card-po-detail">
+          {selectedPO ? (
+            <>
+              <div className="flex items-start justify-between gap-4 mb-4">
+                <div>
+                  <h2 className="text-sm font-semibold tracking-tight">Detalle de orden</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {selectedPO.id.toUpperCase()} · {selectedPO.supplier}
+                  </p>
+                </div>
+                {selectedPO.status === 'recibido' && <Badge className="text-[10px] bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/15">Recibido</Badge>}
+                {selectedPO.status === 'en_transito' && <Badge className="text-[10px] bg-sky-500/15 text-sky-300 border-sky-500/30 hover:bg-sky-500/15">En tránsito</Badge>}
+                {selectedPO.status === 'pendiente' && <Badge variant="outline" className="text-[10px]">Pendiente</Badge>}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 mb-5">
+                <Detail label="Fecha compra" value={formatDate(selectedPO.date)} />
+                <Detail label="Esperada" value={selectedPO.expectedDate ? formatDate(selectedPO.expectedDate) : '—'} />
+                <Detail label="Recibida" value={selectedPO.receivedDate ? formatDate(selectedPO.receivedDate) : '—'} />
+                <Detail label="Pago" value={selectedPO.paymentMethod} />
+                <Detail label="Moneda" value={selectedPO.currency} />
+                <Detail label="Costo total" value={formatCOP(selectedPO.landedCost)} strong />
+              </div>
+
+              <div className="rounded-md border border-border bg-muted/20 p-3 mb-4">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Notas</div>
+                <p className="mt-1 text-xs leading-relaxed">{selectedPO.notes ?? 'Sin notas cargadas.'}</p>
+              </div>
+
+              <h3 className="text-xs font-semibold mb-2">Qué trae esta orden</h3>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Material</TableHead>
+                    <TableHead className="text-right">Cant.</TableHead>
+                    <TableHead className="text-right">Subtotal</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {selectedPO.items.map((item, index) => (
+                    <TableRow key={`${selectedPO.id}-${index}`} data-testid={`row-po-item-${selectedPO.id}-${index}`}>
+                      <TableCell>
+                        <div className="text-[13px] font-medium">{item.material}</div>
+                        <div className="text-[11px] text-muted-foreground font-mono">{item.sku ?? 'SKU pendiente'}</div>
+                        {item.expectedUse && <div className="mt-1 text-[11px] text-muted-foreground leading-relaxed">{item.expectedUse}</div>}
+                      </TableCell>
+                      <TableCell className="text-right tabular">{formatNumber(item.qty)}</TableCell>
+                      <TableCell className="text-right tabular font-medium">{formatCOP(item.subtotal)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+
+              <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
+                <Detail label="Items" value={formatCOP(selectedPO.items.reduce((s, item) => s + item.subtotal, 0))} />
+                <Detail label="Envío" value={formatCOP(selectedPO.shipping)} />
+                <Detail label="Impuesto" value={formatCOP(selectedPO.tax)} />
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">Selecciona una orden para ver su detalle.</p>
+          )}
         </Card>
       </section>
     </Layout>
+  );
+}
+
+function Detail({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className="rounded-md border border-border bg-muted/20 p-2.5" data-testid={`detail-${label.toLowerCase().replaceAll(' ', '-')}`}>
+      <div className="text-[10.5px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={`mt-1 text-xs tabular ${strong ? 'font-semibold text-emerald-300' : 'font-medium'}`}>{value}</div>
+    </div>
   );
 }
