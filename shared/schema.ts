@@ -172,6 +172,20 @@ export type Expense = {
   source: 'shopify' | 'sheet' | 'manual';
 };
 
+export const insertExpenseSchema = z.object({
+  date: z.string().min(1),
+  category: z.string().min(1),
+  description: z.string().min(1),
+  amount: z.number().positive(),
+  paidTo: z.string().optional(),
+  paidWith: z.string().optional(),
+  currency: z.enum(['COP', 'USD']).default('COP'),
+  originalAmount: z.number().positive().optional(),
+  fxRate: z.number().positive().optional(),
+});
+
+export type InsertExpense = z.infer<typeof insertExpenseSchema>;
+
 export type DailyPerformance = {
   date: string;
   month: string;
@@ -293,3 +307,9 @@ export type CloseChecklistItem = {
   status: 'pendiente' | 'en_progreso' | 'listo' | 'bloqueado';
   whyItMatters: string;
 };
+
+export const updateCloseChecklistSchema = z.object({
+  status: z.enum(['pendiente', 'en_progreso', 'listo', 'bloqueado']),
+});
+
+export type UpdateCloseChecklist = z.infer<typeof updateCloseChecklistSchema>;

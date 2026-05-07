@@ -1,7 +1,7 @@
 import { Layout } from '@/components/layout';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -9,11 +9,12 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell,
 } from 'recharts';
 import type {
-  CashFlowSnapshot, CloseChecklistItem, InventoryAccountingRow, PnlRow,
+  CashFlowSnapshot, CloseChecklistItem, Expense, InventoryAccountingRow, PnlRow,
 } from '@shared/schema';
 import { formatCOP, formatCOPCompact, formatPct } from '@/lib/format';
 import { KpiCard } from '@/components/kpi-card';
 import { Banknote, Boxes, CheckCircle2, ClipboardCheck, ReceiptText, TrendingUp } from 'lucide-react';
+import { apiRequest, queryClient } from '@/lib/queryClient';
 
 const STATUS_CLASS = {
   ok: 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10',
@@ -26,12 +27,20 @@ export default function Financiero() {
   const cash = useQuery<CashFlowSnapshot[]>({ queryKey: ['/api/cash-flow'] });
   const inventoryAccounting = useQuery<InventoryAccountingRow[]>({ queryKey: ['/api/inventory-accounting'] });
   const checklist = useQuery<CloseChecklistItem[]>({ queryKey: ['/api/close-checklist'] });
+  const expenses = useQuery<Expense[]>({ queryKey: ['/api/expenses'] });
+
+  const updateChecklist = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: CloseChecklistItem['status'] }) =>
+      (await apiRequest('PATCH', `/api/close-checklist/${id}`, { status })).json(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['/api/close-checklist'] }),
+  });
 
   const latest = pnl.data?.[pnl.data.length - 1];
   const april = pnl.data?.find(row => row.month === '2026-04');
   const totalInventoryCapitalized = (inventoryAccounting.data ?? []).reduce((sum, row) => sum + row.capitalizedToInventory, 0);
   const totalCogsRecognized = (inventoryAccounting.data ?? []).reduce((sum, row) => sum + row.cogsRecognized, 0);
   const openChecklist = (checklist.data ?? []).filter(item => item.status !== 'listo').length;
+  const manualExpensesTotal = (expenses.data ?? []).filter(expense => expense.source === 'manual').reduce((sum, expense) => sum + expense.amount, 0);
 
   return (
     <Layout
@@ -46,10 +55,11 @@ export default function Financiero() {
         </p>
       </Card>
 
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <section className="grid grid-cols-2 xl:grid-cols-5 gap-4">
         <KpiCard label="Caja operativa" value={formatCOP(cash.data?.[0]?.amount ?? 0)} icon={Banknote} emphasis="gold" testId="kpi-fin-cash" />
         <KpiCard label="Utilidad contable abril" value={april ? formatCOP(april.netIncomeAccounting) : '—'} icon={TrendingUp} emphasis="emerald" testId="kpi-fin-april-profit" hint="Después de capitalizar inventario" />
         <KpiCard label="Inventario capitalizado" value={formatCOP(totalInventoryCapitalized)} icon={Boxes} testId="kpi-fin-capitalized" />
+        <KpiCard label="Gastos manuales" value={formatCOP(manualExpensesTotal)} icon={ReceiptText} testId="kpi-fin-manual-expenses" hint="Persistente pre-API" />
         <KpiCard label="Checklist abierto" value={`${openChecklist}`} icon={ClipboardCheck} testId="kpi-fin-checklist" hint="Items no listos" />
       </section>
 
@@ -223,7 +233,18 @@ export default function Financiero() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-semibold">{item.task}</span>
-                      <Badge variant="outline" className="text-[10px] capitalize">{item.status}</Badge>
+                      <select
+                        value={item.status}
+                        onChange={event => updateChecklist.mutate({ id: item.id, status: event.target.value as CloseChecklistItem['status'] })}
+                        disabled={updateChecklist.isPending}
+                        className="h-7 rounded-md border border-input bg-background px-2 text-[11px] capitalize"
+                        data-testid={`select-checklist-status-${item.id}`}
+                      >
+                        <option value="pendiente">pendiente</option>
+                        <option value="en_progreso">en progreso</option>
+                        <option value="listo">listo</option>
+                        <option value="bloqueado">bloqueado</option>
+                      </select>
                     </div>
                     <div className="mt-1 text-[11px] text-muted-foreground">
                       {item.owner} · {item.area} · {item.dueTiming}

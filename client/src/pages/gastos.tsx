@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -13,13 +13,13 @@ import {
 import type { MonthlyRow, Expense } from '@shared/schema';
 import { formatCOP, formatCOPCompact, formatDate } from '@/lib/format';
 import { KpiCard } from '@/components/kpi-card';
-import { Receipt, TrendingDown, TrendingUp, AlertTriangle, Plus } from 'lucide-react';
+import { Receipt, TrendingDown, TrendingUp, AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { useMemo, useState, type FormEvent } from 'react';
+import { apiRequest, queryClient } from '@/lib/queryClient';
 
 export default function Gastos() {
   const months = useQuery<MonthlyRow[]>({ queryKey: ['/api/months'] });
   const expenses = useQuery<Expense[]>({ queryKey: ['/api/expenses'] });
-  const [manualExpenses, setManualExpenses] = useState<Expense[]>([]);
   const [draft, setDraft] = useState({
     date: new Date().toISOString().slice(0, 10),
     category: 'Inventario',
@@ -33,10 +33,60 @@ export default function Gastos() {
   });
 
   const totalIncome = 94_107_261;
-  const allExpenses = useMemo(() => [...manualExpenses, ...(expenses.data ?? [])], [manualExpenses, expenses.data]);
+  const allExpenses = useMemo(() => expenses.data ?? [], [expenses.data]);
+  const manualExpenses = useMemo(() => allExpenses.filter(e => e.source === 'manual'), [allExpenses]);
   const manualTotal = manualExpenses.reduce((s, e) => s + e.amount, 0);
   const totalExpenses = 92_090_654 + manualTotal;
   const totalProfit = totalIncome - totalExpenses;
+  const monthsWithManual = useMemo(() => {
+    const byMonth = new Map<string, number>();
+    manualExpenses.forEach(expense => byMonth.set(expense.month, (byMonth.get(expense.month) ?? 0) + expense.amount));
+    const base = (months.data ?? []).map(month => {
+      const extra = byMonth.get(month.month) ?? 0;
+      return extra > 0
+        ? { ...month, expenses: month.expenses + extra, profit: month.profit - extra, note: `${month.note ?? ''} + gastos manuales guardados`.trim() }
+        : month;
+    });
+    const existing = new Set(base.map(month => month.month));
+    byMonth.forEach((amount, month) => {
+      if (!existing.has(month)) {
+        base.push({
+          month,
+          label: new Date(`${month}-02T00:00:00`).toLocaleDateString('es-CO', { month: 'short', year: 'numeric' }),
+          income: 0,
+          expenses: amount,
+          profit: -amount,
+          partial: true,
+          note: 'Mes creado por gasto manual pre-API',
+        });
+      }
+    });
+    return base.sort((a, b) => a.month.localeCompare(b.month));
+  }, [manualExpenses, months.data]);
+  const lossMonths = monthsWithManual.filter(month => month.profit < 0).length;
+
+  const createExpense = useMutation({
+    mutationFn: async (payload: {
+      date: string;
+      category: string;
+      description: string;
+      amount: number;
+      paidTo?: string;
+      paidWith?: string;
+      currency: 'COP' | 'USD';
+      originalAmount?: number;
+      fxRate?: number;
+    }) => (await apiRequest('POST', '/api/expenses', payload)).json() as Promise<Expense>,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/expenses'] });
+      setDraft(prev => ({ ...prev, description: '', paidTo: '', amount: '', originalAmount: '', fxRate: '' }));
+    },
+  });
+
+  const deleteExpense = useMutation({
+    mutationFn: async (id: string) => (await apiRequest('DELETE', `/api/expenses/${id}`)).json(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['/api/expenses'] }),
+  });
 
   function addExpense(e: FormEvent) {
     e.preventDefault();
@@ -44,10 +94,8 @@ export default function Gastos() {
     if (!draft.date || !draft.description.trim() || !Number.isFinite(amount) || amount <= 0) return;
     const originalAmount = draft.currency === 'USD' ? Number(draft.originalAmount || draft.amount) : amount;
     const fxRate = draft.currency === 'USD' ? Number(draft.fxRate || 0) : undefined;
-    const expense: Expense = {
-      id: `manual-${Date.now()}`,
+    createExpense.mutate({
       date: draft.date,
-      month: draft.date.slice(0, 7),
       category: draft.category,
       description: draft.description.trim(),
       amount,
@@ -56,10 +104,7 @@ export default function Gastos() {
       currency: draft.currency,
       originalAmount,
       fxRate,
-      source: 'manual',
-    };
-    setManualExpenses(prev => [expense, ...prev]);
-    setDraft(prev => ({ ...prev, description: '', paidTo: '', amount: '', originalAmount: '', fxRate: '' }));
+    });
   }
 
   return (
@@ -68,7 +113,7 @@ export default function Gastos() {
         <KpiCard label="Ingresos totales" value={formatCOP(totalIncome)} icon={TrendingUp} emphasis="emerald" testId="kpi-gastos-ingresos" />
         <KpiCard label="Gastos totales" value={formatCOP(totalExpenses)} icon={Receipt} testId="kpi-gastos-totales" />
         <KpiCard label="Utilidad" value={formatCOP(totalProfit)} icon={totalProfit >= 0 ? TrendingUp : TrendingDown} emphasis="gold" testId="kpi-gastos-utilidad" />
-        <KpiCard label="Meses con pérdida" value="2 / 5" icon={AlertTriangle} testId="kpi-meses-perdida" hint="Abr y May 2026" />
+        <KpiCard label="Meses con pérdida" value={`${lossMonths} / ${monthsWithManual.length || 5}`} icon={AlertTriangle} testId="kpi-meses-perdida" hint="Incluye manuales guardados" />
       </section>
 
       <section className="mt-6">
@@ -77,10 +122,10 @@ export default function Gastos() {
             <div>
               <h2 className="text-sm font-semibold tracking-tight">Agregar gasto manual</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Prototipo para registrar gastos que todavía no viven en Shopify. Después se guardará en base de datos y se reconciliará con Shopify/contabilidad.
+                Guarda gastos manuales en SQLite del prototipo. Luego se reconciliarán con Shopify, bancos y contabilidad.
               </p>
             </div>
-            <Badge variant="outline" className="text-[11px]">Manual temporal</Badge>
+            <Badge variant="outline" className="text-[11px]">Persistente pre-API</Badge>
           </div>
           <form onSubmit={addExpense} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[140px_150px_1fr_180px_150px_120px_140px_auto] gap-3 items-end">
             <label className="space-y-1.5">
@@ -183,14 +228,14 @@ export default function Gastos() {
                 </label>
               </>
             )}
-            <Button type="submit" className="gap-2" data-testid="button-add-expense">
+            <Button type="submit" className="gap-2" data-testid="button-add-expense" disabled={createExpense.isPending}>
               <Plus className="h-4 w-4" />
-              Agregar
+              {createExpense.isPending ? 'Guardando' : 'Agregar'}
             </Button>
           </form>
           {manualExpenses.length > 0 && (
             <p className="text-xs text-emerald-300 mt-3" data-testid="text-manual-expense-count">
-              {manualExpenses.length} gasto(s) manual(es) agregados en esta sesión: {formatCOP(manualTotal)}
+              {manualExpenses.length} gasto(s) manual(es) guardados: {formatCOP(manualTotal)}
             </p>
           )}
         </Card>
@@ -207,7 +252,7 @@ export default function Gastos() {
           </div>
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={months.data ?? []} margin={{ left: -8, right: 8, top: 8 }}>
+              <ComposedChart data={monthsWithManual} margin={{ left: -8, right: 8, top: 8 }}>
                 <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} />
                 <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false}
@@ -231,7 +276,7 @@ export default function Gastos() {
         <Card className="p-5 bg-card border-card-border" data-testid="card-monthly-table">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold tracking-tight">Resumen mensual</h2>
-            <Badge variant="outline" className="text-[11px]">5 meses</Badge>
+            <Badge variant="outline" className="text-[11px]">{monthsWithManual.length || 5} meses</Badge>
           </div>
           <Table>
             <TableHeader>
@@ -245,7 +290,7 @@ export default function Gastos() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(months.data ?? []).map(m => (
+              {monthsWithManual.map(m => (
                 <TableRow key={m.month} data-testid={`row-month-${m.month}`}>
                   <TableCell className="font-medium">{m.label}</TableCell>
                   <TableCell className="text-right tabular" data-testid={`text-month-income-${m.month}`}>{formatCOP(m.income)}</TableCell>
@@ -294,6 +339,7 @@ export default function Gastos() {
                 <TableHead>Origen</TableHead>
                 <TableHead>Moneda</TableHead>
                 <TableHead className="text-right">Monto</TableHead>
+                <TableHead className="text-right">Acción</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -316,6 +362,22 @@ export default function Gastos() {
                     {e.currency === 'USD' && e.fxRate ? <span className="text-muted-foreground"> · TRM {e.fxRate}</span> : null}
                   </TableCell>
                   <TableCell className="text-right tabular">{formatCOP(e.amount)}</TableCell>
+                  <TableCell className="text-right">
+                    {e.source === 'manual' ? (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => deleteExpense.mutate(e.id)}
+                        disabled={deleteExpense.isPending}
+                        aria-label={`Eliminar ${e.description}`}
+                        data-testid={`button-delete-expense-${e.id}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
