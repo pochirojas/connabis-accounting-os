@@ -19,7 +19,13 @@ export default function Inventario() {
   const pending = (pos.data ?? []).filter(p => p.status === 'pendiente').length;
 
   return (
-    <Layout title="Inventario & Compras" subtitle="Costos aterrizados desde Noids Costo Dash · órdenes de compra">
+    <Layout title="Inventario & Compras" subtitle="Phase 2: copiar exactamente Material Manager y eventualmente reemplazarlo">
+      <Card className="mb-6 p-4 border-amber-500/30 bg-amber-500/8" data-testid="banner-mm-phase2">
+        <h2 className="text-sm font-semibold text-amber-200">Material Manager será Phase 2</h2>
+        <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+          Esta página todavía es una representación simplificada. Para reemplazar MM bien, primero copiaremos exactamente sus vistas, campos, estados, cálculos de costo, órdenes de compra, materiales y flujos de producción. Luego migraremos datos y apagaremos duplicados.
+        </p>
+      </Card>
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard label="Compras período" value={formatCOP(totalSpend)} icon={FileBarChart} emphasis="emerald" testId="kpi-compras-total" />
         <KpiCard label="POs en tránsito" value={`${inTransit}`} icon={Truck} testId="kpi-pos-transito" />

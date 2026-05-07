@@ -4,7 +4,7 @@ import type { Server } from 'node:http';
 import {
   channels, years, months, kpis, products,
   materials, purchaseOrders, expenses, alerts, integrationPhases,
-  dailyPerformance, glossaryTerms,
+  dailyPerformance, glossaryTerms, accountingSuggestions,
 } from './seed';
 
 export async function registerRoutes(
@@ -26,6 +26,7 @@ export async function registerRoutes(
   app.get('/api/alerts', (_req, res) => res.json(alerts));
   app.get('/api/integration-phases', (_req, res) => res.json(integrationPhases));
   app.get('/api/glossary', (_req, res) => res.json(glossaryTerms));
+  app.get('/api/accounting-suggestions', (_req, res) => res.json(accountingSuggestions));
 
   // Shopify connection status (placeholder — no live OAuth in MVP)
   app.get('/api/shopify/status', (_req, res) => res.json({

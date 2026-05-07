@@ -12,7 +12,7 @@ import {
 import type { Product } from '@shared/schema';
 import { formatCOP, formatCOPCompact, formatNumber, formatPct } from '@/lib/format';
 import { KpiCard } from '@/components/kpi-card';
-import { Package, ShieldAlert, ShieldCheck, Pencil, Info, Search, Layers3 } from 'lucide-react';
+import { Package, ShieldAlert, ShieldCheck, Pencil, Info, Search, Layers3, AlertTriangle } from 'lucide-react';
 import {
   Tooltip as UiTooltip, TooltipContent, TooltipTrigger,
 } from '@/components/ui/tooltip';
@@ -27,7 +27,7 @@ export default function Productos() {
   const [selectedId, setSelectedId] = useState<string>('p1');
 
   const computed = useMemo(() => {
-    return (products.data ?? []).map(p => {
+    return (products.data ?? []).filter(p => p.active).map(p => {
       const override = overrides[p.id];
       const cogs = override ?? p.cogsUsed;
       const variableCost = cogs + p.packaging + p.unitPrice * p.fees + p.shippingSubsidy;
@@ -61,8 +61,20 @@ export default function Productos() {
   return (
     <Layout
       title="Productos & Márgenes"
-      subtitle="COGS desde campo cost de Shopify (variant.cost) · fallback solo si está vacío"
+      subtitle="Phase 1: solo productos activos de Shopify · precios/costos actuales son seed incompleto hasta conectar API + Material Manager"
     >
+      <Card className="mb-6 p-4 border-amber-500/30 bg-amber-500/8" data-testid="banner-product-data-prototype">
+        <div className="flex gap-3">
+          <AlertTriangle className="h-5 w-5 text-amber-300 shrink-0 mt-0.5" />
+          <div>
+            <h2 className="text-sm font-semibold text-amber-200">Datos incompletos a propósito</h2>
+            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+              Esta tabla todavía no contiene todo el catálogo real. Cuando conectemos la API, Productos & Márgenes usará únicamente productos activos de Shopify y tomará costos/márgenes desde Shopify + Material Manager. No uses estos precios seed para decidir cambios reales.
+            </p>
+          </div>
+        </div>
+      </Card>
+
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard label="Ingresos top SKUs" value={formatCOP(totalRev)} icon={Package} emphasis="emerald" testId="kpi-prod-ingresos" />
         <KpiCard label="Margen bruto promedio" value={formatPct(avgGM, 1)} icon={ShieldCheck} testId="kpi-gm-prom" hint="(Precio − COGS) / Precio" />
@@ -130,12 +142,18 @@ export default function Productos() {
                 {selected.cogsSource === 'shopify' ? 'Shopify cost' : 'Fallback'}
               </Badge>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 mb-4">
               <MiniMetric label="Precio" value={formatCOP(selected.unitPrice)} testId="metric-selected-price" />
               <MiniMetric label="COGS usado" value={formatCOP(selected.cogsUsed)} testId="metric-selected-cogs" />
               <MiniMetric label="Margen bruto" value={formatPct(selected.grossMargin)} testId="metric-selected-gm" />
               <MiniMetric label="Margen contribución" value={formatPct(selected.contributionMargin)} testId="metric-selected-cm" />
+              <MiniMetric label="Precio ideal" value={formatCOP(selected.idealPrice)} testId="metric-selected-ideal-price" />
+              <MiniMetric label="Competencia" value={formatCOP(selected.competitorPrice)} testId="metric-selected-competitor-price" />
+              <MiniMetric label="Descuento máximo" value={formatPct(selected.maxProfitableDiscount)} testId="metric-selected-max-discount" />
             </div>
+            <p className="text-xs text-muted-foreground leading-relaxed mb-4" data-testid="text-pricing-note">
+              Precio ideal usa un objetivo de margen de contribución de 45%. Precio de competencia es placeholder hasta hacer scraping/research y debe reemplazarse con mercado real.
+            </p>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -256,6 +274,9 @@ export default function Productos() {
                   <TableHead className="text-right">Subsidio envío</TableHead>
                   <TableHead className="text-right">GM</TableHead>
                   <TableHead className="text-right">CM</TableHead>
+                  <TableHead className="text-right">Precio ideal</TableHead>
+                  <TableHead className="text-right">Competencia</TableHead>
+                  <TableHead className="text-right">Desc. máx.</TableHead>
                   <TableHead>Estado</TableHead>
                 </TableRow>
               </TableHeader>
@@ -273,7 +294,7 @@ export default function Productos() {
                         {p.sku ?? 'sin SKU'} · {formatNumber(p.unitsSold)} u · {formatCOP(p.revenue)}
                       </div>
                     </TableCell>
-                    <TableCell><Badge variant="outline" className="text-[10.5px]">{p.family}</Badge></TableCell>
+                  <TableCell><Badge variant="outline" className="text-[10.5px]">{p.family}</Badge></TableCell>
                     <TableCell className="text-right tabular">{formatCOP(p.unitPrice)}</TableCell>
                     <TableCell className="text-right tabular">
                       <div className="flex items-center justify-end gap-1.5">
@@ -320,6 +341,9 @@ export default function Productos() {
                       p.contributionMargin < 0.30 ? 'text-amber-300' :
                       'text-emerald-400'
                     }`} data-testid={`text-cm-${p.id}`}>{formatPct(p.contributionMargin)}</TableCell>
+                    <TableCell className="text-right tabular text-muted-foreground">{formatCOP(p.idealPrice)}</TableCell>
+                    <TableCell className="text-right tabular text-muted-foreground">{formatCOP(p.competitorPrice)}</TableCell>
+                    <TableCell className="text-right tabular text-muted-foreground">{formatPct(p.maxProfitableDiscount)}</TableCell>
                     <TableCell>
                       <UiTooltip>
                         <TooltipTrigger asChild>

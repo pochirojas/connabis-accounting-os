@@ -13,6 +13,7 @@ import Productos from "@/pages/productos";
 import Performance from "@/pages/performance";
 import Inventario from "@/pages/inventario";
 import Alertas from "@/pages/alertas";
+import Sugerencias from "@/pages/sugerencias";
 import Integracion from "@/pages/integracion";
 import Glosario from "@/pages/glosario";
 
@@ -26,6 +27,7 @@ function AppRouter() {
       <Route path="/performance" component={Performance} />
       <Route path="/inventario" component={Inventario} />
       <Route path="/alertas" component={Alertas} />
+      <Route path="/sugerencias" component={Sugerencias} />
       <Route path="/integracion" component={Integracion} />
       <Route path="/glosario" component={Glosario} />
       <Route component={NotFound} />

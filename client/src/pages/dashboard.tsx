@@ -28,6 +28,17 @@ export default function Dashboard() {
 
   return (
     <Layout title="Vista general" subtitle={k ? `Datos al ${new Date(k.asOf).toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' })}` : ''}>
+      <Card className="mb-6 p-4 border-amber-500/30 bg-amber-500/8" data-testid="banner-dashboard-prototype">
+        <div className="flex gap-3">
+          <AlertTriangle className="h-5 w-5 text-amber-300 shrink-0 mt-0.5" />
+          <div>
+            <h2 className="text-sm font-semibold text-amber-200">MVP con data parcial</h2>
+            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+              Los ingresos agregados vienen del reporte Shopify/Sheet actualizado, pero productos, costos, márgenes, inventario y performance diaria siguen siendo seed de prototipo. La versión real debe sincronizar productos activos, precios y costos desde Shopify, y márgenes desde Material Manager/Shopify.
+            </p>
+          </div>
+        </div>
+      </Card>
       {/* KPI Grid */}
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-4" aria-label="Indicadores clave">
         <KpiCard label="Ingresos totales" value={k ? formatCOP(k.ingresos) : '—'} icon={TrendingUp} emphasis="emerald" testId="kpi-ingresos"

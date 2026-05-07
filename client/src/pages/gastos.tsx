@@ -24,7 +24,12 @@ export default function Gastos() {
     date: new Date().toISOString().slice(0, 10),
     category: 'Inventario',
     description: '',
+    paidTo: '',
+    paidWith: 'Bancolombia',
+    currency: 'COP' as 'COP' | 'USD',
     amount: '',
+    originalAmount: '',
+    fxRate: '',
   });
 
   const totalIncome = 94_107_261;
@@ -37,6 +42,8 @@ export default function Gastos() {
     e.preventDefault();
     const amount = Number(draft.amount);
     if (!draft.date || !draft.description.trim() || !Number.isFinite(amount) || amount <= 0) return;
+    const originalAmount = draft.currency === 'USD' ? Number(draft.originalAmount || draft.amount) : amount;
+    const fxRate = draft.currency === 'USD' ? Number(draft.fxRate || 0) : undefined;
     const expense: Expense = {
       id: `manual-${Date.now()}`,
       date: draft.date,
@@ -44,10 +51,15 @@ export default function Gastos() {
       category: draft.category,
       description: draft.description.trim(),
       amount,
+      paidTo: draft.paidTo.trim() || 'Sin proveedor',
+      paidWith: draft.paidWith,
+      currency: draft.currency,
+      originalAmount,
+      fxRate,
       source: 'manual',
     };
     setManualExpenses(prev => [expense, ...prev]);
-    setDraft(prev => ({ ...prev, description: '', amount: '' }));
+    setDraft(prev => ({ ...prev, description: '', paidTo: '', amount: '', originalAmount: '', fxRate: '' }));
   }
 
   return (
@@ -70,7 +82,7 @@ export default function Gastos() {
             </div>
             <Badge variant="outline" className="text-[11px]">Manual temporal</Badge>
           </div>
-          <form onSubmit={addExpense} className="grid grid-cols-1 md:grid-cols-[150px_170px_1fr_160px_auto] gap-3 items-end">
+          <form onSubmit={addExpense} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[140px_150px_1fr_180px_150px_120px_140px_auto] gap-3 items-end">
             <label className="space-y-1.5">
               <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Fecha</span>
               <Input
@@ -94,6 +106,15 @@ export default function Gastos() {
               </select>
             </label>
             <label className="space-y-1.5">
+              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">A quién</span>
+              <Input
+                value={draft.paidTo}
+                onChange={e => setDraft(prev => ({ ...prev, paidTo: e.target.value }))}
+                placeholder="Proveedor/persona"
+                data-testid="input-expense-paid-to"
+              />
+            </label>
+            <label className="space-y-1.5">
               <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Descripción</span>
               <Input
                 value={draft.description}
@@ -101,6 +122,31 @@ export default function Gastos() {
                 placeholder="Ej: etiquetas lote junio, envío proveedor, pauta..."
                 data-testid="input-expense-description"
               />
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Con qué se pagó</span>
+              <select
+                value={draft.paidWith}
+                onChange={e => setDraft(prev => ({ ...prev, paidWith: e.target.value }))}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                data-testid="select-expense-paid-with"
+              >
+                {['Bancolombia', 'Nequi', 'Daviplata', 'Tarjeta crédito', 'Tarjeta débito', 'Efectivo', 'PayPal', 'Wise', 'Cripto', 'Otro'].map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Moneda</span>
+              <select
+                value={draft.currency}
+                onChange={e => setDraft(prev => ({ ...prev, currency: e.target.value as 'COP' | 'USD' }))}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                data-testid="select-expense-currency"
+              >
+                <option value="COP">COP</option>
+                <option value="USD">USD</option>
+              </select>
             </label>
             <label className="space-y-1.5">
               <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Monto COP</span>
@@ -113,6 +159,30 @@ export default function Gastos() {
                 data-testid="input-expense-amount"
               />
             </label>
+            {draft.currency === 'USD' && (
+              <>
+                <label className="space-y-1.5">
+                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Monto USD</span>
+                  <Input
+                    type="number"
+                    value={draft.originalAmount}
+                    onChange={e => setDraft(prev => ({ ...prev, originalAmount: e.target.value }))}
+                    className="text-right tabular"
+                    data-testid="input-expense-original-amount"
+                  />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">TRM</span>
+                  <Input
+                    type="number"
+                    value={draft.fxRate}
+                    onChange={e => setDraft(prev => ({ ...prev, fxRate: e.target.value }))}
+                    className="text-right tabular"
+                    data-testid="input-expense-fx-rate"
+                  />
+                </label>
+              </>
+            )}
             <Button type="submit" className="gap-2" data-testid="button-add-expense">
               <Plus className="h-4 w-4" />
               Agregar
@@ -219,7 +289,10 @@ export default function Gastos() {
                 <TableHead>Fecha</TableHead>
                 <TableHead>Categoría</TableHead>
                 <TableHead>Descripción</TableHead>
+                <TableHead>Pagado a</TableHead>
+                <TableHead>Pagado con</TableHead>
                 <TableHead>Origen</TableHead>
+                <TableHead>Moneda</TableHead>
                 <TableHead className="text-right">Monto</TableHead>
               </TableRow>
             </TableHeader>
@@ -231,10 +304,16 @@ export default function Gastos() {
                     <Badge variant="outline" className="text-[10.5px]">{e.category}</Badge>
                   </TableCell>
                   <TableCell className="text-sm">{e.description}</TableCell>
+                  <TableCell className="text-sm">{e.paidTo ?? '—'}</TableCell>
+                  <TableCell className="text-sm">{e.paidWith ?? '—'}</TableCell>
                   <TableCell>
                     <Badge variant={e.source === 'shopify' ? 'default' : e.source === 'manual' ? 'outline' : 'secondary'} className="text-[10px] uppercase tracking-wide">
                       {e.source}
                     </Badge>
+                  </TableCell>
+                  <TableCell className="text-xs tabular">
+                    {e.currency ?? 'COP'}
+                    {e.currency === 'USD' && e.fxRate ? <span className="text-muted-foreground"> · TRM {e.fxRate}</span> : null}
                   </TableCell>
                   <TableCell className="text-right tabular">{formatCOP(e.amount)}</TableCell>
                 </TableRow>

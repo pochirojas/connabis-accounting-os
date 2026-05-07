@@ -59,6 +59,7 @@ export type Product = {
   name: string;
   family: string;
   sku?: string;
+  active: boolean;
   unitsSold: number;
   unitPrice: number;        // COP - from Shopify
   revenue: number;          // COP
@@ -71,6 +72,11 @@ export type Product = {
   // computed
   cogsUsed: number;
   cogsSource: 'shopify' | 'fallback';
+  marginSource: 'shopify' | 'material_manager' | 'seed';
+  dataCompleteness: 'real' | 'partial' | 'placeholder';
+  idealPrice: number;
+  competitorPrice: number;
+  maxProfitableDiscount: number;
   grossMargin: number;      // 0..1
   contributionMargin: number;  // 0..1
   alert: 'ok' | 'warn' | 'danger';
@@ -113,6 +119,11 @@ export type Expense = {
   category: string;
   description: string;
   amount: number;
+  paidTo?: string;
+  paidWith?: string;
+  currency?: 'COP' | 'USD';
+  originalAmount?: number;
+  fxRate?: number;
   source: 'shopify' | 'sheet' | 'manual';
 };
 
@@ -138,6 +149,17 @@ export type GlossaryTerm = {
   formula?: string;
   connabisExample: string;
   action: string;
+};
+
+export type AccountingSuggestion = {
+  id: string;
+  type: 'prediccion' | 'analisis' | 'sugerencia' | 'recordatorio';
+  priority: 'alta' | 'media' | 'baja';
+  title: string;
+  description: string;
+  whyItMatters: string;
+  suggestedAction: string;
+  phase: 1 | 2;
 };
 
 export type Alert = {
