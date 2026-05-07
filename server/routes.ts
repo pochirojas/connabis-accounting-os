@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
-import { insertExpenseSchema, updateCloseChecklistSchema } from '@shared/schema';
+import { insertExpenseSchema, updateCashAccountSchema, updateCloseChecklistSchema } from '@shared/schema';
 import { storage } from './storage';
 import {
   channels, years, months, kpis, products,
@@ -20,7 +20,14 @@ export async function registerRoutes(
   app.get('/api/channels', (_req, res) => res.json(channels));
   app.get('/api/years', (_req, res) => res.json(years));
   app.get('/api/months', (_req, res) => res.json(months));
-  app.get('/api/ceo-metrics', (_req, res) => res.json(ceoMetrics));
+  app.get('/api/ceo-metrics', async (_req, res) => {
+    const accounts = await storage.listCashAccounts();
+    const netCash = accounts.reduce((sum, account) => {
+      if (account.type === 'liability') return sum - account.amount;
+      return sum + account.amount;
+    }, 0);
+    res.json(ceoMetrics.map(metric => metric.id === 'cash' ? { ...metric, value: netCash } : metric));
+  });
 
   // Tabs
   app.get('/api/products', (_req, res) => res.json(products));
@@ -53,7 +60,36 @@ export async function registerRoutes(
   app.get('/api/accounting-suggestions', (_req, res) => res.json(accountingSuggestions));
   app.get('/api/restock-plan', (_req, res) => res.json(restockRecommendations));
   app.get('/api/pnl', (_req, res) => res.json(pnlRows));
-  app.get('/api/cash-flow', (_req, res) => res.json(cashFlowSnapshots));
+  app.get('/api/cash-accounts', async (_req, res) => res.json(await storage.listCashAccounts()));
+  app.patch('/api/cash-accounts/:id', async (req, res) => {
+    const parsed = updateCashAccountSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid cash account amount', details: parsed.error.flatten() });
+    }
+    const updated = await storage.updateCashAccount(req.params.id as never, parsed.data.amount);
+    if (!updated) return res.status(404).json({ error: 'Cash account not found' });
+    res.json(updated);
+  });
+  app.get('/api/cash-flow', async (_req, res) => {
+    const accounts = await storage.listCashAccounts();
+    const netCash = accounts.reduce((sum, account) => account.type === 'liability' ? sum - account.amount : sum + account.amount, 0);
+    const usableCash = accounts
+      .filter(account => account.type === 'asset')
+      .reduce((sum, account) => sum + account.amount, 0);
+    const pendingCash = accounts
+      .filter(account => account.type === 'pending_asset')
+      .reduce((sum, account) => sum + account.amount, 0);
+    res.json(cashFlowSnapshots.map(item => {
+      if (item.id === 'cash-on-hand') {
+        return {
+          ...item,
+          amount: netCash,
+          explanation: `Caja neta editable. Disponible hoy: ${usableCash.toLocaleString('es-CO')} COP; pendiente Mercado Pago: ${pendingCash.toLocaleString('es-CO')} COP.`,
+        };
+      }
+      return item;
+    }));
+  });
   app.get('/api/inventory-accounting', (_req, res) => res.json(inventoryAccountingRows));
   app.get('/api/close-checklist', async (_req, res) => {
     res.json(await storage.mergeCloseChecklist(closeChecklist));

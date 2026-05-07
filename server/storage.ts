@@ -1,5 +1,5 @@
 import { users } from '@shared/schema';
-import type { CloseChecklistItem, Expense, InsertExpense, User, InsertUser } from '@shared/schema';
+import type { CashAccount, CloseChecklistItem, Expense, InsertExpense, User, InsertUser } from '@shared/schema';
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
@@ -27,6 +27,12 @@ CREATE TABLE IF NOT EXISTS close_checklist_status (
   status TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS cash_accounts (
+  id TEXT PRIMARY KEY,
+  amount INTEGER NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `);
 
 export const db = drizzle(sqlite);
@@ -40,7 +46,25 @@ export interface IStorage {
   deleteManualExpense(id: string): Promise<boolean>;
   mergeCloseChecklist(seedItems: CloseChecklistItem[]): Promise<CloseChecklistItem[]>;
   updateCloseChecklistStatus(id: string, status: CloseChecklistItem['status']): Promise<void>;
+  listCashAccounts(): Promise<CashAccount[]>;
+  updateCashAccount(id: CashAccount['id'], amount: number): Promise<CashAccount | undefined>;
 }
+
+const CASH_ACCOUNT_DEFS: Omit<CashAccount, 'amount'>[] = [
+  { id: 'nequi', label: 'Balance Nequi', type: 'asset', description: 'Caja disponible inmediata en Nequi.' },
+  { id: 'nu_debit', label: 'Balance Nu débito', type: 'asset', description: 'Caja disponible inmediata en cuenta Nu.' },
+  { id: 'mercado_pago_released', label: 'Mercado Pago liberado', type: 'asset', description: 'Saldo Mercado Pago ya disponible para usar.' },
+  { id: 'mercado_pago_unreleased', label: 'Mercado Pago no liberado', type: 'pending_asset', description: 'Saldo pendiente: cuenta para forecast, no para gastar hoy.' },
+  { id: 'nu_credit_card_debt', label: 'Deuda credit card Nu', type: 'liability', description: 'Deuda a restar del efectivo para ver caja neta.' },
+];
+
+const CASH_ACCOUNT_DEFAULTS: Record<CashAccount['id'], number> = {
+  nequi: 2_100_000,
+  nu_debit: 1_750_000,
+  mercado_pago_released: 3_400_000,
+  mercado_pago_unreleased: 1_600_000,
+  nu_credit_card_debt: 0,
+};
 
 export class DatabaseStorage implements IStorage {
   async getUser(id: number): Promise<User | undefined> {
@@ -137,6 +161,26 @@ export class DatabaseStorage implements IStorage {
       VALUES (?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at
     `).run(id, status, new Date().toISOString());
+  }
+
+  async listCashAccounts(): Promise<CashAccount[]> {
+    const rows = sqlite.prepare('SELECT id, amount FROM cash_accounts').all() as Array<{ id: CashAccount['id']; amount: number }>;
+    const amountById = new Map(rows.map(row => [row.id, row.amount]));
+    return CASH_ACCOUNT_DEFS.map(def => ({
+      ...def,
+      amount: Number(amountById.get(def.id) ?? CASH_ACCOUNT_DEFAULTS[def.id]),
+    }));
+  }
+
+  async updateCashAccount(id: CashAccount['id'], amount: number): Promise<CashAccount | undefined> {
+    const exists = CASH_ACCOUNT_DEFS.some(def => def.id === id);
+    if (!exists) return undefined;
+    sqlite.prepare(`
+      INSERT INTO cash_accounts (id, amount, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET amount = excluded.amount, updated_at = excluded.updated_at
+    `).run(id, Math.round(amount), new Date().toISOString());
+    return (await this.listCashAccounts()).find(account => account.id === id);
   }
 }
 

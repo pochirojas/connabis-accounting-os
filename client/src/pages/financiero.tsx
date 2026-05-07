@@ -1,6 +1,8 @@
 import { Layout } from '@/components/layout';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -9,12 +11,13 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell,
 } from 'recharts';
 import type {
-  CashFlowSnapshot, CloseChecklistItem, Expense, InventoryAccountingRow, PnlRow,
+  CashAccount, CashFlowSnapshot, CloseChecklistItem, Expense, InventoryAccountingRow, PnlRow,
 } from '@shared/schema';
 import { formatCOP, formatCOPCompact, formatPct } from '@/lib/format';
 import { KpiCard } from '@/components/kpi-card';
-import { Banknote, Boxes, CheckCircle2, ClipboardCheck, ReceiptText, TrendingUp } from 'lucide-react';
+import { Banknote, Boxes, CheckCircle2, ClipboardCheck, ReceiptText, Save, TrendingUp } from 'lucide-react';
 import { apiRequest, queryClient } from '@/lib/queryClient';
+import { useState } from 'react';
 
 const STATUS_CLASS = {
   ok: 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10',
@@ -25,6 +28,7 @@ const STATUS_CLASS = {
 export default function Financiero() {
   const pnl = useQuery<PnlRow[]>({ queryKey: ['/api/pnl'] });
   const cash = useQuery<CashFlowSnapshot[]>({ queryKey: ['/api/cash-flow'] });
+  const cashAccounts = useQuery<CashAccount[]>({ queryKey: ['/api/cash-accounts'] });
   const inventoryAccounting = useQuery<InventoryAccountingRow[]>({ queryKey: ['/api/inventory-accounting'] });
   const checklist = useQuery<CloseChecklistItem[]>({ queryKey: ['/api/close-checklist'] });
   const expenses = useQuery<Expense[]>({ queryKey: ['/api/expenses'] });
@@ -35,12 +39,23 @@ export default function Financiero() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['/api/close-checklist'] }),
   });
 
+  const updateCash = useMutation({
+    mutationFn: async ({ id, amount }: { id: CashAccount['id']; amount: number }) =>
+      (await apiRequest('PATCH', `/api/cash-accounts/${id}`, { amount })).json(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/cash-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/cash-flow'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/ceo-metrics'] });
+    },
+  });
+
   const latest = pnl.data?.[pnl.data.length - 1];
   const april = pnl.data?.find(row => row.month === '2026-04');
   const totalInventoryCapitalized = (inventoryAccounting.data ?? []).reduce((sum, row) => sum + row.capitalizedToInventory, 0);
   const totalCogsRecognized = (inventoryAccounting.data ?? []).reduce((sum, row) => sum + row.cogsRecognized, 0);
   const openChecklist = (checklist.data ?? []).filter(item => item.status !== 'listo').length;
   const manualExpensesTotal = (expenses.data ?? []).filter(expense => expense.source === 'manual').reduce((sum, expense) => sum + expense.amount, 0);
+  const operatingCash = (cashAccounts.data ?? []).reduce((sum, account) => account.type === 'liability' ? sum - account.amount : sum + account.amount, 0);
 
   return (
     <Layout
@@ -56,7 +71,7 @@ export default function Financiero() {
       </Card>
 
       <section className="grid grid-cols-2 xl:grid-cols-5 gap-4">
-        <KpiCard label="Caja operativa" value={formatCOP(cash.data?.[0]?.amount ?? 0)} icon={Banknote} emphasis="gold" testId="kpi-fin-cash" />
+        <KpiCard label="Caja operativa neta" value={formatCOP(operatingCash || cash.data?.[0]?.amount || 0)} icon={Banknote} emphasis="gold" testId="kpi-fin-cash" />
         <KpiCard label="Utilidad contable abril" value={april ? formatCOP(april.netIncomeAccounting) : '—'} icon={TrendingUp} emphasis="emerald" testId="kpi-fin-april-profit" hint="Después de capitalizar inventario" />
         <KpiCard label="Inventario capitalizado" value={formatCOP(totalInventoryCapitalized)} icon={Boxes} testId="kpi-fin-capitalized" />
         <KpiCard label="Gastos manuales" value={formatCOP(manualExpensesTotal)} icon={ReceiptText} testId="kpi-fin-manual-expenses" hint="Persistente pre-API" />
@@ -121,6 +136,34 @@ export default function Financiero() {
                 </div>
               </div>
             ))}
+          </div>
+        </Card>
+      </section>
+
+      <section className="mt-6">
+        <Card className="p-5 bg-card border-card-border" data-testid="card-cash-accounts">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div>
+              <h2 className="text-sm font-semibold tracking-tight">Caja operativa editable</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Separa fuentes de efectivo y deuda para decidir compras sin mirar solo el total.
+              </p>
+            </div>
+            <Badge variant="outline" className="text-[11px]">Pre-API bancos</Badge>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+            {(cashAccounts.data ?? []).map(account => (
+              <CashAccountEditor
+                key={`${account.id}-${account.amount}`}
+                account={account}
+                onSave={(amount) => updateCash.mutate({ id: account.id, amount })}
+                disabled={updateCash.isPending}
+              />
+            ))}
+          </div>
+          <div className="mt-4 rounded-md bg-muted/25 border border-border p-3 text-sm">
+            <span className="text-muted-foreground">Caja neta calculada: </span>
+            <span className="font-semibold tabular" data-testid="text-operating-cash-net">{formatCOP(operatingCash)}</span>
           </div>
         </Card>
       </section>
@@ -279,4 +322,62 @@ function ActionBox({ title, body }: { title: string; body: string }) {
       <p className="mt-1 text-muted-foreground">{body}</p>
     </div>
   );
+}
+
+function CashAccountEditor({
+  account,
+  onSave,
+  disabled,
+}: {
+  account: CashAccount;
+  onSave: (amount: number) => void;
+  disabled: boolean;
+}) {
+  const [value, setValue] = useState(formatPlainNumber(account.amount));
+  const tone = account.type === 'liability'
+    ? 'text-rose-300'
+    : account.type === 'pending_asset'
+      ? 'text-amber-300'
+      : 'text-emerald-300';
+
+  return (
+    <div className="rounded-md border border-border bg-muted/20 p-3" data-testid={`cash-account-${account.id}`}>
+      <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{account.label}</div>
+      <div className={`mt-1 text-xs ${tone}`}>{account.type === 'liability' ? 'Deuda' : account.type === 'pending_asset' ? 'Pendiente' : 'Disponible'}</div>
+      <div className="mt-3 flex items-center gap-2">
+        <Input
+          value={value}
+          inputMode="numeric"
+          onChange={event => setValue(formatAmountInput(event.target.value))}
+          className="text-right tabular pr-4"
+          data-testid={`input-cash-account-${account.id}`}
+        />
+        <Button
+          type="button"
+          size="icon"
+          variant="outline"
+          onClick={() => onSave(parseAmountInput(value))}
+          disabled={disabled}
+          aria-label={`Guardar ${account.label}`}
+          data-testid={`button-save-cash-account-${account.id}`}
+        >
+          <Save className="h-4 w-4" />
+        </Button>
+      </div>
+      <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{account.description}</p>
+    </div>
+  );
+}
+
+function parseAmountInput(value: string) {
+  return Number(value.replace(/[^\d]/g, '') || 0);
+}
+
+function formatAmountInput(value: string) {
+  const parsed = parseAmountInput(value);
+  return parsed ? parsed.toLocaleString('en-US') : '';
+}
+
+function formatPlainNumber(value: number) {
+  return value ? Math.round(value).toLocaleString('en-US') : '';
 }

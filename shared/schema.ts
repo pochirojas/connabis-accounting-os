@@ -286,6 +286,20 @@ export type CashFlowSnapshot = {
   explanation: string;
 };
 
+export type CashAccount = {
+  id: 'nequi' | 'nu_debit' | 'mercado_pago_released' | 'mercado_pago_unreleased' | 'nu_credit_card_debt';
+  label: string;
+  type: 'asset' | 'pending_asset' | 'liability';
+  amount: number;
+  description: string;
+};
+
+export const updateCashAccountSchema = z.object({
+  amount: z.number().min(0),
+});
+
+export type UpdateCashAccount = z.infer<typeof updateCashAccountSchema>;
+
 export type InventoryAccountingRow = {
   id: string;
   month: string;

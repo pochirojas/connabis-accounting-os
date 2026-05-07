@@ -17,6 +17,29 @@ import { Receipt, TrendingDown, TrendingUp, AlertTriangle, Plus, Trash2 } from '
 import { useMemo, useState, type FormEvent } from 'react';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 
+const RECURRENT_SELLERS = [
+  'Shopify',
+  'Perplexity',
+  'Discord',
+  'Hau',
+  'Floraplex',
+  'Amazon',
+  'Material Manager',
+  'Mercado Pago',
+  'Envía',
+  'Servientrega',
+  'Otro',
+];
+
+function parseAmountInput(value: string) {
+  return Number(value.replace(/[^\d]/g, '') || 0);
+}
+
+function formatAmountInput(value: string) {
+  const parsed = parseAmountInput(value);
+  return parsed ? parsed.toLocaleString('en-US') : '';
+}
+
 export default function Gastos() {
   const months = useQuery<MonthlyRow[]>({ queryKey: ['/api/months'] });
   const expenses = useQuery<Expense[]>({ queryKey: ['/api/expenses'] });
@@ -24,7 +47,8 @@ export default function Gastos() {
     date: new Date().toISOString().slice(0, 10),
     category: 'Inventario',
     description: '',
-    paidTo: '',
+    paidTo: 'Shopify',
+    paidToOther: '',
     paidWith: 'Bancolombia',
     currency: 'COP' as 'COP' | 'USD',
     amount: '',
@@ -64,6 +88,13 @@ export default function Gastos() {
     return base.sort((a, b) => a.month.localeCompare(b.month));
   }, [manualExpenses, months.data]);
   const lossMonths = monthsWithManual.filter(month => month.profit < 0).length;
+  const sellerOptions = useMemo(() => {
+    const saved = manualExpenses
+      .map(expense => expense.paidTo)
+      .filter((seller): seller is string => Boolean(seller))
+      .filter(seller => !RECURRENT_SELLERS.includes(seller));
+    return [...RECURRENT_SELLERS.slice(0, -1), ...Array.from(new Set(saved)), 'Otro'];
+  }, [manualExpenses]);
 
   const createExpense = useMutation({
     mutationFn: async (payload: {
@@ -79,7 +110,7 @@ export default function Gastos() {
     }) => (await apiRequest('POST', '/api/expenses', payload)).json() as Promise<Expense>,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/expenses'] });
-      setDraft(prev => ({ ...prev, description: '', paidTo: '', amount: '', originalAmount: '', fxRate: '' }));
+      setDraft(prev => ({ ...prev, description: '', paidToOther: '', amount: '', originalAmount: '', fxRate: '' }));
     },
   });
 
@@ -90,16 +121,17 @@ export default function Gastos() {
 
   function addExpense(e: FormEvent) {
     e.preventDefault();
-    const amount = Number(draft.amount);
+    const amount = parseAmountInput(draft.amount);
     if (!draft.date || !draft.description.trim() || !Number.isFinite(amount) || amount <= 0) return;
-    const originalAmount = draft.currency === 'USD' ? Number(draft.originalAmount || draft.amount) : amount;
-    const fxRate = draft.currency === 'USD' ? Number(draft.fxRate || 0) : undefined;
+    const originalAmount = draft.currency === 'USD' ? parseAmountInput(draft.originalAmount || draft.amount) : amount;
+    const fxRate = draft.currency === 'USD' ? parseAmountInput(draft.fxRate || '0') : undefined;
+    const paidTo = draft.paidTo === 'Otro' ? draft.paidToOther.trim() : draft.paidTo;
     createExpense.mutate({
       date: draft.date,
       category: draft.category,
       description: draft.description.trim(),
       amount,
-      paidTo: draft.paidTo.trim() || 'Sin proveedor',
+      paidTo: paidTo || 'Sin proveedor',
       paidWith: draft.paidWith,
       currency: draft.currency,
       originalAmount,
@@ -127,7 +159,7 @@ export default function Gastos() {
             </div>
             <Badge variant="outline" className="text-[11px]">Persistente pre-API</Badge>
           </div>
-          <form onSubmit={addExpense} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[140px_150px_1fr_180px_150px_120px_140px_auto] gap-3 items-end">
+          <form onSubmit={addExpense} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[140px_150px_180px_1fr_150px_120px_170px_auto] gap-3 items-end">
             <label className="space-y-1.5">
               <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Fecha</span>
               <Input
@@ -152,13 +184,26 @@ export default function Gastos() {
             </label>
             <label className="space-y-1.5">
               <span className="text-[11px] uppercase tracking-wider text-muted-foreground">A quién</span>
-              <Input
+              <select
                 value={draft.paidTo}
                 onChange={e => setDraft(prev => ({ ...prev, paidTo: e.target.value }))}
-                placeholder="Proveedor/persona"
-                data-testid="input-expense-paid-to"
-              />
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                data-testid="select-expense-paid-to"
+              >
+                {sellerOptions.map(seller => <option key={seller} value={seller}>{seller}</option>)}
+              </select>
             </label>
+            {draft.paidTo === 'Otro' && (
+              <label className="space-y-1.5">
+                <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Nuevo seller</span>
+                <Input
+                  value={draft.paidToOther}
+                  onChange={e => setDraft(prev => ({ ...prev, paidToOther: e.target.value }))}
+                  placeholder="Nombre del proveedor"
+                  data-testid="input-expense-paid-to-other"
+                />
+              </label>
+            )}
             <label className="space-y-1.5">
               <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Descripción</span>
               <Input
@@ -176,7 +221,7 @@ export default function Gastos() {
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 data-testid="select-expense-paid-with"
               >
-                {['Bancolombia', 'Nequi', 'Daviplata', 'Tarjeta crédito', 'Tarjeta débito', 'Efectivo', 'PayPal', 'Wise', 'Cripto', 'Otro'].map(c => (
+                {['Bancolombia', 'Nequi', 'Nu crédito', 'Nu débito', 'Daviplata', 'Tarjeta crédito', 'Tarjeta débito', 'Efectivo', 'PayPal', 'Wise', 'Cripto', 'Otro'].map(c => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
@@ -196,11 +241,12 @@ export default function Gastos() {
             <label className="space-y-1.5">
               <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Monto COP</span>
               <Input
-                type="number"
+                type="text"
+                inputMode="numeric"
                 value={draft.amount}
-                onChange={e => setDraft(prev => ({ ...prev, amount: e.target.value }))}
+                onChange={e => setDraft(prev => ({ ...prev, amount: formatAmountInput(e.target.value) }))}
                 placeholder="0"
-                className="text-right tabular"
+                className="text-right tabular pr-4"
                 data-testid="input-expense-amount"
               />
             </label>
@@ -209,20 +255,22 @@ export default function Gastos() {
                 <label className="space-y-1.5">
                   <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Monto USD</span>
                   <Input
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
                     value={draft.originalAmount}
-                    onChange={e => setDraft(prev => ({ ...prev, originalAmount: e.target.value }))}
-                    className="text-right tabular"
+                    onChange={e => setDraft(prev => ({ ...prev, originalAmount: formatAmountInput(e.target.value) }))}
+                    className="text-right tabular pr-4"
                     data-testid="input-expense-original-amount"
                   />
                 </label>
                 <label className="space-y-1.5">
                   <span className="text-[11px] uppercase tracking-wider text-muted-foreground">TRM</span>
                   <Input
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
                     value={draft.fxRate}
-                    onChange={e => setDraft(prev => ({ ...prev, fxRate: e.target.value }))}
-                    className="text-right tabular"
+                    onChange={e => setDraft(prev => ({ ...prev, fxRate: formatAmountInput(e.target.value) }))}
+                    className="text-right tabular pr-4"
                     data-testid="input-expense-fx-rate"
                   />
                 </label>
