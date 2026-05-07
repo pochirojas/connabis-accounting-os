@@ -524,6 +524,8 @@ export const integrationPhases: IntegrationPhase[] = [
       'SQLite/Postgres con tablas: orders, products, variants, expenses, purchase_orders, materials.',
       'Job de reconciliación diaria Shopify ↔︎ contabilidad.',
       'UI de edición y override por SKU (cuando el costo Shopify no es confiable).',
+      'Calculadora de blends/carts: ingresar proporciones por blend y cantidad objetivo para generar receta exacta por ingrediente, costo por lote y costo por unidad.',
+      'Replicar la página de calculadora de carts del Sheet original, conectada a BOM/materiales, inventario y costos aterrizados.',
     ],
   },
   {
@@ -665,5 +667,15 @@ export const accountingSuggestions: AccountingSuggestion[] = [
     description: 'Inventario y órdenes de compra deberían copiar exactamente la lógica de Material Manager antes de reemplazarlo.',
     whyItMatters: 'Material Manager ya contiene el modelo mental correcto para insumos, producción, compras y costos.',
     suggestedAction: 'Phase 2: clonar vistas, campos, cálculos y estados de MM; después migrar datos y apagar duplicados.',
+  },
+  {
+    id: 'as6',
+    type: 'sugerencia',
+    priority: 'alta',
+    phase: 2,
+    title: 'Calculadora de blends y carts',
+    description: 'Ingresar proporciones de cada blend/cannabinoide/terpeno y una cantidad objetivo para calcular receta total, gramos o ml por ingrediente, costo del lote y costo por cart/recarga.',
+    whyItMatters: 'Evita errores de producción, permite cotizar antes de producir y alimenta el BOM, el inventario de materiales y el costo Shopify de cada producto terminado.',
+    suggestedAction: 'Phase 2: replicar la calculadora de carts del Sheet original y conectarla a materiales, costos aterrizados, inventario y productos terminados.',
   },
 ];
