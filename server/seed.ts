@@ -2,7 +2,8 @@ import type {
   Channel, MonthlyRow, YearSummary, DashboardKPIs,
   Product, MaterialCost, PurchaseOrder, Expense, Alert, IntegrationPhase,
   DailyPerformance, GlossaryTerm, CostBreakdownItem, AccountingSuggestion,
-  IncomeDetail, RestockRecommendation,
+  IncomeDetail, RestockRecommendation, CeoMetric, PnlRow,
+  CashFlowSnapshot, InventoryAccountingRow, CloseChecklistItem,
 } from '@shared/schema';
 
 // ----- Channel split (Shopify) -----
@@ -42,6 +43,64 @@ export const kpis: DashboardKPIs = {
   alertasActivas: 5,
   asOf: '2026-05-07',
 };
+
+// ----- CEO daily control panel (seed until live Shopify + bank sync) -----
+export const ceoMetrics: CeoMetric[] = [
+  {
+    id: 'cash',
+    label: 'Caja disponible',
+    value: 8_850_000,
+    unit: 'COP',
+    status: 'watch',
+    subtitle: 'Seed: caja operativa estimada después de POs abiertas',
+    action: 'No aprobar compras nuevas >1.5M sin revisar calendario de restock.',
+  },
+  {
+    id: 'month-sales',
+    label: 'Ventas del mes',
+    value: 690_000,
+    unit: 'COP',
+    status: 'risk',
+    subtitle: 'Mayo incompleto: ingresos reales deben venir de Shopify Orders',
+    action: 'Sincronizar mayo antes de decidir pauta o compras.',
+  },
+  {
+    id: 'month-profit',
+    label: 'Utilidad mayo parcial',
+    value: -314_370,
+    unit: 'COP',
+    status: 'risk',
+    subtitle: 'No es utilidad all-time: es una lectura de mayo con ingresos incompletos',
+    action: 'Cerrar mayo cargando ventas, fees, COGS y gastos reales antes de decidir.',
+  },
+  {
+    id: 'gross-margin',
+    label: 'Margen bruto SKU',
+    value: 0.57,
+    unit: 'pct',
+    status: 'ok',
+    subtitle: 'Promedio seed de catálogo activo cargado',
+    action: 'Reemplazar con Shopify cost + BOM real antes de pricing.',
+  },
+  {
+    id: 'critical-stock',
+    label: 'Inventario crítico',
+    value: 3,
+    unit: 'count',
+    status: 'watch',
+    subtitle: 'Materiales en riesgo alto/crítico por días de cobertura',
+    action: 'Comprar primero lo que evita ruptura sin descuadrar caja.',
+  },
+  {
+    id: 'profit-product',
+    label: 'Producto más rentable',
+    value: 'Recarga D8 ULTRA',
+    unit: 'text',
+    status: 'ok',
+    subtitle: 'Seed por margen de contribución, no por revenue',
+    action: 'Usarlo para bundles y campañas de margen sano.',
+  },
+];
 
 // ----- Top products (Shopify revenue all-time) -----
 export const products: Product[] = [
@@ -293,6 +352,120 @@ export const restockRecommendations: RestockRecommendation[] = [
     latestSafeOrderDate: '2026-06-05', monthCashImpact: 667_813, risk: 'medio',
     balanceNote: 'Puede esperar al cierre de mes si no hay campaña agresiva de cartuchos.',
     productsImpacted: ['Cartucho Reutilizable Cerámica 2.25mL XXX', 'Cartucho Reutilizable Cerámica 2.25mL THCO ULTRA'],
+  },
+];
+
+// ----- CEO / contador financial control -----
+export const pnlRows: PnlRow[] = [
+  {
+    month: '2026-01', label: 'Ene 2026', revenue: 6_128_490, refunds: 0, discounts: 380_000,
+    netRevenue: 5_748_490, cogsRecognized: 2_410_000, grossProfit: 3_338_490, grossMargin: 0.581,
+    operatingExpenses: 1_315_029, inventoryPurchases: 1_240_000, inventoryCapitalized: 1_240_000,
+    netIncomeAccounting: 2_023_461, cashProfitNaive: 2_403_461,
+    note: 'Mes sano; inventario comprado no debe mezclarse con gasto operativo.',
+  },
+  {
+    month: '2026-02', label: 'Feb 2026', revenue: 8_410_795, refunds: 120_000, discounts: 510_000,
+    netRevenue: 7_780_795, cogsRecognized: 2_950_000, grossProfit: 4_830_795, grossMargin: 0.621,
+    operatingExpenses: 1_485_599, inventoryPurchases: 980_000, inventoryCapitalized: 980_000,
+    netIncomeAccounting: 3_345_196, cashProfitNaive: 4_485_196,
+    note: 'Buen margen; revisar si el AOV subió por mix o por descuentos controlados.',
+  },
+  {
+    month: '2026-03', label: 'Mar 2026', revenue: 6_978_909, refunds: 0, discounts: 420_000,
+    netRevenue: 6_558_909, cogsRecognized: 2_610_000, grossProfit: 3_948_909, grossMargin: 0.602,
+    operatingExpenses: 1_599_417, inventoryPurchases: 1_120_000, inventoryCapitalized: 1_120_000,
+    netIncomeAccounting: 2_349_492, cashProfitNaive: 2_769_492,
+    note: 'Marzo queda rentable aun separando inventario; buen mes base para forecast.',
+  },
+  {
+    month: '2026-04', label: 'Abr 2026', revenue: 11_704_507, refunds: 0, discounts: 930_000,
+    netRevenue: 10_774_507, cogsRecognized: 4_215_000, grossProfit: 6_559_507, grossMargin: 0.609,
+    operatingExpenses: 4_479_373, inventoryPurchases: 7_303_210, inventoryCapitalized: 7_303_210,
+    netIncomeAccounting: 2_080_134, cashProfitNaive: -2_303_076,
+    note: 'Abril parece pérdida si todo inventario se gasta; contablemente puede ser rentable si se capitaliza inventario.',
+  },
+  {
+    month: '2026-05', label: 'May 2026', revenue: 690_000, refunds: 0, discounts: 126_000,
+    netRevenue: 564_000, cogsRecognized: 226_000, grossProfit: 338_000, grossMargin: 0.599,
+    operatingExpenses: 314_370, inventoryPurchases: 1_004_370, inventoryCapitalized: 1_004_370,
+    netIncomeAccounting: 23_630, cashProfitNaive: -1_004_370,
+    note: 'Mayo es parcial. No usar para decisión hasta traer ingresos Shopify completos.',
+  },
+];
+
+export const cashFlowSnapshots: CashFlowSnapshot[] = [
+  {
+    id: 'cash-on-hand', label: 'Caja operativa estimada', amount: 8_850_000, status: 'watch',
+    explanation: 'Caja seed después de compras abiertas. En versión real debe venir de bancos/pagos o input manual validado.',
+  },
+  {
+    id: 'inventory-cash-locked', label: 'Caja inmovilizada en inventario', amount: 9_643_580, status: 'watch',
+    explanation: 'Valor aproximado en inventario comprado que todavía no se ha reconocido como COGS.',
+  },
+  {
+    id: 'open-restock-need', label: 'Restock recomendado 30 días', amount: 3_924_823, status: 'risk',
+    explanation: 'Compras sugeridas para no romper stock; idealmente dividir por fecha y payout.',
+  },
+  {
+    id: 'safe-spend', label: 'Gasto libre seguro', amount: 2_100_000, status: 'ok',
+    explanation: 'Caja disponible estimada después de reservar inventario crítico, fees y operación básica.',
+  },
+];
+
+export const inventoryAccountingRows: InventoryAccountingRow[] = [
+  {
+    id: 'ia1', month: '2026-04', purchaseOrder: 'PO1', material: 'Cartuchos 2.25mL',
+    cashPaid: 1_862_790, capitalizedToInventory: 1_862_790, cogsRecognized: 381_000, remainingInventoryValue: 1_481_790,
+    accountingTreatment: 'Capitalizar como inventario; reconocer costo por unidad cuando el cartucho se venda.',
+  },
+  {
+    id: 'ia2', month: '2026-04', purchaseOrder: 'PO2', material: 'Desechables 4mL',
+    cashPaid: 3_803_420, capitalizedToInventory: 3_803_420, cogsRecognized: 698_000, remainingInventoryValue: 3_105_420,
+    accountingTreatment: 'No tratar el total como gasto de abril; el costo se libera contra ventas futuras.',
+  },
+  {
+    id: 'ia3', month: '2026-04', purchaseOrder: 'PO3', material: 'THCO 100g',
+    cashPaid: 590_009, capitalizedToInventory: 590_009, cogsRecognized: 186_000, remainingInventoryValue: 404_009,
+    accountingTreatment: 'Costo aterrizado por gramo debe alimentar BOM y Shopify variant.cost.',
+  },
+  {
+    id: 'ia4', month: '2026-04', purchaseOrder: 'PO4', material: 'HHC 250g',
+    cashPaid: 866_474, capitalizedToInventory: 866_474, cogsRecognized: 112_000, remainingInventoryValue: 754_474,
+    accountingTreatment: 'Compra grande; mantener como activo hasta consumo en producción/venta.',
+  },
+  {
+    id: 'ia5', month: '2026-05', purchaseOrder: 'PO5', material: 'Empaque jeringas',
+    cashPaid: 1_004_370, capitalizedToInventory: 1_004_370, cogsRecognized: 0, remainingInventoryValue: 1_004_370,
+    accountingTreatment: 'Mientras no se venda producto terminado, el empaque sigue siendo inventario.',
+  },
+];
+
+export const closeChecklist: CloseChecklistItem[] = [
+  {
+    id: 'cc1', area: 'shopify', task: 'Sincronizar órdenes del mes, refunds, descuentos, shipping y payouts',
+    owner: 'CEO', dueTiming: 'Día 1 de cierre', status: 'pendiente',
+    whyItMatters: 'Sin esto, ingresos y fees del mes quedan incompletos.',
+  },
+  {
+    id: 'cc2', area: 'gastos', task: 'Cargar gastos manuales con fecha, proveedor, método de pago, moneda y soporte',
+    owner: 'Operaciones', dueTiming: 'Antes del día 3', status: 'en_progreso',
+    whyItMatters: 'Permite separar gasto real de compra de inventario.',
+  },
+  {
+    id: 'cc3', area: 'inventario', task: 'Capitalizar compras de inventario y reconocer solo COGS vendido',
+    owner: 'Contador', dueTiming: 'Antes del P&L final', status: 'pendiente',
+    whyItMatters: 'Evita que meses con compras grandes parezcan pérdidas falsas.',
+  },
+  {
+    id: 'cc4', area: 'reconciliacion', task: 'Conciliar Shopify total net sales vs depósitos/payouts y fees',
+    owner: 'Contador', dueTiming: 'Día 4 de cierre', status: 'pendiente',
+    whyItMatters: 'Detecta diferencias entre ventas, efectivo recibido, devoluciones y comisiones.',
+  },
+  {
+    id: 'cc5', area: 'impuestos', task: 'Revisar retefuente, IVA/consumo si aplica, ICA y renta con contador',
+    owner: 'Contador', dueTiming: 'Según calendario tributario', status: 'bloqueado',
+    whyItMatters: 'Debe configurarse con RUT/actividad económica antes de automatizar alertas.',
   },
 ];
 

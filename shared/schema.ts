@@ -54,6 +54,16 @@ export type DashboardKPIs = {
   asOf: string;
 };
 
+export type CeoMetric = {
+  id: string;
+  label: string;
+  value: number | string;
+  unit?: 'COP' | 'pct' | 'count' | 'text';
+  status: 'ok' | 'watch' | 'risk';
+  subtitle: string;
+  action: string;
+};
+
 export type Product = {
   id: string;
   name: string;
@@ -234,4 +244,52 @@ export type RestockRecommendation = {
   risk: 'crítico' | 'alto' | 'medio' | 'bajo';
   balanceNote: string;
   productsImpacted: string[];
+};
+
+export type PnlRow = {
+  month: string;
+  label: string;
+  revenue: number;
+  refunds: number;
+  discounts: number;
+  netRevenue: number;
+  cogsRecognized: number;
+  grossProfit: number;
+  grossMargin: number;
+  operatingExpenses: number;
+  inventoryPurchases: number;
+  inventoryCapitalized: number;
+  netIncomeAccounting: number;
+  cashProfitNaive: number;
+  note?: string;
+};
+
+export type CashFlowSnapshot = {
+  id: string;
+  label: string;
+  amount: number;
+  status: 'ok' | 'watch' | 'risk';
+  explanation: string;
+};
+
+export type InventoryAccountingRow = {
+  id: string;
+  month: string;
+  purchaseOrder: string;
+  material: string;
+  cashPaid: number;
+  capitalizedToInventory: number;
+  cogsRecognized: number;
+  remainingInventoryValue: number;
+  accountingTreatment: string;
+};
+
+export type CloseChecklistItem = {
+  id: string;
+  area: 'shopify' | 'gastos' | 'inventario' | 'impuestos' | 'reconciliacion';
+  task: string;
+  owner: 'CEO' | 'Contador' | 'Operaciones';
+  dueTiming: string;
+  status: 'pendiente' | 'en_progreso' | 'listo' | 'bloqueado';
+  whyItMatters: string;
 };

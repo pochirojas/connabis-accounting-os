@@ -6,6 +6,7 @@ import {
   materials, purchaseOrders, expenses, alerts, integrationPhases,
   dailyPerformance, glossaryTerms, accountingSuggestions,
   incomeDetails, restockRecommendations,
+  ceoMetrics, pnlRows, cashFlowSnapshots, inventoryAccountingRows, closeChecklist,
 } from './seed';
 
 export async function registerRoutes(
@@ -17,6 +18,7 @@ export async function registerRoutes(
   app.get('/api/channels', (_req, res) => res.json(channels));
   app.get('/api/years', (_req, res) => res.json(years));
   app.get('/api/months', (_req, res) => res.json(months));
+  app.get('/api/ceo-metrics', (_req, res) => res.json(ceoMetrics));
 
   // Tabs
   app.get('/api/products', (_req, res) => res.json(products));
@@ -30,6 +32,10 @@ export async function registerRoutes(
   app.get('/api/glossary', (_req, res) => res.json(glossaryTerms));
   app.get('/api/accounting-suggestions', (_req, res) => res.json(accountingSuggestions));
   app.get('/api/restock-plan', (_req, res) => res.json(restockRecommendations));
+  app.get('/api/pnl', (_req, res) => res.json(pnlRows));
+  app.get('/api/cash-flow', (_req, res) => res.json(cashFlowSnapshots));
+  app.get('/api/inventory-accounting', (_req, res) => res.json(inventoryAccountingRows));
+  app.get('/api/close-checklist', (_req, res) => res.json(closeChecklist));
 
   // Shopify connection status (placeholder — no live OAuth in MVP)
   app.get('/api/shopify/status', (_req, res) => res.json({

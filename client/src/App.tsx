@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
+import Financiero from "@/pages/financiero";
 import Ingresos from "@/pages/ingresos";
 import Gastos from "@/pages/gastos";
 import Productos from "@/pages/productos";
@@ -21,6 +22,7 @@ function AppRouter() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
+      <Route path="/financiero" component={Financiero} />
       <Route path="/ingresos" component={Ingresos} />
       <Route path="/gastos" component={Gastos} />
       <Route path="/productos" component={Productos} />
