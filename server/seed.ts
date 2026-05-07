@@ -1,6 +1,7 @@
 import type {
   Channel, MonthlyRow, YearSummary, DashboardKPIs,
   Product, MaterialCost, PurchaseOrder, Expense, Alert, IntegrationPhase,
+  DailyPerformance, GlossaryTerm, CostBreakdownItem,
 } from '@shared/schema';
 
 // ----- Channel split (Shopify) -----
@@ -43,16 +44,59 @@ export const kpis: DashboardKPIs = {
 
 // ----- Top products (Shopify revenue all-time) -----
 export const products: Product[] = [
-  mkProduct({ id: 'p1', name: 'Recarga XXX en Jeringa Uso Diurno', family: 'Recargas en Jeringa', revenue: 11_905_325, unitPrice: 230_000, cogsShopify: 78_500, cogsFallback: 82_000, packaging: 4_200, fees: 0.043, shippingSubsidy: 6_000 }),
-  mkProduct({ id: 'p2', name: 'Recarga THCO ULTRA en Jeringa Uso Diurno', family: 'Recargas en Jeringa', revenue: 7_090_691, unitPrice: 245_000, cogsShopify: 92_000, cogsFallback: 95_000, packaging: 4_200, fees: 0.043, shippingSubsidy: 6_000 }),
-  mkProduct({ id: 'p3', name: 'Cartucho Reutilizable Cerámica 2.25mL XXX', family: 'Cartuchos', revenue: 4_781_949, unitPrice: 165_000, cogsShopify: null, cogsFallback: 64_500, packaging: 3_500, fees: 0.043, shippingSubsidy: 5_000 }),
-  mkProduct({ id: 'p4', name: 'Desechable Cerámica 4mL XXX', family: 'Desechables', revenue: 4_125_309, unitPrice: 195_000, cogsShopify: 88_000, cogsFallback: 90_500, packaging: 3_800, fees: 0.043, shippingSubsidy: 5_000 }),
-  mkProduct({ id: 'p5', name: 'Cartucho Reutilizable Cerámica 1mL XXX', family: 'Cartuchos', revenue: 3_813_973, unitPrice: 110_000, cogsShopify: 38_500, cogsFallback: 41_000, packaging: 3_500, fees: 0.043, shippingSubsidy: 5_000 }),
-  mkProduct({ id: 'p6', name: 'Desechable Cerámica 4mL THCO ULTRA', family: 'Desechables', revenue: 3_019_573, unitPrice: 215_000, cogsShopify: 102_500, cogsFallback: 105_000, packaging: 3_800, fees: 0.043, shippingSubsidy: 5_000 }),
-  mkProduct({ id: 'p7', name: 'Melena de León Orgánica', family: 'Hongos & Wellness', revenue: 2_643_248, unitPrice: 95_000, cogsShopify: null, cogsFallback: 38_000, packaging: 2_800, fees: 0.043, shippingSubsidy: 5_000 }),
-  mkProduct({ id: 'p8', name: 'Recarga THCO MAX en Jeringa', family: 'Recargas en Jeringa', revenue: 2_468_065, unitPrice: 260_000, cogsShopify: 98_000, cogsFallback: 100_000, packaging: 4_200, fees: 0.043, shippingSubsidy: 6_000 }),
-  mkProduct({ id: 'p9', name: 'Cartucho Reutilizable Cerámica 2.25mL THCO ULTRA', family: 'Cartuchos', revenue: 1_920_684, unitPrice: 175_000, cogsShopify: null, cogsFallback: 72_000, packaging: 3_500, fees: 0.043, shippingSubsidy: 5_000 }),
+  mkProduct({ id: 'p1', sku: 'REC-XXX-DIA', name: 'Recarga XXX en Jeringa Uso Diurno', family: 'Recargas en Jeringa', revenue: 11_905_325, unitPrice: 230_000, cogsShopify: 78_500, cogsFallback: 82_000, packaging: 4_200, fees: 0.043, shippingSubsidy: 6_000, cogsBreakdown: recargaBreakdown(78_500, 'XXX blend', 61_800) }),
+  mkProduct({ id: 'p2', sku: 'REC-THCO-ULTRA-DIA', name: 'Recarga THCO ULTRA en Jeringa Uso Diurno', family: 'Recargas en Jeringa', revenue: 7_090_691, unitPrice: 245_000, cogsShopify: 92_000, cogsFallback: 95_000, packaging: 4_200, fees: 0.043, shippingSubsidy: 6_000, cogsBreakdown: recargaBreakdown(92_000, 'THCO Ultra blend', 73_400) }),
+  mkProduct({ id: 'p3', sku: 'CART-225-XXX', name: 'Cartucho Reutilizable Cerámica 2.25mL XXX', family: 'Cartuchos', revenue: 4_781_949, unitPrice: 165_000, cogsShopify: null, cogsFallback: 64_500, packaging: 3_500, fees: 0.043, shippingSubsidy: 5_000, cogsBreakdown: cartBreakdown(64_500, 'XXX blend 2.25mL', 41_300, 6_356) }),
+  mkProduct({ id: 'p4', sku: 'DISP-4ML-XXX', name: 'Desechable Cerámica 4mL XXX', family: 'Desechables', revenue: 4_125_309, unitPrice: 195_000, cogsShopify: 88_000, cogsFallback: 90_500, packaging: 3_800, fees: 0.043, shippingSubsidy: 5_000, cogsBreakdown: disposableBreakdown(88_000, 'XXX blend 4mL', 55_900) }),
+  mkProduct({ id: 'p5', sku: 'CART-1ML-XXX', name: 'Cartucho Reutilizable Cerámica 1mL XXX', family: 'Cartuchos', revenue: 3_813_973, unitPrice: 110_000, cogsShopify: 38_500, cogsFallback: 41_000, packaging: 3_500, fees: 0.043, shippingSubsidy: 5_000, cogsBreakdown: cartBreakdown(38_500, 'XXX blend 1mL', 22_800, 5_968) }),
+  mkProduct({ id: 'p6', sku: 'DISP-4ML-THCO-ULTRA', name: 'Desechable Cerámica 4mL THCO ULTRA', family: 'Desechables', revenue: 3_019_573, unitPrice: 215_000, cogsShopify: 102_500, cogsFallback: 105_000, packaging: 3_800, fees: 0.043, shippingSubsidy: 5_000, cogsBreakdown: disposableBreakdown(102_500, 'THCO Ultra blend 4mL', 70_400) }),
+  mkProduct({ id: 'p7', sku: 'WELL-LION-MANE', name: 'Melena de León Orgánica', family: 'Hongos & Wellness', revenue: 2_643_248, unitPrice: 95_000, cogsShopify: null, cogsFallback: 38_000, packaging: 2_800, fees: 0.043, shippingSubsidy: 5_000, cogsBreakdown: wellnessBreakdown(38_000, 'Melena de León orgánica', 27_500) }),
+  mkProduct({ id: 'p8', sku: 'REC-THCO-MAX', name: 'Recarga THCO MAX en Jeringa', family: 'Recargas en Jeringa', revenue: 2_468_065, unitPrice: 260_000, cogsShopify: 98_000, cogsFallback: 100_000, packaging: 4_200, fees: 0.043, shippingSubsidy: 6_000, cogsBreakdown: recargaBreakdown(98_000, 'THCO Max blend', 78_100) }),
+  mkProduct({ id: 'p9', sku: 'CART-225-THCO-ULTRA', name: 'Cartucho Reutilizable Cerámica 2.25mL THCO ULTRA', family: 'Cartuchos', revenue: 1_920_684, unitPrice: 175_000, cogsShopify: null, cogsFallback: 72_000, packaging: 3_500, fees: 0.043, shippingSubsidy: 5_000, cogsBreakdown: cartBreakdown(72_000, 'THCO Ultra blend 2.25mL', 48_800, 6_356) }),
+  mkProduct({ id: 'p10', sku: 'REC-D8-ULTRA', name: 'Recarga D8 ULTRA en Jeringa', family: 'Recargas en Jeringa', revenue: 1_480_000, unitPrice: 210_000, cogsShopify: 62_000, cogsFallback: 64_500, packaging: 4_200, fees: 0.043, shippingSubsidy: 6_000, cogsBreakdown: recargaBreakdown(62_000, 'D8 Ultra blend', 46_100) }),
+  mkProduct({ id: 'p11', sku: 'CART-1ML-HHC-MAX', name: 'Cartucho Reutilizable Cerámica 1mL HHC MAX', family: 'Cartuchos', revenue: 1_190_000, unitPrice: 130_000, cogsShopify: 44_000, cogsFallback: 46_000, packaging: 3_500, fees: 0.043, shippingSubsidy: 5_000, cogsBreakdown: cartBreakdown(44_000, 'HHC Max blend 1mL', 27_900, 5_968) }),
+  mkProduct({ id: 'p12', sku: 'WS-CBD', name: 'Water Soluble CBD', family: 'Water Soluble', revenue: 960_000, unitPrice: 85_000, cogsShopify: 27_500, cogsFallback: 29_000, packaging: 2_900, fees: 0.043, shippingSubsidy: 5_000, cogsBreakdown: wellnessBreakdown(27_500, 'WS CBD', 18_600) }),
+  mkProduct({ id: 'p13', sku: 'WS-HHC', name: 'Water Soluble HHC', family: 'Water Soluble', revenue: 820_000, unitPrice: 98_000, cogsShopify: 36_000, cogsFallback: 38_000, packaging: 2_900, fees: 0.043, shippingSubsidy: 5_000, cogsBreakdown: wellnessBreakdown(36_000, 'WS HHC', 25_900) }),
+  mkProduct({ id: 'p14', sku: 'WELL-REISHI', name: 'Ganoderma Reishi Rojo Orgánico', family: 'Hongos & Wellness', revenue: 760_000, unitPrice: 90_000, cogsShopify: 34_000, cogsFallback: 35_500, packaging: 2_800, fees: 0.043, shippingSubsidy: 5_000, cogsBreakdown: wellnessBreakdown(34_000, 'Ganoderma/Reishi', 24_800) }),
+  mkProduct({ id: 'p15', sku: 'GUMMY-DELTA', name: 'Gomitas cannabinoides edición piloto', family: 'Edibles', revenue: 540_000, unitPrice: 70_000, cogsShopify: null, cogsFallback: 31_000, packaging: 3_200, fees: 0.043, shippingSubsidy: 5_000, cogsBreakdown: wellnessBreakdown(31_000, 'Base gomita + cannabinoide', 21_300) }),
 ];
+
+function recargaBreakdown(total: number, active: string, activeCost: number): CostBreakdownItem[] {
+  return [
+    { label: active, amount: activeCost, source: 'shopify', note: 'Costo del cannabinoide/blend desde variante Shopify o BOM sincronizado' },
+    { label: 'Jeringa 1mL + tapa', amount: 2_900, source: 'bom' },
+    { label: 'Terpenos / formulación', amount: Math.max(0, total - activeCost - 2_900 - 4_200 - 3_500), source: 'bom' },
+    { label: 'Caja y etiqueta', amount: 4_200, source: 'bom' },
+    { label: 'Producción y control', amount: 3_500, source: 'manual' },
+  ];
+}
+
+function cartBreakdown(total: number, active: string, activeCost: number, hardware: number): CostBreakdownItem[] {
+  return [
+    { label: active, amount: activeCost, source: 'shopify' },
+    { label: 'Hardware cerámico', amount: hardware, source: 'shopify', note: 'Último costo de inventario/hardware' },
+    { label: 'Caja y etiqueta', amount: 3_500, source: 'bom' },
+    { label: 'Ensamble, llenado y QA', amount: Math.max(0, total - activeCost - hardware - 3_500), source: 'manual' },
+  ];
+}
+
+function disposableBreakdown(total: number, active: string, activeCost: number): CostBreakdownItem[] {
+  return [
+    { label: active, amount: activeCost, source: 'shopify' },
+    { label: 'Desechable cerámico 4mL', amount: 23_273.81, source: 'shopify' },
+    { label: 'Caja, etiqueta y sello', amount: 3_800, source: 'bom' },
+    { label: 'Ensamble, carga y QA', amount: Math.max(0, total - activeCost - 23_273.81 - 3_800), source: 'manual' },
+  ];
+}
+
+function wellnessBreakdown(total: number, active: string, activeCost: number): CostBreakdownItem[] {
+  return [
+    { label: active, amount: activeCost, source: 'shopify' },
+    { label: 'Envase / empaque', amount: 2_800, source: 'bom' },
+    { label: 'Etiqueta y lote', amount: 1_100, source: 'bom' },
+    { label: 'Manipulación / preparación', amount: Math.max(0, total - activeCost - 2_800 - 1_100), source: 'manual' },
+  ];
+}
 
 function mkProduct(p: Omit<Product, 'unitsSold' | 'cogsUsed' | 'cogsSource' | 'grossMargin' | 'contributionMargin' | 'alert' | 'alertReason'>): Product {
   const unitsSold = Math.max(1, Math.round(p.revenue / p.unitPrice));
@@ -104,6 +148,21 @@ export const expenses: Expense[] = [
   { id: 'e10', date: '2026-03-30', month: '2026-03', category: 'Marketing',  description: 'Meta Ads marzo', amount:    920_000, source: 'sheet' },
   { id: 'e11', date: '2026-03-30', month: '2026-03', category: 'Logística',  description: 'Envíos marzo', amount:    640_000, source: 'shopify' },
   { id: 'e12', date: '2026-03-31', month: '2026-03', category: 'Operación',  description: 'Operación marzo', amount: 2_649_417, source: 'sheet' },
+];
+
+// ----- Daily performance drilldown (seeded until Shopify live sync) -----
+export const dailyPerformance: DailyPerformance[] = [
+  { date: '2026-01-12', month: '2026-01', orders: 9, revenue: 1_120_000, expenses: 420_000, profit: 700_000, aov: 124_444, topProduct: 'Recarga XXX en Jeringa Uso Diurno', topProductRevenue: 460_000, topProductUnits: 2 },
+  { date: '2026-01-23', month: '2026-01', orders: 11, revenue: 1_480_000, expenses: 380_000, profit: 1_100_000, aov: 134_545, topProduct: 'Recarga THCO ULTRA en Jeringa Uso Diurno', topProductRevenue: 490_000, topProductUnits: 2 },
+  { date: '2026-02-05', month: '2026-02', orders: 14, revenue: 1_860_000, expenses: 510_000, profit: 1_350_000, aov: 132_857, topProduct: 'Cartucho Reutilizable Cerámica 1mL XXX', topProductRevenue: 440_000, topProductUnits: 4 },
+  { date: '2026-02-18', month: '2026-02', orders: 18, revenue: 2_450_000, expenses: 620_000, profit: 1_830_000, aov: 136_111, topProduct: 'Recarga XXX en Jeringa Uso Diurno', topProductRevenue: 690_000, topProductUnits: 3 },
+  { date: '2026-03-09', month: '2026-03', orders: 13, revenue: 1_540_000, expenses: 440_000, profit: 1_100_000, aov: 118_462, topProduct: 'Melena de León Orgánica', topProductRevenue: 285_000, topProductUnits: 3 },
+  { date: '2026-03-22', month: '2026-03', orders: 16, revenue: 2_180_000, expenses: 730_000, profit: 1_450_000, aov: 136_250, topProduct: 'Desechable Cerámica 4mL XXX', topProductRevenue: 585_000, topProductUnits: 3 },
+  { date: '2026-04-20', month: '2026-04', orders: 9, revenue: 1_320_000, expenses: 1_100_000, profit: 220_000, aov: 146_667, topProduct: 'Recarga XXX en Jeringa Uso Diurno', topProductRevenue: 460_000, topProductUnits: 2, note: '4/20: awareness alto, conversión moderada' },
+  { date: '2026-04-26', month: '2026-04', orders: 12, revenue: 1_980_000, expenses: 1_360_000, profit: 620_000, aov: 165_000, topProduct: 'Recarga THCO ULTRA en Jeringa Uso Diurno', topProductRevenue: 735_000, topProductUnits: 3 },
+  { date: '2026-04-29', month: '2026-04', orders: 13, revenue: 1_860_000, expenses: 940_000, profit: 920_000, aov: 143_077, topProduct: 'Recarga XXX en Jeringa Uso Diurno', topProductRevenue: 690_000, topProductUnits: 3, note: 'Urgencia por cierre de oferta' },
+  { date: '2026-04-30', month: '2026-04', orders: 14, revenue: 1_970_000, expenses: 4_620_000, profit: -2_650_000, aov: 140_714, topProduct: 'Desechable Cerámica 4mL THCO ULTRA', topProductRevenue: 645_000, topProductUnits: 3, note: 'Mejor día comercial; pérdida contable por carga de gastos/POs' },
+  { date: '2026-05-03', month: '2026-05', orders: 5, revenue: 690_000, expenses: 1_004_370, profit: -314_370, aov: 138_000, topProduct: 'Water Soluble CBD', topProductRevenue: 170_000, topProductUnits: 2, note: 'Ingresos de mayo aún no reconciliados en Sheet' },
 ];
 
 // ----- Alerts -----
@@ -181,5 +240,72 @@ export const integrationPhases: IntegrationPhase[] = [
       'Deprecar dashboard standalone una vez validado.',
     ],
     requiresCredentials: ['SHOPIFY_API_KEY', 'SHOPIFY_API_SECRET', 'SHOPIFY_APP_URL'],
+  },
+];
+
+// ----- Glossary / help center -----
+export const glossaryTerms: GlossaryTerm[] = [
+  {
+    id: 'g1', category: 'finanzas', term: 'Ingresos',
+    short: 'Dinero vendido antes de restar gastos.',
+    formula: 'Suma de ventas Shopify netas por período',
+    connabisExample: 'Abril 2026 fue récord comercial con ventas fuertes por campaña 4/20 y urgencia de cierre.',
+    action: 'Úsalo para medir tracción, pero nunca solo: combínalo con margen y gastos.',
+  },
+  {
+    id: 'g2', category: 'finanzas', term: 'Gastos',
+    short: 'Salidas de dinero: inventario, envíos, marketing, fees, operación y herramientas.',
+    formula: 'Suma de egresos clasificados por fecha/categoría',
+    connabisExample: 'Abril aparece con pérdida contable porque entraron compras de inventario y operación en el mismo mes.',
+    action: 'Clasifica cada gasto para saber si fue inventario capitalizable, operación o adquisición de clientes.',
+  },
+  {
+    id: 'g3', category: 'margen', term: 'COGS',
+    short: 'Costo directo de producir o adquirir una unidad vendida.',
+    formula: 'Insumos + hardware + empaque directo + producción directa',
+    connabisExample: 'En una recarga, el COGS incluye blend/cannabinoide, jeringa, caja, etiqueta y producción.',
+    action: 'En Connabis debe salir de Shopify; si falta, marca el SKU como Fallback y corrígelo en Shopify.',
+  },
+  {
+    id: 'g4', category: 'margen', term: 'Margen bruto',
+    short: 'Qué porcentaje queda después de restar COGS.',
+    formula: '(Precio - COGS) / Precio',
+    connabisExample: 'Si vendes a 230K y el COGS es 78.5K, el margen bruto muestra cuánto espacio hay antes de fees/envío.',
+    action: 'Úsalo para decidir si el precio base del producto está sano.',
+  },
+  {
+    id: 'g5', category: 'margen', term: 'Margen de contribución',
+    short: 'Margen real después de COGS y costos variables de vender.',
+    formula: '(Precio - COGS - empaque - fees - subsidio envío) / Precio',
+    connabisExample: 'Un producto puede verse rentable en margen bruto pero quedar delicado después de envío, fees y descuentos.',
+    action: 'Este es el número clave para decidir descuentos, bundles y pauta.',
+  },
+  {
+    id: 'g6', category: 'shopify', term: 'AOV',
+    short: 'Ticket promedio por orden.',
+    formula: 'Ingresos / número de órdenes',
+    connabisExample: 'Abril subió el AOV porque la oferta empujó más cantidad por compra, no solo rebaja de precio.',
+    action: 'Súbelo con bundles y kits; no con descuentos que maten margen.',
+  },
+  {
+    id: 'g7', category: 'shopify', term: 'Draft Orders',
+    short: 'Órdenes creadas manualmente, usualmente WhatsApp, VIP o B2B.',
+    formula: 'Ingresos de Draft Orders / ingresos totales',
+    connabisExample: 'Connabis tiene 14.6% por Draft Orders, señal de canal B2B/VIP no sistematizado.',
+    action: 'Formaliza catálogo VIP/B2B con precios y reglas de margen.',
+  },
+  {
+    id: 'g8', category: 'inventario', term: 'Costo aterrizado',
+    short: 'Costo real después de producto, envío, impuestos y nacionalización.',
+    formula: 'Costo producto + envío + impuestos + fees de importación',
+    connabisExample: 'Un cartucho no cuesta solo el precio del proveedor: suma envío, impuestos y pérdidas.',
+    action: 'Usa costo aterrizado para Shopify cost, no solo invoice price.',
+  },
+  {
+    id: 'g9', category: 'crecimiento', term: 'Precio mínimo rentable',
+    short: 'Precio más bajo que puedes cobrar sin romper el margen objetivo.',
+    formula: '(COGS + costos variables) / (1 - margen objetivo)',
+    connabisExample: 'Si quieres 45% de contribución, el descuento máximo depende del COGS real de ese SKU.',
+    action: 'Crea reglas para bloquear descuentos en SKUs con margen delicado.',
   },
 ];

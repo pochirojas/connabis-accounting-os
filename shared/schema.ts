@@ -58,11 +58,13 @@ export type Product = {
   id: string;
   name: string;
   family: string;
+  sku?: string;
   unitsSold: number;
   unitPrice: number;        // COP - from Shopify
   revenue: number;          // COP
   cogsShopify: number | null; // COP - Shopify variant cost; null = no cost in Shopify
   cogsFallback: number;     // estimated landed cost (used only if Shopify cost missing)
+  cogsBreakdown: CostBreakdownItem[];
   packaging: number;        // COP
   fees: number;             // % of revenue
   shippingSubsidy: number;  // COP
@@ -73,6 +75,13 @@ export type Product = {
   contributionMargin: number;  // 0..1
   alert: 'ok' | 'warn' | 'danger';
   alertReason?: string;
+};
+
+export type CostBreakdownItem = {
+  label: string;
+  amount: number;
+  source: 'shopify' | 'bom' | 'manual' | 'fallback';
+  note?: string;
 };
 
 export type MaterialCost = {
@@ -105,6 +114,30 @@ export type Expense = {
   description: string;
   amount: number;
   source: 'shopify' | 'sheet' | 'manual';
+};
+
+export type DailyPerformance = {
+  date: string;
+  month: string;
+  orders: number;
+  revenue: number;
+  expenses: number;
+  profit: number;
+  aov: number;
+  topProduct: string;
+  topProductRevenue: number;
+  topProductUnits: number;
+  note?: string;
+};
+
+export type GlossaryTerm = {
+  id: string;
+  term: string;
+  category: 'finanzas' | 'shopify' | 'margen' | 'inventario' | 'crecimiento';
+  short: string;
+  formula?: string;
+  connabisExample: string;
+  action: string;
 };
 
 export type Alert = {

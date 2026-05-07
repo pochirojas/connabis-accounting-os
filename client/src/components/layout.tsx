@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   LayoutDashboard, TrendingUp, Receipt, PackageSearch,
   Boxes, AlertTriangle, Settings, Moon, Sun, RefreshCw,
+  CalendarRange, BookOpen,
 } from 'lucide-react';
 import { ConnabisLogo } from './logo';
 import { useTheme } from './theme-provider';
@@ -16,8 +17,10 @@ const NAV = [
   { href: '/ingresos',   label: 'Ingresos',       icon: TrendingUp,      testId: 'nav-ingresos' },
   { href: '/gastos',     label: 'Gastos',         icon: Receipt,         testId: 'nav-gastos' },
   { href: '/productos',  label: 'Productos & Márgenes', icon: PackageSearch, testId: 'nav-productos' },
+  { href: '/performance',label: 'Performance mensual', icon: CalendarRange, testId: 'nav-performance' },
   { href: '/inventario', label: 'Inventario & Compras', icon: Boxes,         testId: 'nav-inventario' },
   { href: '/alertas',    label: 'Alertas',        icon: AlertTriangle,   testId: 'nav-alertas' },
+  { href: '/glosario',   label: 'Diccionario',    icon: BookOpen,        testId: 'nav-glosario' },
   { href: '/integracion',label: 'Plan de integración', icon: Settings,        testId: 'nav-integracion' },
 ] as const;
 

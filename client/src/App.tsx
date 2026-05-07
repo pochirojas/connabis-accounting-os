@@ -10,9 +10,11 @@ import Dashboard from "@/pages/dashboard";
 import Ingresos from "@/pages/ingresos";
 import Gastos from "@/pages/gastos";
 import Productos from "@/pages/productos";
+import Performance from "@/pages/performance";
 import Inventario from "@/pages/inventario";
 import Alertas from "@/pages/alertas";
 import Integracion from "@/pages/integracion";
+import Glosario from "@/pages/glosario";
 
 function AppRouter() {
   return (
@@ -21,9 +23,11 @@ function AppRouter() {
       <Route path="/ingresos" component={Ingresos} />
       <Route path="/gastos" component={Gastos} />
       <Route path="/productos" component={Productos} />
+      <Route path="/performance" component={Performance} />
       <Route path="/inventario" component={Inventario} />
       <Route path="/alertas" component={Alertas} />
       <Route path="/integracion" component={Integracion} />
+      <Route path="/glosario" component={Glosario} />
       <Route component={NotFound} />
     </Switch>
   );
