@@ -1,0 +1,141 @@
+import { Layout } from '@/components/layout';
+import { KpiCard } from '@/components/kpi-card';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { useQuery } from '@tanstack/react-query';
+import {
+  TrendingUp, Receipt, Wallet, Percent, ShoppingCart, Users,
+  Package, AlertTriangle,
+} from 'lucide-react';
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell,
+  PieChart, Pie, Legend,
+} from 'recharts';
+import type { DashboardKPIs, MonthlyRow, Channel, Alert } from '@shared/schema';
+import { formatCOP, formatCOPCompact, formatNumber, formatPct } from '@/lib/format';
+import { Link } from 'wouter';
+import { Button } from '@/components/ui/button';
+
+const CHART_COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))'];
+
+export default function Dashboard() {
+  const kpis = useQuery<DashboardKPIs>({ queryKey: ['/api/kpis'] });
+  const months = useQuery<MonthlyRow[]>({ queryKey: ['/api/months'] });
+  const channels = useQuery<Channel[]>({ queryKey: ['/api/channels'] });
+  const alerts = useQuery<Alert[]>({ queryKey: ['/api/alerts'] });
+
+  const k = kpis.data;
+
+  return (
+    <Layout title="Vista general" subtitle={k ? `Datos al ${new Date(k.asOf).toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' })}` : ''}>
+      {/* KPI Grid */}
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-4" aria-label="Indicadores clave">
+        <KpiCard label="Ingresos totales" value={k ? formatCOP(k.ingresos) : '—'} icon={TrendingUp} emphasis="emerald" testId="kpi-ingresos"
+          hint="Shopify all-time" />
+        <KpiCard label="Gastos totales" value={k ? formatCOP(k.gastos) : '—'} icon={Receipt} testId="kpi-gastos" hint="Sheet + Shopify" />
+        <KpiCard label="Utilidad neta" value={k ? formatCOP(k.utilidadNeta) : '—'} icon={Wallet} emphasis="gold" testId="kpi-utilidad" hint={k ? `Margen ${formatPct(k.margenEstimado)}` : ''} />
+        <KpiCard label="Margen estimado" value={k ? formatPct(k.margenEstimado, 2) : '—'} icon={Percent} testId="kpi-margen" hint="Sobre ingresos all-time" />
+
+        <KpiCard label="AOV" value={k ? formatCOP(k.aov) : '—'} icon={ShoppingCart} testId="kpi-aov" hint="Ticket promedio" />
+        <KpiCard label="Órdenes" value={k ? formatNumber(k.ordenes) : '—'} icon={Package} testId="kpi-ordenes" hint="All-time Shopify" />
+        <KpiCard label="Clientes recurrentes" value={k ? `${formatNumber(k.clientesRecurrentes)}` : '—'} icon={Users} testId="kpi-recurrentes" hint={k ? `${formatPct(k.clientesRecurrentesPct)} del total` : ''} />
+        <KpiCard label="Familia top" value={k?.topProductFamily ?? '—'} icon={Package} testId="kpi-top-family" hint="Por ingresos" />
+      </section>
+
+      {/* Charts row */}
+      <section className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <Card className="lg:col-span-2 p-5 bg-card border-card-border" data-testid="card-monthly-profit">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-sm font-semibold tracking-tight">Resultado mensual 2026</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Ingresos vs gastos · utilidad por mes</p>
+            </div>
+            <Badge variant="outline" className="text-[11px]" data-testid="badge-source-monthly">Sheet contable</Badge>
+          </div>
+          <div className="h-[260px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={months.data ?? []} margin={{ left: -8, right: 8, top: 8 }}>
+                <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false}
+                  tickFormatter={(v) => formatCOPCompact(Number(v))} />
+                <Tooltip
+                  cursor={{ fill: 'hsl(var(--muted) / 0.4)' }}
+                  contentStyle={{
+                    background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))',
+                    borderRadius: 8, fontSize: 12,
+                  }}
+                  formatter={(v: number) => formatCOP(v)}
+                />
+                <Bar dataKey="income" name="Ingresos" fill="hsl(var(--chart-1))" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="expenses" name="Gastos" fill="hsl(var(--chart-2))" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="profit" name="Utilidad" radius={[3, 3, 0, 0]}>
+                  {(months.data ?? []).map((m, i) => (
+                    <Cell key={i} fill={m.profit >= 0 ? 'hsl(var(--chart-3))' : 'hsl(var(--destructive))'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+
+        <Card className="p-5 bg-card border-card-border" data-testid="card-channel-split">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-sm font-semibold tracking-tight">Canales de venta</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Mix por canal</p>
+            </div>
+            <Badge variant="outline" className="text-[11px]">Shopify</Badge>
+          </div>
+          <div className="h-[260px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={channels.data ?? []} dataKey="share" nameKey="name" innerRadius={60} outerRadius={88} paddingAngle={2} stroke="hsl(var(--card))" strokeWidth={2}>
+                  {(channels.data ?? []).map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                </Pie>
+                <Tooltip
+                  contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
+                  formatter={(v: number) => `${(v * 100).toFixed(1)}%`}
+                />
+                <Legend iconSize={8} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+      </section>
+
+      {/* Alerts preview */}
+      <section className="mt-6">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="text-sm font-semibold tracking-tight">Alertas activas</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Prioridades de revisión</p>
+          </div>
+          <Link href="/alertas"><Button variant="outline" size="sm" data-testid="button-ver-alertas">Ver todas</Button></Link>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {(alerts.data ?? []).slice(0, 4).map(a => (
+            <Card key={a.id} className="p-4 bg-card border-card-border" data-testid={`alert-card-${a.id}`}>
+              <div className="flex items-start gap-3">
+                <span className={`mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-md ${
+                  a.level === 'critical' ? 'bg-destructive/15 text-destructive' :
+                  a.level === 'warn' ? 'bg-amber-500/15 text-amber-400' :
+                  'bg-sky-500/15 text-sky-400'
+                }`}>
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[13.5px] font-semibold">{a.title}</span>
+                    <Badge variant="outline" className="text-[10px] uppercase tracking-wider">{a.level}</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{a.description}</p>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      </section>
+    </Layout>
+  );
+}

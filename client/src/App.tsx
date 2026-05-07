@@ -1,0 +1,47 @@
+import { Switch, Route, Router } from "wouter";
+import { useHashLocation } from "wouter/use-hash-location";
+import { queryClient } from "./lib/queryClient";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { Toaster } from "@/components/ui/toaster";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { ThemeProvider } from "@/components/theme-provider";
+import NotFound from "@/pages/not-found";
+import Dashboard from "@/pages/dashboard";
+import Ingresos from "@/pages/ingresos";
+import Gastos from "@/pages/gastos";
+import Productos from "@/pages/productos";
+import Inventario from "@/pages/inventario";
+import Alertas from "@/pages/alertas";
+import Integracion from "@/pages/integracion";
+
+function AppRouter() {
+  return (
+    <Switch>
+      <Route path="/" component={Dashboard} />
+      <Route path="/ingresos" component={Ingresos} />
+      <Route path="/gastos" component={Gastos} />
+      <Route path="/productos" component={Productos} />
+      <Route path="/inventario" component={Inventario} />
+      <Route path="/alertas" component={Alertas} />
+      <Route path="/integracion" component={Integracion} />
+      <Route component={NotFound} />
+    </Switch>
+  );
+}
+
+function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <TooltipProvider delayDuration={150}>
+          <Toaster />
+          <Router hook={useHashLocation}>
+            <AppRouter />
+          </Router>
+        </TooltipProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
+  );
+}
+
+export default App;
