@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import { insertExpenseSchema, updateCashAccountSchema, updateCloseChecklistSchema } from '@shared/schema';
 import { storage } from './storage';
 import {
@@ -13,6 +14,89 @@ import {
 } from './seed';
 
 const SHOPIFY_API_VERSION = '2026-04';
+const MATERIAL_MANAGER_BOM_PATH = '/home/user/workspace/material-manager-export-material-product.csv';
+const MATERIAL_MANAGER_MATERIALS_PATH = '/home/user/workspace/material-manager-export.csv';
+
+function parseCsvLine(line: string) {
+  const cells: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    const next = line[i + 1];
+    if (char === '"' && inQuotes && next === '"') {
+      current += '"';
+      i += 1;
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      cells.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  cells.push(current);
+  return cells;
+}
+
+function parseCsv(path: string) {
+  if (!fs.existsSync(path)) return [] as Record<string, string>[];
+  const lines = fs.readFileSync(path, 'utf-8').replace(/^\uFEFF/, '').split(/\r?\n/).filter(Boolean);
+  const headers = parseCsvLine(lines[0]);
+  return lines.slice(1).map(line => {
+    const values = parseCsvLine(line);
+    return Object.fromEntries(headers.map((header, index) => [header, values[index] ?? '']));
+  });
+}
+
+function loadMaterialManagerData() {
+  const materials = parseCsv(MATERIAL_MANAGER_MATERIALS_PATH);
+  const bomRows = parseCsv(MATERIAL_MANAGER_BOM_PATH);
+  const materialsById = new Map(materials.map(material => [
+    material.ID,
+    {
+      name: material.Name,
+      category: material.Category || 'Material',
+      measurement: material.Measurement || 'unidad',
+      cost: Number(material.Cost) || 0,
+      currency: material['Currency Code'] || 'COP',
+      stock: Number(material['Calle 36 #22a-108 (4bf83698-ff9e-4857-9da3-e4f44bc3b447)']) || 0,
+    },
+  ]));
+
+  const bomByVariantId = new Map<string, Array<{
+    materialId: string;
+    materialName: string;
+    quantity: number;
+    unitCost: number;
+    amount: number;
+    category: string;
+    measurement: string;
+    stock: number;
+  }>>();
+
+  for (const row of bomRows) {
+    const variantId = row['Variant ID'];
+    const material = materialsById.get(row['Material ID']);
+    if (!variantId || !material) continue;
+    const quantity = Number(row['Quantity of material used']) || 0;
+    const amount = quantity * material.cost;
+    const item = {
+      materialId: row['Material ID'],
+      materialName: row['Material name'] || material.name,
+      quantity,
+      unitCost: material.cost,
+      amount,
+      category: material.category,
+      measurement: material.measurement,
+      stock: material.stock,
+    };
+    bomByVariantId.set(variantId, [...(bomByVariantId.get(variantId) ?? []), item]);
+  }
+
+  return { bomByVariantId };
+}
 
 async function getShopifyAccessToken() {
   const clientId = process.env.SHOPIFY_CLIENT_ID;
@@ -89,9 +173,59 @@ function getVariantPresentation(title: string) {
   return pieces.length > 1 ? pieces[pieces.length - 1] : title.trim();
 }
 
+function variantsHaveSameEconomics(variants: Array<{ price: string; inventoryItem: { unitCost: { amount: string; currencyCode: string } | null } }>) {
+  const prices = new Set(variants.map(variant => Number(variant.price).toFixed(2)));
+  const costs = new Set(variants.map(variant => Number(variant.inventoryItem.unitCost?.amount ?? 0).toFixed(2)));
+  return prices.size <= 1 && costs.size <= 1;
+}
+
+function getBomComponentKey(materialName: string) {
+  return materialName.toLowerCase().includes('terpenos') ? 'Terpeno según sabor' : materialName;
+}
+
+function buildGroupedBomBreakdown(variantLegacyIds: string[]) {
+  const { bomByVariantId } = loadMaterialManagerData();
+  const variantBoms = variantLegacyIds
+    .map(id => bomByVariantId.get(id) ?? [])
+    .filter(items => items.length > 0);
+
+  if (variantBoms.length === 0) return null;
+
+  const componentMap = new Map<string, {
+    label: string;
+    amount: number;
+    source: 'bom';
+    note: string;
+  }>();
+
+  for (const items of variantBoms) {
+    for (const item of items) {
+      const key = getBomComponentKey(item.materialName);
+      const current = componentMap.get(key);
+      const note = key === 'Terpeno según sabor'
+        ? `Promedio del terpeno específico de cada sabor. MM: ${item.quantity} ${item.measurement} × ${item.unitCost.toLocaleString('es-CO')} COP.`
+        : `MM: ${item.quantity} ${item.measurement} × ${item.unitCost.toLocaleString('es-CO')} COP · Stock material: ${item.stock.toLocaleString('es-CO')}.`;
+      componentMap.set(key, {
+        label: key,
+        amount: (current?.amount ?? 0) + item.amount,
+        source: 'bom',
+        note: current?.note ?? note,
+      });
+    }
+  }
+
+  const divisor = variantBoms.length;
+  const breakdown = Array.from(componentMap.values())
+    .map(item => ({ ...item, amount: item.amount / divisor }))
+    .sort((a, b) => b.amount - a.amount);
+  const total = breakdown.reduce((sum, item) => sum + item.amount, 0);
+  return { breakdown, total, matchedVariants: variantBoms.length };
+}
+
 async function loadLiveShopifyProducts() {
   type LiveVariant = {
     id: string;
+    legacyResourceId: string;
     title: string;
     sku: string | null;
     price: string;
@@ -120,6 +254,7 @@ async function loadLiveShopifyProducts() {
               edges {
                 node {
                   id
+                  legacyResourceId
                   title
                   sku
                   price
@@ -159,13 +294,16 @@ async function loadLiveShopifyProducts() {
             return map;
           }, new Map<string, LiveVariant[]>())
         ).map(([presentation, items]) => ({ presentation, variants: items }))
-      : [{ presentation: null, variants }];
+      : variantsHaveSameEconomics(variants)
+      ? [{ presentation: null, variants }]
+      : variants.map(item => ({ presentation: item.title === 'Default Title' ? null : item.title, variants: [item] }));
 
     return variantGroups.map(group => {
     const variant = group.variants[0];
     const price = Number(variant.price) || 0;
     const shopifyCost = variant.inventoryItem.unitCost ? Number(variant.inventoryItem.unitCost.amount) : null;
-    const cogsUsed = shopifyCost ?? 0;
+    const bom = buildGroupedBomBreakdown(group.variants.map(item => String(item.legacyResourceId)));
+    const cogsUsed = bom?.total ?? shopifyCost ?? 0;
     const packaging = defaultPackaging(product.title);
     const fees = 0.035;
     const shippingSubsidy = 0;
@@ -190,7 +328,7 @@ async function loadLiveShopifyProducts() {
       revenue: 0,
       cogsShopify: shopifyCost,
       cogsFallback: 0,
-      cogsBreakdown: [
+      cogsBreakdown: bom?.breakdown ?? [
         {
           label: 'Costo unitario Shopify',
           amount: cogsUsed,
@@ -204,16 +342,16 @@ async function loadLiveShopifyProducts() {
       fees,
       shippingSubsidy,
       cogsUsed,
-      cogsSource: shopifyCost === null ? 'fallback' : 'shopify',
-      marginSource: 'shopify',
+      cogsSource: cogsUsed === 0 ? 'fallback' : 'shopify',
+      marginSource: bom ? 'material_manager' : 'shopify',
       dataCompleteness: shopifyCost === null ? 'partial' : 'real',
       idealPrice,
       competitorPrice: price,
       maxProfitableDiscount,
       grossMargin: price > 0 ? (price - cogsUsed) / price : 0,
       contributionMargin: price > 0 ? (price - cogsUsed - packaging - price * fees - shippingSubsidy) / price : 0,
-      alert: shopifyCost === null ? 'warn' : 'ok',
-      alertReason: shopifyCost === null ? 'Falta costo unitario en Shopify.' : undefined,
+      alert: cogsUsed === 0 ? 'warn' : 'ok',
+      alertReason: cogsUsed === 0 ? 'Falta BOM/costo unitario en Material Manager y Shopify.' : undefined,
       inventoryQuantity,
       variantCount: group.variants.length,
       flavorOptions,

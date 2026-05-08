@@ -58,6 +58,7 @@ export default function Productos() {
   const avgCM = computed.length ? computed.reduce((s, p) => s + p.contributionMargin, 0) / computed.length : 0;
   const missingCosts = computed.filter(p => p.cogsSource === 'fallback').length;
   const isLive = Boolean(shopifyStatus.data?.connected);
+  const sourceLabel = (p: Product) => p.marginSource === 'material_manager' ? 'Material Manager' : p.cogsSource === 'shopify' ? 'Shopify' : 'Fallback temporal';
 
   return (
     <Layout
@@ -136,7 +137,7 @@ export default function Productos() {
               <div>
                 <h2 className="text-sm font-semibold tracking-tight">{selected.name}</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  SKU base {selected.sku ?? 'sin SKU'} · {selected.family} · {(selected as Product & { variantCount?: number }).variantCount ?? 1} sabores/variantes · Fuente de costo: {selected.cogsSource === 'shopify' ? 'Shopify' : 'Fallback temporal'}
+                  SKU base {selected.sku ?? 'sin SKU'} · {selected.family} · {(selected as Product & { variantCount?: number }).variantCount ?? 1} sabores/variantes · Fuente de costo: {sourceLabel(selected)}
                 </p>
               </div>
               <Badge
@@ -144,7 +145,7 @@ export default function Productos() {
                 className={`text-[10px] uppercase tracking-wide ${selected.cogsSource === 'fallback' ? 'border-amber-500/40 text-amber-300' : ''}`}
                 data-testid="badge-selected-source"
               >
-                {selected.cogsSource === 'shopify' ? 'Shopify cost' : 'Fallback'}
+                {selected.marginSource === 'material_manager' ? 'MM BOM' : selected.cogsSource === 'shopify' ? 'Shopify cost' : 'Fallback'}
               </Badge>
             </div>
           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 mb-4">
@@ -179,7 +180,7 @@ export default function Productos() {
                       <Badge variant="outline" className="text-[10px] uppercase">{item.source}</Badge>
                     </TableCell>
                     <TableCell className="text-right tabular">{formatCOP(item.amount)}</TableCell>
-                    <TableCell className="text-right tabular">{formatPct(item.amount / selected.cogsUsed)}</TableCell>
+                    <TableCell className="text-right tabular">{selected.cogsUsed > 0 ? formatPct(item.amount / selected.cogsUsed) : '—'}</TableCell>
                   </TableRow>
                 ))}
                 <TableRow className="bg-muted/30">
@@ -327,12 +328,14 @@ export default function Productos() {
                               data-testid={`badge-source-${p.id}`}
                             >
                               <Info className="h-2.5 w-2.5 mr-1" />
-                              {p.cogsSource === 'shopify' ? 'Shopify' : 'Fallback'}
+                              {p.marginSource === 'material_manager' ? 'MM BOM' : p.cogsSource === 'shopify' ? 'Shopify' : 'Fallback'}
                             </Badge>
                           </span>
                         </TooltipTrigger>
                         <TooltipContent className="max-w-xs text-[11.5px]">
-                          {p.cogsSource === 'shopify'
+                          {p.marginSource === 'material_manager'
+                            ? 'Costo desglosado desde Material Manager: cantidad de material usada × costo unitario por material.'
+                            : p.cogsSource === 'shopify'
                             ? 'Costo tomado del campo cost de la variante en Shopify.'
                             : 'Costo Shopify vacío. Usando estimación de costo aterrizado. Cargar costo en Shopify para fuente única de verdad.'}
                         </TooltipContent>
