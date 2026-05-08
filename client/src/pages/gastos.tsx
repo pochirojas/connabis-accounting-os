@@ -16,7 +16,7 @@ import { KpiCard } from '@/components/kpi-card';
 import { Receipt, TrendingDown, TrendingUp, AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { useMemo, useState, type FormEvent } from 'react';
 import { apiRequest, queryClient } from '@/lib/queryClient';
-import { sortByMonth, type ChartSortOrder } from '@/lib/chart-sort';
+import { sortByDate, sortByMonth, type ChartSortOrder } from '@/lib/chart-sort';
 
 const RECURRENT_SELLERS = [
   'Shopify',
@@ -59,6 +59,8 @@ export default function Gastos() {
   const [exportMonth, setExportMonth] = useState('all');
   const [exportYear, setExportYear] = useState('all');
   const [monthlySort, setMonthlySort] = useState<ChartSortOrder>('oldest');
+  const [monthlyTableSort, setMonthlyTableSort] = useState<ChartSortOrder>('newest');
+  const [expenseDetailSort, setExpenseDetailSort] = useState<ChartSortOrder>('newest');
 
   const allExpenses = useMemo(() => expenses.data ?? [], [expenses.data]);
   const manualExpenses = useMemo(() => allExpenses.filter(e => e.source === 'manual'), [allExpenses]);
@@ -90,6 +92,8 @@ export default function Gastos() {
   const monthOptions = monthsWithManual.map(month => month.month).sort().reverse();
   const yearOptions = Array.from(new Set(monthOptions.map(month => month.slice(0, 4)))).sort().reverse();
   const monthlyChartRows = useMemo(() => sortByMonth(monthsWithManual, monthlySort), [monthsWithManual, monthlySort]);
+  const monthlyTableRows = useMemo(() => sortByMonth(monthsWithManual, monthlyTableSort), [monthsWithManual, monthlyTableSort]);
+  const expenseDetailRows = useMemo(() => sortByDate(allExpenses, expenseDetailSort), [allExpenses, expenseDetailSort]);
   const sellerOptions = useMemo(() => {
     const saved = manualExpenses
       .map(expense => expense.paidTo)
@@ -357,6 +361,15 @@ export default function Gastos() {
               <p className="text-xs text-muted-foreground mt-0.5">Ingresos y gastos exportables por mes o año.</p>
             </div>
             <div className="flex flex-wrap gap-2 justify-end">
+              <select
+                value={monthlyTableSort}
+                onChange={e => setMonthlyTableSort(e.target.value as ChartSortOrder)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-xs"
+                data-testid="select-monthly-summary-sort"
+              >
+                <option value="newest">Nuevo → viejo</option>
+                <option value="oldest">Viejo → nuevo</option>
+              </select>
               <select value={exportMonth} onChange={e => setExportMonth(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-xs" data-testid="select-expense-export-month">
                 <option value="all">Todos los meses</option>
                 {monthOptions.map(month => <option key={month} value={month}>{month}</option>)}
@@ -382,7 +395,7 @@ export default function Gastos() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {monthsWithManual.map(m => (
+              {monthlyTableRows.map(m => (
                 <TableRow key={m.month} data-testid={`row-month-${m.month}`}>
                   <TableCell className="font-medium">{m.label}</TableCell>
                   <TableCell className="text-right tabular" data-testid={`text-month-income-${m.month}`}>{formatCOP(m.income)}</TableCell>
@@ -414,11 +427,20 @@ export default function Gastos() {
 
       <section className="mt-6">
         <Card className="p-5 bg-card border-card-border" data-testid="card-expense-detail">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between gap-3 mb-4">
             <div>
               <h2 className="text-sm font-semibold tracking-tight">Detalle de gastos</h2>
               <p className="text-xs text-muted-foreground mt-0.5">Origen actual: Expenses sheet histórico + gastos manuales nuevos. Seed queda fuera de totales.</p>
             </div>
+            <select
+              value={expenseDetailSort}
+              onChange={e => setExpenseDetailSort(e.target.value as ChartSortOrder)}
+              className="h-9 rounded-md border border-input bg-background px-3 text-xs"
+              data-testid="select-expense-detail-sort"
+            >
+              <option value="newest">Nuevo → viejo</option>
+              <option value="oldest">Viejo → nuevo</option>
+            </select>
           </div>
           <Table>
             <TableHeader>
@@ -436,7 +458,7 @@ export default function Gastos() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {allExpenses.map(e => (
+              {expenseDetailRows.map(e => (
                 <TableRow key={e.id} data-testid={`row-expense-${e.id}`}>
                   <TableCell className="text-sm tabular">{formatDate(e.date)}</TableCell>
                   <TableCell>

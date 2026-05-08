@@ -15,7 +15,7 @@ import { KpiCard } from '@/components/kpi-card';
 import { TrendingUp, ShoppingBag, BadgePercent, Calendar } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { apiRequest } from '@/lib/queryClient';
-import { sortByMonth, type ChartSortOrder } from '@/lib/chart-sort';
+import { sortByDate, sortByMonth, type ChartSortOrder } from '@/lib/chart-sort';
 
 const CHART_COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))'];
 
@@ -28,17 +28,18 @@ export default function Ingresos() {
   const [detailChannel, setDetailChannel] = useState('all');
   const [exportYear, setExportYear] = useState('all');
   const [monthlySort, setMonthlySort] = useState<ChartSortOrder>('oldest');
+  const [detailSort, setDetailSort] = useState<ChartSortOrder>('newest');
 
   const yr2026 = years.data?.find(y => y.year === 2026);
   const total = years.data?.reduce((s, y) => s + y.revenue, 0) ?? 0;
   const totalOrders = years.data?.reduce((s, y) => s + y.orders, 0) ?? 0;
   const aov = totalOrders ? total / totalOrders : 0;
   const filteredDetails = useMemo(() => {
-    return (incomeDetails.data ?? [])
+    const filtered = (incomeDetails.data ?? [])
       .filter(row => detailMonth === 'all' || row.month === detailMonth)
-      .filter(row => detailChannel === 'all' || row.channel === detailChannel)
-      .sort((a, b) => b.date.localeCompare(a.date));
-  }, [incomeDetails.data, detailMonth, detailChannel]);
+      .filter(row => detailChannel === 'all' || row.channel === detailChannel);
+    return sortByDate(filtered, detailSort);
+  }, [incomeDetails.data, detailMonth, detailChannel, detailSort]);
   const detailTotals = filteredDetails.reduce((acc, row) => {
     acc.gross += row.grossRevenue;
     acc.discounts += row.discounts;
@@ -229,6 +230,15 @@ export default function Ingresos() {
                 {detailChannels.map(channel => (
                   <option key={channel} value={channel}>{channel}</option>
                 ))}
+              </select>
+              <select
+                value={detailSort}
+                onChange={e => setDetailSort(e.target.value as ChartSortOrder)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-xs"
+                data-testid="select-income-detail-sort"
+              >
+                <option value="newest">Nuevo → viejo</option>
+                <option value="oldest">Viejo → nuevo</option>
               </select>
               <select
                 value={exportYear}
