@@ -93,7 +93,7 @@ export default function Productos() {
             <div>
               <h2 className="text-sm font-semibold tracking-tight">Selector de producto</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Busca cualquier producto activo de Shopify y abre su desglose de costo, precio ideal, competencia placeholder y descuento máximo rentable.
+                Busca cualquier producto activo de Shopify. Los sabores/variantes quedan agrupados en una sola fila porque comparten precio y costo base.
               </p>
             </div>
             <Badge variant="outline" className="text-[11px]">{computed.length} productos</Badge>
@@ -136,7 +136,7 @@ export default function Productos() {
               <div>
                 <h2 className="text-sm font-semibold tracking-tight">{selected.name}</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  SKU {selected.sku ?? 'sin SKU'} · {selected.family} · Fuente de costo: {selected.cogsSource === 'shopify' ? 'Shopify' : 'Fallback temporal'}
+                  SKU base {selected.sku ?? 'sin SKU'} · {selected.family} · {(selected as Product & { variantCount?: number }).variantCount ?? 1} sabores/variantes · Fuente de costo: {selected.cogsSource === 'shopify' ? 'Shopify' : 'Fallback temporal'}
                 </p>
               </div>
               <Badge
@@ -297,6 +297,7 @@ export default function Productos() {
                       <div>{p.name}</div>
                       <div className="text-[11px] text-muted-foreground tabular mt-0.5">
                         {p.sku ?? 'sin SKU'} · stock {formatNumber((p as Product & { inventoryQuantity?: number }).inventoryQuantity ?? 0)} · {p.revenue > 0 ? formatCOP(p.revenue) : 'ingresos por SKU pendiente'}
+                        {' · '}{formatNumber((p as Product & { variantCount?: number }).variantCount ?? 1)} sabores
                       </div>
                     </TableCell>
                   <TableCell><Badge variant="outline" className="text-[10.5px]">{p.family}</Badge></TableCell>

@@ -139,8 +139,9 @@ async function loadLiveShopifyProducts() {
     cursor = data.products.pageInfo.endCursor;
   }
 
-  return allProducts.flatMap(product => product.variants.edges.map(edge => {
-    const variant = edge.node;
+  return allProducts.map(product => {
+    const variants = product.variants.edges.map(edge => edge.node);
+    const variant = variants[0];
     const price = Number(variant.price) || 0;
     const shopifyCost = variant.inventoryItem.unitCost ? Number(variant.inventoryItem.unitCost.amount) : null;
     const cogsUsed = shopifyCost ?? 0;
@@ -151,14 +152,16 @@ async function loadLiveShopifyProducts() {
     const maxProfitableDiscount = price > 0
       ? Math.max(0, Math.min(0.7, 1 - ((cogsUsed + packaging + shippingSubsidy) / (price * (1 - fees))) / 0.30))
       : 0;
-    const variantLabel = variant.title && variant.title !== 'Default Title' ? ` · ${variant.title}` : '';
-    const name = `${product.title}${variantLabel}`;
+    const flavorOptions = variants
+      .map(item => item.title)
+      .filter(title => title && title !== 'Default Title');
+    const inventoryQuantity = variants.reduce((sum, item) => sum + (item.inventoryQuantity || 0), 0);
 
     return {
-      id: variant.id,
-      name,
+      id: product.id,
+      name: product.title,
       family: inferProductFamily(product.title),
-      sku: variant.sku ?? undefined,
+      sku: variants.find(item => item.sku)?.sku ?? undefined,
       active: product.status === 'ACTIVE',
       unitsSold: 0,
       unitPrice: price,
@@ -170,7 +173,9 @@ async function loadLiveShopifyProducts() {
           label: 'Costo unitario Shopify',
           amount: cogsUsed,
           source: shopifyCost === null ? 'fallback' : 'shopify',
-          note: shopifyCost === null ? 'Sin unitCost en Shopify; cargar costo para margen real.' : `Inventory item ${variant.inventoryItem.id}`,
+          note: shopifyCost === null
+            ? 'Sin unitCost en Shopify; cargar costo para margen real.'
+            : `Costo base tomado de la primera variante. ${flavorOptions.length || variants.length} sabores/variantes agrupadas.`,
         },
       ],
       packaging,
@@ -187,11 +192,13 @@ async function loadLiveShopifyProducts() {
       contributionMargin: price > 0 ? (price - cogsUsed - packaging - price * fees - shippingSubsidy) / price : 0,
       alert: shopifyCost === null ? 'warn' : 'ok',
       alertReason: shopifyCost === null ? 'Falta costo unitario en Shopify.' : undefined,
-      inventoryQuantity: variant.inventoryQuantity,
+      inventoryQuantity,
+      variantCount: variants.length,
+      flavorOptions,
       shopifyProductId: product.id,
       shopifyHandle: product.handle,
     };
-  }));
+  });
 }
 
 export async function registerRoutes(
