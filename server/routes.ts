@@ -79,6 +79,16 @@ function defaultPackaging(title: string) {
   return 3_000;
 }
 
+function shouldSplitProductVariants(title: string) {
+  const value = title.toLowerCase();
+  return value.includes('recarga') || value.includes('destilado');
+}
+
+function getVariantPresentation(title: string) {
+  const pieces = title.split('/').map(piece => piece.trim()).filter(Boolean);
+  return pieces.length > 1 ? pieces[pieces.length - 1] : title.trim();
+}
+
 async function loadLiveShopifyProducts() {
   type LiveVariant = {
     id: string;
@@ -139,9 +149,20 @@ async function loadLiveShopifyProducts() {
     cursor = data.products.pageInfo.endCursor;
   }
 
-  return allProducts.map(product => {
+  return allProducts.flatMap(product => {
     const variants = product.variants.edges.map(edge => edge.node);
-    const variant = variants[0];
+    const variantGroups = shouldSplitProductVariants(product.title)
+      ? Array.from(
+          variants.reduce((map, item) => {
+            const key = getVariantPresentation(item.title);
+            map.set(key, [...(map.get(key) ?? []), item]);
+            return map;
+          }, new Map<string, LiveVariant[]>())
+        ).map(([presentation, items]) => ({ presentation, variants: items }))
+      : [{ presentation: null, variants }];
+
+    return variantGroups.map(group => {
+    const variant = group.variants[0];
     const price = Number(variant.price) || 0;
     const shopifyCost = variant.inventoryItem.unitCost ? Number(variant.inventoryItem.unitCost.amount) : null;
     const cogsUsed = shopifyCost ?? 0;
@@ -152,16 +173,17 @@ async function loadLiveShopifyProducts() {
     const maxProfitableDiscount = price > 0
       ? Math.max(0, Math.min(0.7, 1 - ((cogsUsed + packaging + shippingSubsidy) / (price * (1 - fees))) / 0.30))
       : 0;
-    const flavorOptions = variants
+    const flavorOptions = group.variants
       .map(item => item.title)
       .filter(title => title && title !== 'Default Title');
-    const inventoryQuantity = variants.reduce((sum, item) => sum + (item.inventoryQuantity || 0), 0);
+    const inventoryQuantity = group.variants.reduce((sum, item) => sum + (item.inventoryQuantity || 0), 0);
+    const name = group.presentation ? `${product.title} · ${group.presentation}` : product.title;
 
     return {
-      id: product.id,
-      name: product.title,
+      id: group.presentation ? `${product.id}-${group.presentation}` : product.id,
+      name,
       family: inferProductFamily(product.title),
-      sku: variants.find(item => item.sku)?.sku ?? undefined,
+      sku: group.variants.find(item => item.sku)?.sku ?? undefined,
       active: product.status === 'ACTIVE',
       unitsSold: 0,
       unitPrice: price,
@@ -175,7 +197,7 @@ async function loadLiveShopifyProducts() {
           source: shopifyCost === null ? 'fallback' : 'shopify',
           note: shopifyCost === null
             ? 'Sin unitCost en Shopify; cargar costo para margen real.'
-            : `Costo base tomado de la primera variante. ${flavorOptions.length || variants.length} sabores/variantes agrupadas.`,
+            : `Costo base tomado de Shopify. ${flavorOptions.length || group.variants.length} variantes agrupadas en esta fila.`,
         },
       ],
       packaging,
@@ -193,11 +215,13 @@ async function loadLiveShopifyProducts() {
       alert: shopifyCost === null ? 'warn' : 'ok',
       alertReason: shopifyCost === null ? 'Falta costo unitario en Shopify.' : undefined,
       inventoryQuantity,
-      variantCount: variants.length,
+      variantCount: group.variants.length,
       flavorOptions,
+      presentation: group.presentation,
       shopifyProductId: product.id,
       shopifyHandle: product.handle,
     };
+    });
   });
 }
 
