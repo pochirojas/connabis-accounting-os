@@ -16,6 +16,7 @@ import { KpiCard } from '@/components/kpi-card';
 import { Receipt, TrendingDown, TrendingUp, AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { useMemo, useState, type FormEvent } from 'react';
 import { apiRequest, queryClient } from '@/lib/queryClient';
+import { sortByMonth, type ChartSortOrder } from '@/lib/chart-sort';
 
 const RECURRENT_SELLERS = [
   'Shopify',
@@ -57,6 +58,7 @@ export default function Gastos() {
   });
   const [exportMonth, setExportMonth] = useState('all');
   const [exportYear, setExportYear] = useState('all');
+  const [monthlySort, setMonthlySort] = useState<ChartSortOrder>('oldest');
 
   const allExpenses = useMemo(() => expenses.data ?? [], [expenses.data]);
   const manualExpenses = useMemo(() => allExpenses.filter(e => e.source === 'manual'), [allExpenses]);
@@ -87,6 +89,7 @@ export default function Gastos() {
   const lossMonths = monthsWithManual.filter(month => month.profit < 0).length;
   const monthOptions = monthsWithManual.map(month => month.month).sort().reverse();
   const yearOptions = Array.from(new Set(monthOptions.map(month => month.slice(0, 4)))).sort().reverse();
+  const monthlyChartRows = useMemo(() => sortByMonth(monthsWithManual, monthlySort), [monthsWithManual, monthlySort]);
   const sellerOptions = useMemo(() => {
     const saved = manualExpenses
       .map(expense => expense.paidTo)
@@ -306,16 +309,27 @@ export default function Gastos() {
 
       <section className="mt-6">
         <Card className="p-5 bg-card border-card-border" data-testid="card-monthly-pl">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between gap-3 mb-4">
             <div>
               <h2 className="text-sm font-semibold tracking-tight">P&L mensual</h2>
               <p className="text-xs text-muted-foreground mt-0.5">Ingresos Shopify live contra Expenses sheet + manuales</p>
             </div>
-            <Badge variant="outline" className="text-[11px]">Expenses sheet</Badge>
+            <div className="flex items-center gap-2">
+              <select
+                value={monthlySort}
+                onChange={e => setMonthlySort(e.target.value as ChartSortOrder)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-xs"
+                data-testid="select-expense-chart-sort"
+              >
+                <option value="oldest">Viejo → nuevo</option>
+                <option value="newest">Nuevo → viejo</option>
+              </select>
+              <Badge variant="outline" className="text-[11px]">Expenses sheet</Badge>
+            </div>
           </div>
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={monthsWithManual} margin={{ left: -8, right: 8, top: 8 }}>
+              <ComposedChart data={monthlyChartRows} margin={{ left: -8, right: 8, top: 8 }}>
                 <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} />
                 <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false}

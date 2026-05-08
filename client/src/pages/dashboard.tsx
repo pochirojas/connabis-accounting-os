@@ -15,6 +15,8 @@ import type { DashboardKPIs, MonthlyRow, Channel, Alert, CeoMetric } from '@shar
 import { formatCOP, formatCOPCompact, formatNumber, formatPct } from '@/lib/format';
 import { Link } from 'wouter';
 import { Button } from '@/components/ui/button';
+import { useMemo, useState } from 'react';
+import { sortByMonth, type ChartSortOrder } from '@/lib/chart-sort';
 
 const CHART_COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))'];
 
@@ -37,8 +39,10 @@ export default function Dashboard() {
   const channels = useQuery<Channel[]>({ queryKey: ['/api/channels'] });
   const alerts = useQuery<Alert[]>({ queryKey: ['/api/alerts'] });
   const ceoMetrics = useQuery<CeoMetric[]>({ queryKey: ['/api/ceo-metrics'] });
+  const [monthlySort, setMonthlySort] = useState<ChartSortOrder>('oldest');
 
   const k = kpis.data;
+  const monthlyChartRows = useMemo(() => sortByMonth(months.data ?? [], monthlySort), [months.data, monthlySort]);
 
   return (
     <Layout title="Vista general" subtitle={k ? `Datos al ${new Date(k.asOf).toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' })}` : ''}>
@@ -113,16 +117,27 @@ export default function Dashboard() {
       {/* Charts row */}
       <section className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="lg:col-span-2 p-5 bg-card border-card-border" data-testid="card-monthly-profit">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between gap-3 mb-4">
             <div>
               <h2 className="text-sm font-semibold tracking-tight">Resultado mensual 2026</h2>
               <p className="text-xs text-muted-foreground mt-0.5">Ingresos vs gastos · utilidad por mes</p>
             </div>
-            <Badge variant="outline" className="text-[11px]" data-testid="badge-source-monthly">Sheet contable</Badge>
+            <div className="flex items-center gap-2">
+              <select
+                value={monthlySort}
+                onChange={e => setMonthlySort(e.target.value as ChartSortOrder)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-xs"
+                data-testid="select-dashboard-chart-sort"
+              >
+                <option value="oldest">Viejo → nuevo</option>
+                <option value="newest">Nuevo → viejo</option>
+              </select>
+              <Badge variant="outline" className="text-[11px]" data-testid="badge-source-monthly">Sheet contable</Badge>
+            </div>
           </div>
           <div className="h-[260px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={months.data ?? []} margin={{ left: -8, right: 8, top: 8 }}>
+              <BarChart data={monthlyChartRows} margin={{ left: -8, right: 8, top: 8 }}>
                 <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} />
                 <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false}
@@ -138,7 +153,7 @@ export default function Dashboard() {
                 <Bar dataKey="income" name="Ingresos" fill="hsl(var(--chart-1))" radius={[3, 3, 0, 0]} />
                 <Bar dataKey="expenses" name="Gastos" fill="hsl(var(--chart-2))" radius={[3, 3, 0, 0]} />
                 <Bar dataKey="profit" name="Utilidad" radius={[3, 3, 0, 0]}>
-                  {(months.data ?? []).map((m, i) => (
+                  {monthlyChartRows.map((m, i) => (
                     <Cell key={i} fill={m.profit >= 0 ? 'hsl(var(--chart-3))' : 'hsl(var(--destructive))'} />
                   ))}
                 </Bar>

@@ -13,17 +13,20 @@ import { formatCOP, formatCOPCompact, formatDate, formatNumber } from '@/lib/for
 import { KpiCard } from '@/components/kpi-card';
 import { CalendarDays, Crown, Package, TrendingUp } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { sortByDate, type ChartSortOrder } from '@/lib/chart-sort';
 
 export default function Performance() {
   const daily = useQuery<DailyPerformance[]>({ queryKey: ['/api/daily-performance'] });
   const months = useQuery<MonthlyRow[]>({ queryKey: ['/api/months'] });
   const [selectedMonth, setSelectedMonth] = useState('2026-04');
   const [compareMonth, setCompareMonth] = useState('2026-03');
+  const [dailyChartSort, setDailyChartSort] = useState<ChartSortOrder>('oldest');
 
   const rows = useMemo(
     () => (daily.data ?? []).filter(r => r.month === selectedMonth).sort((a, b) => a.date.localeCompare(b.date)),
     [daily.data, selectedMonth],
   );
+  const dailyChartRows = useMemo(() => sortByDate(rows, dailyChartSort), [rows, dailyChartSort]);
   const month = (months.data ?? []).find(m => m.month === selectedMonth);
   const bestDay = rows.reduce<DailyPerformance | undefined>((best, row) => !best || row.revenue > best.revenue ? row : best, undefined);
   const bestProfitDay = rows.reduce<DailyPerformance | undefined>((best, row) => !best || row.profit > best.profit ? row : best, undefined);
@@ -158,18 +161,29 @@ export default function Performance() {
 
       <section className="mt-6">
         <Card className="p-5 bg-card border-card-border" data-testid="card-daily-chart">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between gap-3 mb-4">
             <div>
               <h2 className="text-sm font-semibold tracking-tight">Día por día</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Ingresos, gastos y utilidad de los días cargados para el mes seleccionado.
               </p>
             </div>
-            <Badge variant="outline" className="text-[11px]">Daily drilldown</Badge>
+            <div className="flex items-center gap-2">
+              <select
+                value={dailyChartSort}
+                onChange={e => setDailyChartSort(e.target.value as ChartSortOrder)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-xs"
+                data-testid="select-daily-chart-sort"
+              >
+                <option value="oldest">Viejo → nuevo</option>
+                <option value="newest">Nuevo → viejo</option>
+              </select>
+              <Badge variant="outline" className="text-[11px]">Daily drilldown</Badge>
+            </div>
           </div>
           <div className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={rows} margin={{ left: -8, right: 8, top: 8 }}>
+              <ComposedChart data={dailyChartRows} margin={{ left: -8, right: 8, top: 8 }}>
                 <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false}
                   tickFormatter={(v: string) => v.slice(5)} />

@@ -15,6 +15,7 @@ import { KpiCard } from '@/components/kpi-card';
 import { TrendingUp, ShoppingBag, BadgePercent, Calendar } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { apiRequest } from '@/lib/queryClient';
+import { sortByMonth, type ChartSortOrder } from '@/lib/chart-sort';
 
 const CHART_COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))'];
 
@@ -26,6 +27,7 @@ export default function Ingresos() {
   const [detailMonth, setDetailMonth] = useState('all');
   const [detailChannel, setDetailChannel] = useState('all');
   const [exportYear, setExportYear] = useState('all');
+  const [monthlySort, setMonthlySort] = useState<ChartSortOrder>('oldest');
 
   const yr2026 = years.data?.find(y => y.year === 2026);
   const total = years.data?.reduce((s, y) => s + y.revenue, 0) ?? 0;
@@ -49,6 +51,7 @@ export default function Ingresos() {
   const detailMonths = Array.from(new Set((incomeDetails.data ?? []).map(row => row.month))).sort().reverse();
   const detailChannels = Array.from(new Set((incomeDetails.data ?? []).map(row => row.channel))).sort();
   const yearOptions = Array.from(new Set((years.data ?? []).map(row => String(row.year)))).sort().reverse();
+  const monthlyChartRows = useMemo(() => sortByMonth(months.data ?? [], monthlySort), [months.data, monthlySort]);
 
   async function downloadIncomeCsv(scope: 'month' | 'year' | 'all') {
     const query = scope === 'month' && detailMonth !== 'all'
@@ -149,18 +152,29 @@ export default function Ingresos() {
       {/* Monthly revenue 2026 */}
       <section className="mt-6">
         <Card className="p-5 bg-card border-card-border" data-testid="card-monthly-revenue">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between gap-3 mb-4">
             <div>
               <h2 className="text-sm font-semibold tracking-tight">Ingresos mensuales</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Neto de órdenes Shopify; gastos reales se ven en Gastos & Contabilidad
               </p>
             </div>
-            <Badge variant="outline" className="text-[11px]">Shopify</Badge>
+            <div className="flex items-center gap-2">
+              <select
+                value={monthlySort}
+                onChange={e => setMonthlySort(e.target.value as ChartSortOrder)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-xs"
+                data-testid="select-income-chart-sort"
+              >
+                <option value="oldest">Viejo → nuevo</option>
+                <option value="newest">Nuevo → viejo</option>
+              </select>
+              <Badge variant="outline" className="text-[11px]">Shopify</Badge>
+            </div>
           </div>
           <div className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={months.data ?? []} margin={{ left: -8, right: 8, top: 8 }}>
+              <BarChart data={monthlyChartRows} margin={{ left: -8, right: 8, top: 8 }}>
                 <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} />
                 <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false}
@@ -171,7 +185,7 @@ export default function Ingresos() {
                   formatter={(v: number) => formatCOP(v)}
                 />
                 <Bar dataKey="income" name="Ingresos" radius={[4, 4, 0, 0]}>
-                  {(months.data ?? []).map((m, i) => (
+                  {monthlyChartRows.map((m, i) => (
                     <Cell key={i} fill={m.partial ? 'hsl(var(--muted-foreground))' : 'hsl(var(--chart-1))'} />
                   ))}
                 </Bar>
