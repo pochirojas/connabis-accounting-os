@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Response } from "express";
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import crypto from 'node:crypto';
@@ -222,6 +222,229 @@ function buildGroupedBomBreakdown(variantLegacyIds: string[]) {
   return { breakdown, total, matchedVariants: variantBoms.length };
 }
 
+function moneyAmount(value?: { shopMoney?: { amount?: string } } | null) {
+  return Number(value?.shopMoney?.amount ?? 0) || 0;
+}
+
+function monthLabel(month: string) {
+  return new Date(`${month}-02T00:00:00`).toLocaleDateString('es-CO', { month: 'short', year: 'numeric' });
+}
+
+function normalizePaymentStatus(status: string): 'paid' | 'pending' | 'refunded' | 'partially_refunded' {
+  const value = status.toLowerCase();
+  if (value.includes('refund') && value.includes('partial')) return 'partially_refunded';
+  if (value.includes('refund')) return 'refunded';
+  if (value.includes('paid')) return 'paid';
+  return 'pending';
+}
+
+function normalizeFulfillmentStatus(status: string): 'fulfilled' | 'unfulfilled' | 'partial' {
+  const value = status.toLowerCase();
+  if (value.includes('partial')) return 'partial';
+  if (value.includes('fulfilled')) return 'fulfilled';
+  return 'unfulfilled';
+}
+
+function getPeriodQuery(params: { month?: string; year?: string }) {
+  if (params.month && /^\d{4}-\d{2}$/.test(params.month)) {
+    const start = `${params.month}-01`;
+    const end = new Date(`${start}T00:00:00`);
+    end.setUTCMonth(end.getUTCMonth() + 1);
+    return `created_at:>=${start} created_at:<${end.toISOString().slice(0, 10)}`;
+  }
+  if (params.year && /^\d{4}$/.test(params.year)) {
+    const year = Number(params.year);
+    return `created_at:>=${year}-01-01 created_at:<${year + 1}-01-01`;
+  }
+  return 'created_at:>=2024-01-01';
+}
+
+type LiveIncomeOrder = {
+  id: string;
+  name: string;
+  createdAt: string;
+  displayFinancialStatus: string;
+  displayFulfillmentStatus: string;
+  sourceName: string | null;
+  totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
+  subtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+  totalDiscountsSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+  totalShippingPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+  totalRefundedSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+  customer: { numberOfOrders: string | number } | null;
+  lineItems: {
+    edges: Array<{
+      node: {
+        title: string;
+        quantity: number;
+        originalTotalSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+        discountedTotalSet: { shopMoney: { amount: string; currencyCode: string } } | null;
+        variant: { id: string; sku: string | null } | null;
+      };
+    }>;
+  };
+};
+
+async function loadLiveShopifyIncomeOrders(params: { month?: string; year?: string } = {}) {
+  const query = `
+    query LiveIncomeOrders($cursor: String, $query: String!) {
+      orders(first: 100, after: $cursor, sortKey: CREATED_AT, reverse: false, query: $query) {
+        pageInfo { hasNextPage endCursor }
+        edges {
+          node {
+            id
+            name
+            createdAt
+            displayFinancialStatus
+            displayFulfillmentStatus
+            sourceName
+            totalPriceSet { shopMoney { amount currencyCode } }
+            subtotalPriceSet { shopMoney { amount currencyCode } }
+            totalDiscountsSet { shopMoney { amount currencyCode } }
+            totalShippingPriceSet { shopMoney { amount currencyCode } }
+            totalRefundedSet { shopMoney { amount currencyCode } }
+            customer { numberOfOrders }
+            lineItems(first: 100) {
+              edges {
+                node {
+                  title
+                  quantity
+                  originalTotalSet { shopMoney { amount currencyCode } }
+                  discountedTotalSet { shopMoney { amount currencyCode } }
+                  variant { id sku }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const allOrders: LiveIncomeOrder[] = [];
+  let cursor: string | null = null;
+  let hasNextPage = true;
+  while (hasNextPage) {
+    const data = await shopifyGraphql<{
+      orders: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        edges: Array<{ node: LiveIncomeOrder }>;
+      };
+    }>(query, { cursor, query: getPeriodQuery(params) });
+    allOrders.push(...data.orders.edges.map(edge => edge.node));
+    hasNextPage = data.orders.pageInfo.hasNextPage;
+    cursor = data.orders.pageInfo.endCursor;
+  }
+  return allOrders;
+}
+
+function mapOrdersToIncomeDetails(orders: LiveIncomeOrder[]) {
+  return orders.flatMap(order => {
+    const date = order.createdAt.slice(0, 10);
+    const month = date.slice(0, 7);
+    const shipping = moneyAmount(order.totalShippingPriceSet);
+    const refunds = moneyAmount(order.totalRefundedSet);
+    const lineCount = Math.max(order.lineItems.edges.length, 1);
+    const customerOrders = Number(order.customer?.numberOfOrders ?? 1);
+
+    return order.lineItems.edges.map((edge, index) => {
+      const line = edge.node;
+      const grossRevenue = moneyAmount(line.originalTotalSet);
+      const netRevenue = moneyAmount(line.discountedTotalSet);
+      return {
+        id: `${order.id}-${index}`,
+        orderName: order.name,
+        date,
+        month,
+        channel: order.sourceName || 'Shopify',
+        customerType: customerOrders > 1 ? 'recurrente' : 'nuevo',
+        product: line.title,
+        sku: line.variant?.sku ?? '—',
+        qty: line.quantity,
+        grossRevenue,
+        discounts: Math.max(0, grossRevenue - netRevenue),
+        shipping: index === 0 ? shipping : 0,
+        refunds: index === 0 ? refunds : 0,
+        netRevenue: netRevenue + (index === 0 ? shipping - refunds : 0),
+        paymentStatus: normalizePaymentStatus(order.displayFinancialStatus),
+        fulfillmentStatus: normalizeFulfillmentStatus(order.displayFulfillmentStatus),
+      };
+    }).slice(0, lineCount);
+  });
+}
+
+function summarizeYears(orders: LiveIncomeOrder[]) {
+  const grouped = new Map<number, { orders: number; revenue: number }>();
+  for (const order of orders) {
+    const year = Number(order.createdAt.slice(0, 4));
+    const revenue = moneyAmount(order.totalPriceSet) - moneyAmount(order.totalRefundedSet);
+    const current = grouped.get(year) ?? { orders: 0, revenue: 0 };
+    grouped.set(year, { orders: current.orders + 1, revenue: current.revenue + revenue });
+  }
+  return Array.from(grouped.entries()).map(([year, row]) => ({
+    year,
+    orders: row.orders,
+    revenue: row.revenue,
+    aov: row.orders ? row.revenue / row.orders : 0,
+    projected: year === 2026 ? Math.round((row.revenue / Math.max(new Date().getMonth() + 1, 1)) * 12) : undefined,
+    note: 'Shopify live, neto de refunds disponibles',
+  })).sort((a, b) => a.year - b.year);
+}
+
+function summarizeMonths(orders: LiveIncomeOrder[]) {
+  const grouped = new Map<string, { orders: number; income: number }>();
+  for (const order of orders) {
+    const month = order.createdAt.slice(0, 7);
+    const income = moneyAmount(order.totalPriceSet) - moneyAmount(order.totalRefundedSet);
+    const current = grouped.get(month) ?? { orders: 0, income: 0 };
+    grouped.set(month, { orders: current.orders + 1, income: current.income + income });
+  }
+  return Array.from(grouped.entries()).map(([month, row]) => ({
+    month,
+    label: monthLabel(month),
+    income: row.income,
+    expenses: 0,
+    profit: row.income,
+    partial: month === new Date().toISOString().slice(0, 7),
+    note: `${row.orders} órdenes Shopify live; gastos reales se suman desde manual/contabilidad.`,
+  })).sort((a, b) => a.month.localeCompare(b.month));
+}
+
+function summarizeChannels(orders: LiveIncomeOrder[]) {
+  const grouped = new Map<string, { orders: number; revenue: number }>();
+  let totalRevenue = 0;
+  for (const order of orders) {
+    const channel = order.sourceName || 'Shopify';
+    const revenue = moneyAmount(order.totalPriceSet) - moneyAmount(order.totalRefundedSet);
+    totalRevenue += revenue;
+    const current = grouped.get(channel) ?? { orders: 0, revenue: 0 };
+    grouped.set(channel, { orders: current.orders + 1, revenue: current.revenue + revenue });
+  }
+  return Array.from(grouped.entries()).map(([name, row]) => ({
+    name,
+    orders: row.orders,
+    revenue: row.revenue,
+    share: totalRevenue ? row.revenue / totalRevenue : 0,
+  })).sort((a, b) => b.revenue - a.revenue);
+}
+
+function csvEscape(value: unknown) {
+  const text = String(value ?? '');
+  if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+function sendCsv(res: Response, filename: string, rows: Array<Record<string, unknown>>, headersOverride?: string[]) {
+  const headers = headersOverride ?? (rows[0] ? Object.keys(rows[0]) : ['empty']);
+  const csv = [
+    headers.map(csvEscape).join(','),
+    ...rows.map(row => headers.map(header => csvEscape(row[header])).join(',')),
+  ].join('\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(`\uFEFF${csv}`);
+}
+
 async function loadLiveShopifyProducts() {
   type LiveVariant = {
     id: string;
@@ -369,9 +592,51 @@ export async function registerRoutes(
 ): Promise<Server> {
   // KPIs / dashboard
   app.get('/api/kpis', (_req, res) => res.json(kpis));
-  app.get('/api/channels', (_req, res) => res.json(channels));
-  app.get('/api/years', (_req, res) => res.json(years));
-  app.get('/api/months', (_req, res) => res.json(months));
+  app.get('/api/channels', async (_req, res) => {
+    try {
+      res.json(summarizeChannels(await loadLiveShopifyIncomeOrders()));
+    } catch {
+      res.json([]);
+    }
+  });
+  app.get('/api/years', async (_req, res) => {
+    try {
+      res.json(summarizeYears(await loadLiveShopifyIncomeOrders()));
+    } catch {
+      res.json([]);
+    }
+  });
+  app.get('/api/months', async (_req, res) => {
+    try {
+      const orders = await loadLiveShopifyIncomeOrders();
+      const manualExpenses = await storage.listManualExpenses();
+      const expenseByMonth = manualExpenses.reduce((map, expense) => {
+        map.set(expense.month, (map.get(expense.month) ?? 0) + expense.amount);
+        return map;
+      }, new Map<string, number>());
+      const liveMonths = summarizeMonths(orders);
+      const existing = new Set(liveMonths.map(month => month.month));
+      expenseByMonth.forEach((expenseAmount, month) => {
+        if (!existing.has(month)) {
+          liveMonths.push({
+            month,
+            label: monthLabel(month),
+            income: 0,
+            expenses: expenseAmount,
+            profit: -expenseAmount,
+            partial: true,
+            note: 'Mes creado por gasto real/manual.',
+          });
+        }
+      });
+      res.json(liveMonths.map(month => {
+        const expenses = expenseByMonth.get(month.month) ?? month.expenses;
+        return { ...month, expenses, profit: month.income - expenses };
+      }).sort((a, b) => a.month.localeCompare(b.month)));
+    } catch {
+      res.json([]);
+    }
+  });
   app.get('/api/ceo-metrics', async (_req, res) => {
     const accounts = await storage.listCashAccounts();
     const netCash = accounts.reduce((sum, account) => {
@@ -391,10 +656,71 @@ export async function registerRoutes(
   });
   app.get('/api/materials', (_req, res) => res.json(materials));
   app.get('/api/purchase-orders', (_req, res) => res.json(purchaseOrders));
-  app.get('/api/income-details', (_req, res) => res.json(incomeDetails));
+  app.get('/api/income-details', async (req, res) => {
+    try {
+      const month = typeof req.query.month === 'string' ? req.query.month : undefined;
+      const year = typeof req.query.year === 'string' ? req.query.year : undefined;
+      res.json(mapOrdersToIncomeDetails(await loadLiveShopifyIncomeOrders({ month, year })));
+    } catch {
+      res.json([]);
+    }
+  });
   app.get('/api/expenses', async (_req, res) => {
     const manualExpenses = await storage.listManualExpenses();
-    res.json([...manualExpenses, ...expenses]);
+    res.json(manualExpenses);
+  });
+  app.get('/api/export/income.csv', async (req, res) => {
+    try {
+      const month = typeof req.query.month === 'string' ? req.query.month : undefined;
+      const year = typeof req.query.year === 'string' ? req.query.year : undefined;
+      const rows = mapOrdersToIncomeDetails(await loadLiveShopifyIncomeOrders({ month, year })).map(row => ({
+        orden: row.orderName,
+        fecha: row.date,
+        mes: row.month,
+        canal: row.channel,
+        producto: row.product,
+        sku: row.sku,
+        cantidad: row.qty,
+        bruto_cop: Math.round(row.grossRevenue),
+        descuentos_cop: Math.round(row.discounts),
+        envio_cobrado_cop: Math.round(row.shipping),
+        devoluciones_cop: Math.round(row.refunds),
+        neto_cop: Math.round(row.netRevenue),
+        estado_pago: row.paymentStatus,
+        estado_fulfillment: row.fulfillmentStatus,
+      }));
+      sendCsv(res, `connabis-ingresos-${month ?? year ?? 'all-time'}.csv`, rows, [
+        'orden', 'fecha', 'mes', 'canal', 'producto', 'sku', 'cantidad', 'bruto_cop',
+        'descuentos_cop', 'envio_cobrado_cop', 'devoluciones_cop', 'neto_cop',
+        'estado_pago', 'estado_fulfillment',
+      ]);
+    } catch (error) {
+      res.status(502).json({ error: error instanceof Error ? error.message : 'shopify_income_export_failed' });
+    }
+  });
+  app.get('/api/export/expenses.csv', async (req, res) => {
+    const month = typeof req.query.month === 'string' ? req.query.month : undefined;
+    const year = typeof req.query.year === 'string' ? req.query.year : undefined;
+    const rows = (await storage.listManualExpenses())
+      .filter(expense => !month || expense.month === month)
+      .filter(expense => !year || expense.month.startsWith(`${year}-`))
+      .map(expense => ({
+        fecha: expense.date,
+        mes: expense.month,
+        categoria: expense.category,
+        descripcion: expense.description,
+        pagado_a: expense.paidTo ?? '',
+        pagado_con: expense.paidWith ?? '',
+        moneda: expense.currency ?? 'COP',
+        monto_original: expense.originalAmount ?? expense.amount,
+        trm: expense.fxRate ?? '',
+        monto_cop: Math.round(expense.amount),
+        origen: expense.source,
+      }));
+    sendCsv(res, `connabis-gastos-${month ?? year ?? 'all-time'}.csv`, rows, [
+      'fecha', 'mes', 'categoria', 'descripcion', 'pagado_a', 'pagado_con',
+      'moneda', 'monto_original', 'trm', 'monto_cop', 'origen',
+    ]);
   });
   app.post('/api/expenses', async (req, res) => {
     const parsed = insertExpenseSchema.safeParse(req.body);
@@ -485,7 +811,7 @@ export async function registerRoutes(
         scopes,
         hasReadProducts: scopes.includes('read_products'),
         hasReadOrders: scopes.includes('read_orders'),
-        note: 'Shopify Admin API conectado en modo solo lectura. Los dashboards principales siguen en seed hasta activar sync persistente.',
+        note: 'Shopify Admin API conectado en modo solo lectura. Ingresos, productos y exportaciones salen de Shopify live; gastos salen solo de registros manuales reales hasta conectar bancos/contabilidad.',
       });
     } catch (error) {
       res.json({

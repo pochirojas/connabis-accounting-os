@@ -1,6 +1,7 @@
 import { Layout } from '@/components/layout';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { useQuery } from '@tanstack/react-query';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -13,6 +14,7 @@ import { formatCOP, formatCOPCompact, formatNumber, formatPct } from '@/lib/form
 import { KpiCard } from '@/components/kpi-card';
 import { TrendingUp, ShoppingBag, BadgePercent, Calendar } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { apiRequest } from '@/lib/queryClient';
 
 const CHART_COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))'];
 
@@ -23,10 +25,12 @@ export default function Ingresos() {
   const incomeDetails = useQuery<IncomeDetail[]>({ queryKey: ['/api/income-details'] });
   const [detailMonth, setDetailMonth] = useState('all');
   const [detailChannel, setDetailChannel] = useState('all');
+  const [exportYear, setExportYear] = useState('all');
 
   const yr2026 = years.data?.find(y => y.year === 2026);
   const total = years.data?.reduce((s, y) => s + y.revenue, 0) ?? 0;
   const totalOrders = years.data?.reduce((s, y) => s + y.orders, 0) ?? 0;
+  const aov = totalOrders ? total / totalOrders : 0;
   const filteredDetails = useMemo(() => {
     return (incomeDetails.data ?? [])
       .filter(row => detailMonth === 'all' || row.month === detailMonth)
@@ -44,13 +48,30 @@ export default function Ingresos() {
   }, { gross: 0, discounts: 0, shipping: 0, refunds: 0, net: 0, qty: 0 });
   const detailMonths = Array.from(new Set((incomeDetails.data ?? []).map(row => row.month))).sort().reverse();
   const detailChannels = Array.from(new Set((incomeDetails.data ?? []).map(row => row.channel))).sort();
+  const yearOptions = Array.from(new Set((years.data ?? []).map(row => String(row.year)))).sort().reverse();
+
+  async function downloadIncomeCsv(scope: 'month' | 'year' | 'all') {
+    const query = scope === 'month' && detailMonth !== 'all'
+      ? `?month=${detailMonth}`
+      : scope === 'year' && exportYear !== 'all'
+      ? `?year=${exportYear}`
+      : '';
+    const response = await apiRequest('GET', `/api/export/income.csv${query}`);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `connabis-ingresos-${scope === 'month' && detailMonth !== 'all' ? detailMonth : scope === 'year' && exportYear !== 'all' ? exportYear : 'all-time'}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <Layout title="Ingresos" subtitle="Shopify es la fuente de verdad · all-time, por año y por canal">
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard label="Ingresos all-time" value={formatCOP(94_107_261)} icon={TrendingUp} emphasis="emerald" testId="kpi-ingresos-all" />
-        <KpiCard label="Órdenes all-time" value={formatNumber(663)} icon={ShoppingBag} testId="kpi-ordenes-all" />
-        <KpiCard label="AOV all-time" value={formatCOP(130_328)} icon={BadgePercent} testId="kpi-aov-all" />
+        <KpiCard label="Ingresos all-time" value={formatCOP(total)} icon={TrendingUp} emphasis="emerald" testId="kpi-ingresos-all" hint="Shopify live" />
+        <KpiCard label="Órdenes all-time" value={formatNumber(totalOrders)} icon={ShoppingBag} testId="kpi-ordenes-all" hint="Shopify live" />
+        <KpiCard label="AOV all-time" value={formatCOP(aov)} icon={BadgePercent} testId="kpi-aov-all" hint="Neto / órdenes" />
         <KpiCard label="Proyección 2026" value={yr2026?.projected ? formatCOP(yr2026.projected) : '—'} icon={Calendar} emphasis="gold" testId="kpi-proy-2026" hint="Realista" />
       </section>
 
@@ -88,10 +109,10 @@ export default function Ingresos() {
               ))}
               <TableRow className="border-t-2 bg-muted/30">
                 <TableCell className="font-semibold">All-time</TableCell>
-                <TableCell className="text-right font-semibold tabular">663</TableCell>
-                <TableCell className="text-right font-semibold tabular">{formatCOP(94_107_261)}</TableCell>
-                <TableCell className="text-right font-semibold tabular">{formatCOP(130_328)}</TableCell>
-                <TableCell colSpan={2} className="text-[11px] text-muted-foreground">Cifras anuales son aproximadas; all-time desde Shopify</TableCell>
+                <TableCell className="text-right font-semibold tabular">{formatNumber(totalOrders)}</TableCell>
+                <TableCell className="text-right font-semibold tabular">{formatCOP(total)}</TableCell>
+                <TableCell className="text-right font-semibold tabular">{formatCOP(aov)}</TableCell>
+                <TableCell colSpan={2} className="text-[11px] text-muted-foreground">Cifras calculadas desde Shopify live</TableCell>
               </TableRow>
             </TableBody>
           </Table>
@@ -130,9 +151,9 @@ export default function Ingresos() {
         <Card className="p-5 bg-card border-card-border" data-testid="card-monthly-revenue">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-sm font-semibold tracking-tight">Ingresos mensuales 2026</h2>
+              <h2 className="text-sm font-semibold tracking-tight">Ingresos mensuales</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Récord en abril: 75 órdenes, 13.3M COP, AOV ~177K
+                Neto de órdenes Shopify; gastos reales se ven en Gastos & Contabilidad
               </p>
             </div>
             <Badge variant="outline" className="text-[11px]">Shopify</Badge>
@@ -166,11 +187,10 @@ export default function Ingresos() {
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-sm font-semibold tracking-tight">Detalle de ingresos</h2>
-                <Badge variant="outline" className="text-[11px]">Shopify Orders · seed</Badge>
+                <Badge variant="outline" className="text-[11px]">Shopify Orders · live</Badge>
               </div>
               <p className="text-xs text-muted-foreground mt-1 max-w-3xl leading-relaxed">
-                Vista prototipo de órdenes, canal, producto, descuentos, envíos, devoluciones e ingreso neto.
-                Al conectar API, esta tabla debe venir directo de Shopify Orders + Line Items.
+                Detalle real de órdenes, canal, producto, descuentos, envíos, devoluciones e ingreso neto desde Shopify.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -196,6 +216,24 @@ export default function Ingresos() {
                   <option key={channel} value={channel}>{channel}</option>
                 ))}
               </select>
+              <select
+                value={exportYear}
+                onChange={e => setExportYear(e.target.value)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-xs"
+                data-testid="select-income-export-year"
+              >
+                <option value="all">Todos los años</option>
+                {yearOptions.map(year => <option key={year} value={year}>{year}</option>)}
+              </select>
+              <Button type="button" variant="outline" size="sm" onClick={() => downloadIncomeCsv('month')} disabled={detailMonth === 'all'} data-testid="button-export-income-month">
+                Exportar mes
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => downloadIncomeCsv('year')} disabled={exportYear === 'all'} data-testid="button-export-income-year">
+                Exportar año
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => downloadIncomeCsv('all')} data-testid="button-export-income-all">
+                Exportar todo
+              </Button>
             </div>
           </div>
 

@@ -55,23 +55,17 @@ export default function Gastos() {
     originalAmount: '',
     fxRate: '',
   });
+  const [exportMonth, setExportMonth] = useState('all');
+  const [exportYear, setExportYear] = useState('all');
 
-  const totalIncome = 94_107_261;
   const allExpenses = useMemo(() => expenses.data ?? [], [expenses.data]);
   const manualExpenses = useMemo(() => allExpenses.filter(e => e.source === 'manual'), [allExpenses]);
   const manualTotal = manualExpenses.reduce((s, e) => s + e.amount, 0);
-  const totalExpenses = 92_090_654 + manualTotal;
-  const totalProfit = totalIncome - totalExpenses;
   const monthsWithManual = useMemo(() => {
+    const base = [...(months.data ?? [])];
+    const existing = new Set(base.map(month => month.month));
     const byMonth = new Map<string, number>();
     manualExpenses.forEach(expense => byMonth.set(expense.month, (byMonth.get(expense.month) ?? 0) + expense.amount));
-    const base = (months.data ?? []).map(month => {
-      const extra = byMonth.get(month.month) ?? 0;
-      return extra > 0
-        ? { ...month, expenses: month.expenses + extra, profit: month.profit - extra, note: `${month.note ?? ''} + gastos manuales guardados`.trim() }
-        : month;
-    });
-    const existing = new Set(base.map(month => month.month));
     byMonth.forEach((amount, month) => {
       if (!existing.has(month)) {
         base.push({
@@ -87,7 +81,12 @@ export default function Gastos() {
     });
     return base.sort((a, b) => a.month.localeCompare(b.month));
   }, [manualExpenses, months.data]);
+  const totalIncome = monthsWithManual.reduce((sum, month) => sum + month.income, 0);
+  const totalExpenses = monthsWithManual.reduce((sum, month) => sum + month.expenses, 0);
+  const totalProfit = totalIncome - totalExpenses;
   const lossMonths = monthsWithManual.filter(month => month.profit < 0).length;
+  const monthOptions = monthsWithManual.map(month => month.month).sort().reverse();
+  const yearOptions = Array.from(new Set(monthOptions.map(month => month.slice(0, 4)))).sort().reverse();
   const sellerOptions = useMemo(() => {
     const saved = manualExpenses
       .map(expense => expense.paidTo)
@@ -139,11 +138,27 @@ export default function Gastos() {
     });
   }
 
+  async function downloadExpensesCsv(scope: 'month' | 'year' | 'all') {
+    const query = scope === 'month' && exportMonth !== 'all'
+      ? `?month=${exportMonth}`
+      : scope === 'year' && exportYear !== 'all'
+      ? `?year=${exportYear}`
+      : '';
+    const response = await apiRequest('GET', `/api/export/expenses.csv${query}`);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `connabis-gastos-${scope === 'month' && exportMonth !== 'all' ? exportMonth : scope === 'year' && exportYear !== 'all' ? exportYear : 'all-time'}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
-    <Layout title="Gastos & Contabilidad" subtitle="Resumen mensual desde la hoja contable · Shopify cubre fees, refunds y envíos">
+    <Layout title="Gastos & Contabilidad" subtitle="Ingresos desde Shopify live · gastos solo reales/manuales hasta conectar bancos/contabilidad">
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard label="Ingresos totales" value={formatCOP(totalIncome)} icon={TrendingUp} emphasis="emerald" testId="kpi-gastos-ingresos" />
-        <KpiCard label="Gastos totales" value={formatCOP(totalExpenses)} icon={Receipt} testId="kpi-gastos-totales" />
+        <KpiCard label="Gastos reales" value={formatCOP(totalExpenses)} icon={Receipt} testId="kpi-gastos-totales" hint="Manual/persistente" />
         <KpiCard label="Utilidad" value={formatCOP(totalProfit)} icon={totalProfit >= 0 ? TrendingUp : TrendingDown} emphasis="gold" testId="kpi-gastos-utilidad" />
         <KpiCard label="Meses con pérdida" value={`${lossMonths} / ${monthsWithManual.length || 5}`} icon={AlertTriangle} testId="kpi-meses-perdida" hint="Incluye manuales guardados" />
       </section>
@@ -154,10 +169,10 @@ export default function Gastos() {
             <div>
               <h2 className="text-sm font-semibold tracking-tight">Agregar gasto manual</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Guarda gastos manuales en SQLite del prototipo. Luego se reconciliarán con Shopify, bancos y contabilidad.
+                Guarda gastos reales. Ya no se suman gastos seed; lo que no ingreses aquí no se cuenta como gasto.
               </p>
             </div>
-            <Badge variant="outline" className="text-[11px]">Persistente pre-API</Badge>
+            <Badge variant="outline" className="text-[11px]">Real/manual</Badge>
           </div>
           <form onSubmit={addExpense} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[140px_150px_180px_1fr_150px_120px_170px_auto] gap-3 items-end">
             <label className="space-y-1.5">
@@ -293,10 +308,10 @@ export default function Gastos() {
         <Card className="p-5 bg-card border-card-border" data-testid="card-monthly-pl">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-sm font-semibold tracking-tight">P&L mensual 2026</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Ingresos, gastos y utilidad por mes</p>
+              <h2 className="text-sm font-semibold tracking-tight">P&L mensual</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Ingresos Shopify live contra gastos reales/manuales</p>
             </div>
-            <Badge variant="outline" className="text-[11px]">Sheet contable</Badge>
+            <Badge variant="outline" className="text-[11px]">Sin seed</Badge>
           </div>
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -323,8 +338,23 @@ export default function Gastos() {
       <section className="mt-6">
         <Card className="p-5 bg-card border-card-border" data-testid="card-monthly-table">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold tracking-tight">Resumen mensual</h2>
-            <Badge variant="outline" className="text-[11px]">{monthsWithManual.length || 5} meses</Badge>
+            <div>
+              <h2 className="text-sm font-semibold tracking-tight">Resumen mensual</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Ingresos y gastos exportables por mes o año.</p>
+            </div>
+            <div className="flex flex-wrap gap-2 justify-end">
+              <select value={exportMonth} onChange={e => setExportMonth(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-xs" data-testid="select-expense-export-month">
+                <option value="all">Todos los meses</option>
+                {monthOptions.map(month => <option key={month} value={month}>{month}</option>)}
+              </select>
+              <select value={exportYear} onChange={e => setExportYear(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-xs" data-testid="select-expense-export-year">
+                <option value="all">Todos los años</option>
+                {yearOptions.map(year => <option key={year} value={year}>{year}</option>)}
+              </select>
+              <Button type="button" variant="outline" size="sm" onClick={() => downloadExpensesCsv('month')} disabled={exportMonth === 'all'} data-testid="button-export-expenses-month">Exportar mes</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => downloadExpensesCsv('year')} disabled={exportYear === 'all'} data-testid="button-export-expenses-year">Exportar año</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => downloadExpensesCsv('all')} data-testid="button-export-expenses-all">Exportar todo</Button>
+            </div>
           </div>
           <Table>
             <TableHeader>
@@ -373,7 +403,7 @@ export default function Gastos() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-sm font-semibold tracking-tight">Detalle de gastos</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Origen: Shopify (fees, envíos) · Sheet (inventario, marketing, operación)</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Origen actual: gastos manuales reales guardados en la app. Sheet/seed queda fuera de totales.</p>
             </div>
           </div>
           <Table>
