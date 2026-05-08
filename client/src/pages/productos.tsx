@@ -21,6 +21,7 @@ import { Input } from '@/components/ui/input';
 
 export default function Productos() {
   const products = useQuery<Product[]>({ queryKey: ['/api/products'] });
+  const shopifyStatus = useQuery<{ connected: boolean; mode: string }>({ queryKey: ['/api/shopify/status'] });
   const [overrides, setOverrides] = useState<Record<string, number>>({});
   const [search, setSearch] = useState('');
   const [family, setFamily] = useState('Todas');
@@ -53,33 +54,37 @@ export default function Productos() {
   }, [computed, family, search]);
   const selected = computed.find(p => p.id === selectedId) ?? computed[0];
 
-  const totalRev = computed.reduce((s, p) => s + p.revenue, 0);
   const avgGM = computed.length ? computed.reduce((s, p) => s + p.grossMargin, 0) / computed.length : 0;
   const avgCM = computed.length ? computed.reduce((s, p) => s + p.contributionMargin, 0) / computed.length : 0;
-  const danger = computed.filter(p => p.alert === 'danger').length;
+  const missingCosts = computed.filter(p => p.cogsSource === 'fallback').length;
+  const isLive = Boolean(shopifyStatus.data?.connected);
 
   return (
     <Layout
       title="Productos & Márgenes"
-      subtitle="Phase 1: solo productos activos de Shopify · precios/costos actuales son seed incompleto hasta conectar API + Material Manager"
+      subtitle={isLive ? 'Productos activos de Shopify · precios y costos unitarios leídos en modo solo lectura' : 'Phase 1: seed incompleto hasta conectar Shopify'}
     >
-      <Card className="mb-6 p-4 border-amber-500/30 bg-amber-500/8" data-testid="banner-product-data-prototype">
+      <Card className={`mb-6 p-4 ${isLive ? 'border-emerald-500/30 bg-emerald-500/8' : 'border-amber-500/30 bg-amber-500/8'}`} data-testid="banner-product-data-prototype">
         <div className="flex gap-3">
-          <AlertTriangle className="h-5 w-5 text-amber-300 shrink-0 mt-0.5" />
+          <AlertTriangle className={`h-5 w-5 shrink-0 mt-0.5 ${isLive ? 'text-emerald-300' : 'text-amber-300'}`} />
           <div>
-            <h2 className="text-sm font-semibold text-amber-200">Datos incompletos a propósito</h2>
+            <h2 className={`text-sm font-semibold ${isLive ? 'text-emerald-200' : 'text-amber-200'}`}>
+              {isLive ? 'Catálogo activo conectado' : 'Datos incompletos a propósito'}
+            </h2>
             <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-              Esta tabla todavía no contiene todo el catálogo real. Cuando conectemos la API, Productos & Márgenes usará únicamente productos activos de Shopify y tomará costos/márgenes desde Shopify + Material Manager. No uses estos precios seed para decidir cambios reales.
+              {isLive
+                ? 'Esta vista usa todos los productos activos disponibles vía Shopify Admin API. Ingresos/unidades por SKU siguen en 0 hasta conectar el histórico de órdenes por variante.'
+                : 'Esta tabla todavía no contiene todo el catálogo real. Cuando conectemos la API, Productos & Márgenes usará únicamente productos activos de Shopify.'}
             </p>
           </div>
         </div>
       </Card>
 
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard label="Ingresos top SKUs" value={formatCOP(totalRev)} icon={Package} emphasis="emerald" testId="kpi-prod-ingresos" />
+        <KpiCard label="SKUs activos" value={formatNumber(computed.length)} icon={Package} emphasis="emerald" testId="kpi-prod-ingresos" />
         <KpiCard label="Margen bruto promedio" value={formatPct(avgGM, 1)} icon={ShieldCheck} testId="kpi-gm-prom" hint="(Precio − COGS) / Precio" />
         <KpiCard label="Margen contribución" value={formatPct(avgCM, 1)} icon={ShieldCheck} emphasis="gold" testId="kpi-cm-prom" hint="Después de fees, packaging, envío" />
-        <KpiCard label="SKUs en riesgo" value={`${danger}`} icon={ShieldAlert} testId="kpi-skus-riesgo" hint="CM < 10%" />
+        <KpiCard label="SKUs sin costo" value={`${missingCosts}`} icon={ShieldAlert} testId="kpi-skus-riesgo" hint="Variantes sin unitCost en Shopify" />
       </section>
 
       <section className="mt-6">
@@ -88,7 +93,7 @@ export default function Productos() {
             <div>
               <h2 className="text-sm font-semibold tracking-tight">Selector de producto</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Busca cualquier producto cargado en la app y abre su desglose de costo. Cuando conectemos Shopify, este selector traerá todo el catálogo real.
+                Busca cualquier producto activo de Shopify y abre su desglose de costo, precio ideal, competencia placeholder y descuento máximo rentable.
               </p>
             </div>
             <Badge variant="outline" className="text-[11px]">{computed.length} productos</Badge>
@@ -291,7 +296,7 @@ export default function Productos() {
                     <TableCell className="font-medium text-[13px] leading-snug max-w-[300px]">
                       <div>{p.name}</div>
                       <div className="text-[11px] text-muted-foreground tabular mt-0.5">
-                        {p.sku ?? 'sin SKU'} · {formatNumber(p.unitsSold)} u · {formatCOP(p.revenue)}
+                        {p.sku ?? 'sin SKU'} · stock {formatNumber((p as Product & { inventoryQuantity?: number }).inventoryQuantity ?? 0)} · {p.revenue > 0 ? formatCOP(p.revenue) : 'ingresos por SKU pendiente'}
                       </div>
                     </TableCell>
                   <TableCell><Badge variant="outline" className="text-[10.5px]">{p.family}</Badge></TableCell>

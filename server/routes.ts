@@ -60,6 +60,140 @@ async function shopifyGraphql<T>(query: string, variables?: Record<string, unkno
   return payload.data as T;
 }
 
+function inferProductFamily(title: string) {
+  const value = title.toLowerCase();
+  if (value.includes('soluble')) return 'Solubles';
+  if (value.includes('melena') || value.includes('cola de pavo') || value.includes('reishi') || value.includes('ganoderma')) return 'Hongos funcionales';
+  if (value.includes('cartucho')) return 'Cartuchos';
+  if (value.includes('desechable')) return 'Desechables';
+  if (value.includes('recarga') || value.includes('jeringa')) return 'Recargas';
+  if (value.includes('kit') || value.includes('bundle')) return 'Bundles';
+  return 'Shopify activo';
+}
+
+function defaultPackaging(title: string) {
+  const value = title.toLowerCase();
+  if (value.includes('cartucho') || value.includes('desechable')) return 3_500;
+  if (value.includes('recarga') || value.includes('jeringa')) return 2_500;
+  if (value.includes('soluble') || value.includes('melena') || value.includes('cola de pavo') || value.includes('reishi')) return 4_500;
+  return 3_000;
+}
+
+async function loadLiveShopifyProducts() {
+  type LiveVariant = {
+    id: string;
+    title: string;
+    sku: string | null;
+    price: string;
+    inventoryQuantity: number;
+    inventoryItem: { id: string; tracked: boolean; unitCost: { amount: string; currencyCode: string } | null };
+  };
+  type LiveProduct = {
+    id: string;
+    title: string;
+    status: string;
+    handle: string;
+    variants: { edges: Array<{ node: LiveVariant }> };
+  };
+
+  const query = `
+    query LiveProducts($cursor: String) {
+      products(first: 100, after: $cursor, query: "status:active") {
+        pageInfo { hasNextPage endCursor }
+        edges {
+          node {
+            id
+            title
+            status
+            handle
+            variants(first: 100) {
+              edges {
+                node {
+                  id
+                  title
+                  sku
+                  price
+                  inventoryQuantity
+                  inventoryItem { id tracked unitCost { amount currencyCode } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const allProducts: LiveProduct[] = [];
+  let cursor: string | null = null;
+  let hasNextPage = true;
+  while (hasNextPage) {
+    const data = await shopifyGraphql<{
+      products: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        edges: Array<{ node: LiveProduct }>;
+      };
+    }>(query, { cursor });
+    allProducts.push(...data.products.edges.map(edge => edge.node));
+    hasNextPage = data.products.pageInfo.hasNextPage;
+    cursor = data.products.pageInfo.endCursor;
+  }
+
+  return allProducts.flatMap(product => product.variants.edges.map(edge => {
+    const variant = edge.node;
+    const price = Number(variant.price) || 0;
+    const shopifyCost = variant.inventoryItem.unitCost ? Number(variant.inventoryItem.unitCost.amount) : null;
+    const cogsUsed = shopifyCost ?? 0;
+    const packaging = defaultPackaging(product.title);
+    const fees = 0.035;
+    const shippingSubsidy = 0;
+    const idealPrice = cogsUsed > 0 ? Math.ceil((cogsUsed + packaging + shippingSubsidy) / (1 - fees - 0.45) / 100) * 100 : price;
+    const maxProfitableDiscount = price > 0
+      ? Math.max(0, Math.min(0.7, 1 - ((cogsUsed + packaging + shippingSubsidy) / (price * (1 - fees))) / 0.30))
+      : 0;
+    const variantLabel = variant.title && variant.title !== 'Default Title' ? ` · ${variant.title}` : '';
+    const name = `${product.title}${variantLabel}`;
+
+    return {
+      id: variant.id,
+      name,
+      family: inferProductFamily(product.title),
+      sku: variant.sku ?? undefined,
+      active: product.status === 'ACTIVE',
+      unitsSold: 0,
+      unitPrice: price,
+      revenue: 0,
+      cogsShopify: shopifyCost,
+      cogsFallback: 0,
+      cogsBreakdown: [
+        {
+          label: 'Costo unitario Shopify',
+          amount: cogsUsed,
+          source: shopifyCost === null ? 'fallback' : 'shopify',
+          note: shopifyCost === null ? 'Sin unitCost en Shopify; cargar costo para margen real.' : `Inventory item ${variant.inventoryItem.id}`,
+        },
+      ],
+      packaging,
+      fees,
+      shippingSubsidy,
+      cogsUsed,
+      cogsSource: shopifyCost === null ? 'fallback' : 'shopify',
+      marginSource: 'shopify',
+      dataCompleteness: shopifyCost === null ? 'partial' : 'real',
+      idealPrice,
+      competitorPrice: price,
+      maxProfitableDiscount,
+      grossMargin: price > 0 ? (price - cogsUsed) / price : 0,
+      contributionMargin: price > 0 ? (price - cogsUsed - packaging - price * fees - shippingSubsidy) / price : 0,
+      alert: shopifyCost === null ? 'warn' : 'ok',
+      alertReason: shopifyCost === null ? 'Falta costo unitario en Shopify.' : undefined,
+      inventoryQuantity: variant.inventoryQuantity,
+      shopifyProductId: product.id,
+      shopifyHandle: product.handle,
+    };
+  }));
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -79,7 +213,13 @@ export async function registerRoutes(
   });
 
   // Tabs
-  app.get('/api/products', (_req, res) => res.json(products));
+  app.get('/api/products', async (_req, res) => {
+    try {
+      res.json(await loadLiveShopifyProducts());
+    } catch {
+      res.json(products);
+    }
+  });
   app.get('/api/materials', (_req, res) => res.json(materials));
   app.get('/api/purchase-orders', (_req, res) => res.json(purchaseOrders));
   app.get('/api/income-details', (_req, res) => res.json(incomeDetails));
@@ -195,67 +335,7 @@ export async function registerRoutes(
 
   app.get('/api/shopify/products-live', async (_req, res) => {
     try {
-      const data = await shopifyGraphql<{
-        products: {
-          edges: Array<{
-            node: {
-              id: string;
-              title: string;
-              status: string;
-              handle: string;
-              variants: {
-                edges: Array<{
-                  node: {
-                    id: string;
-                    title: string;
-                    sku: string | null;
-                    price: string;
-                    inventoryQuantity: number;
-                    inventoryItem: { id: string; tracked: boolean; unitCost: { amount: string; currencyCode: string } | null };
-                  };
-                }>;
-              };
-            };
-          }>;
-        };
-      }>(`
-        query LiveProducts {
-          products(first: 50, query: "status:active") {
-            edges {
-              node {
-                id
-                title
-                status
-                handle
-                variants(first: 50) {
-                  edges {
-                    node {
-                      id
-                      title
-                      sku
-                      price
-                      inventoryQuantity
-                      inventoryItem { id tracked unitCost { amount currencyCode } }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      `);
-      res.json(data.products.edges.map(edge => {
-        const variants = edge.node.variants.edges.map(variantEdge => variantEdge.node);
-        return {
-          id: edge.node.id,
-          title: edge.node.title,
-          status: edge.node.status,
-          handle: edge.node.handle,
-          variantCount: variants.length,
-          costedVariantCount: variants.filter(variant => variant.inventoryItem.unitCost).length,
-          variants,
-        };
-      }));
+      res.json(await loadLiveShopifyProducts());
     } catch (error) {
       res.status(502).json({ error: error instanceof Error ? error.message : 'shopify_products_failed' });
     }
