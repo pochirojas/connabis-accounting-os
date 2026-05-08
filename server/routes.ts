@@ -12,6 +12,54 @@ import {
   ceoMetrics, pnlRows, cashFlowSnapshots, inventoryAccountingRows, closeChecklist,
 } from './seed';
 
+const SHOPIFY_API_VERSION = '2026-04';
+
+async function getShopifyAccessToken() {
+  const clientId = process.env.SHOPIFY_CLIENT_ID;
+  const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
+  const shop = process.env.SHOPIFY_SHOP_DOMAIN || '2f979e-24.myshopify.com';
+
+  if (!clientId || !clientSecret) {
+    throw new Error('missing_shopify_credentials');
+  }
+
+  const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: clientId,
+      client_secret: clientSecret,
+    }),
+  });
+  const data = await response.json() as { access_token?: string; error?: string; error_description?: string };
+
+  if (!response.ok || !data.access_token) {
+    throw new Error(data.error_description || data.error || 'shopify_token_exchange_failed');
+  }
+
+  return { token: data.access_token, shop };
+}
+
+async function shopifyGraphql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+  const { token, shop } = await getShopifyAccessToken();
+  const response = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
+    method: 'POST',
+    headers: {
+      'X-Shopify-Access-Token': token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  const payload = await response.json() as { data?: T; errors?: Array<{ message: string }> };
+
+  if (!response.ok || payload.errors?.length) {
+    throw new Error(payload.errors?.map(error => error.message).join('; ') || `shopify_graphql_${response.status}`);
+  }
+
+  return payload.data as T;
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -105,15 +153,152 @@ export async function registerRoutes(
     res.json(merged.find(item => item.id === req.params.id));
   });
 
-  // Shopify connection status (placeholder — no live OAuth in MVP)
-  app.get('/api/shopify/status', (_req, res) => res.json({
-    connected: false,
-    mode: 'mock-seed',
-    shopDomain: null,
-    apiVersion: null,
-    lastSync: null,
-    note: 'MVP usa datos sembrados. Ver Plan de integración para conectar Shopify Admin API.',
-  }));
+  app.get('/api/shopify/status', async (_req, res) => {
+    try {
+      const data = await shopifyGraphql<{
+        shop: { name: string; myshopifyDomain: string; primaryDomain: { host: string; url: string } };
+        currentAppInstallation: { accessScopes: Array<{ handle: string }> };
+      }>(`
+        query ShopifyStatus {
+          shop { name myshopifyDomain primaryDomain { host url } }
+          currentAppInstallation { accessScopes { handle } }
+        }
+      `);
+      const scopes = data.currentAppInstallation.accessScopes.map(scope => scope.handle);
+      res.json({
+        connected: true,
+        mode: 'live-read-only',
+        shopName: data.shop.name,
+        shopDomain: data.shop.myshopifyDomain,
+        primaryDomain: data.shop.primaryDomain.host,
+        apiVersion: SHOPIFY_API_VERSION,
+        lastSync: new Date().toISOString(),
+        scopes,
+        hasReadProducts: scopes.includes('read_products'),
+        hasReadOrders: scopes.includes('read_orders'),
+        note: 'Shopify Admin API conectado en modo solo lectura. Los dashboards principales siguen en seed hasta activar sync persistente.',
+      });
+    } catch (error) {
+      res.json({
+        connected: false,
+        mode: 'mock-seed',
+        shopDomain: null,
+        apiVersion: null,
+        lastSync: null,
+        scopes: [],
+        note: error instanceof Error && error.message === 'missing_shopify_credentials'
+          ? 'Faltan variables Shopify en el servidor. El MVP usa datos sembrados.'
+          : 'Shopify no respondió correctamente. El MVP usa datos sembrados.',
+      });
+    }
+  });
+
+  app.get('/api/shopify/products-live', async (_req, res) => {
+    try {
+      const data = await shopifyGraphql<{
+        products: {
+          edges: Array<{
+            node: {
+              id: string;
+              title: string;
+              status: string;
+              handle: string;
+              variants: {
+                edges: Array<{
+                  node: {
+                    id: string;
+                    title: string;
+                    sku: string | null;
+                    price: string;
+                    inventoryQuantity: number;
+                    inventoryItem: { id: string; tracked: boolean; unitCost: { amount: string; currencyCode: string } | null };
+                  };
+                }>;
+              };
+            };
+          }>;
+        };
+      }>(`
+        query LiveProducts {
+          products(first: 50, query: "status:active") {
+            edges {
+              node {
+                id
+                title
+                status
+                handle
+                variants(first: 50) {
+                  edges {
+                    node {
+                      id
+                      title
+                      sku
+                      price
+                      inventoryQuantity
+                      inventoryItem { id tracked unitCost { amount currencyCode } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `);
+      res.json(data.products.edges.map(edge => {
+        const variants = edge.node.variants.edges.map(variantEdge => variantEdge.node);
+        return {
+          id: edge.node.id,
+          title: edge.node.title,
+          status: edge.node.status,
+          handle: edge.node.handle,
+          variantCount: variants.length,
+          costedVariantCount: variants.filter(variant => variant.inventoryItem.unitCost).length,
+          variants,
+        };
+      }));
+    } catch (error) {
+      res.status(502).json({ error: error instanceof Error ? error.message : 'shopify_products_failed' });
+    }
+  });
+
+  app.get('/api/shopify/orders-live', async (_req, res) => {
+    try {
+      const data = await shopifyGraphql<{
+        orders: {
+          edges: Array<{
+            node: {
+              id: string;
+              name: string;
+              createdAt: string;
+              displayFinancialStatus: string;
+              totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
+              lineItems: { edges: Array<{ node: { title: string; quantity: number; variant: { id: string; sku: string | null; price: string } | null } }> };
+            };
+          }>;
+        };
+      }>(`
+        query LiveOrders {
+          orders(first: 20, sortKey: CREATED_AT, reverse: true) {
+            edges {
+              node {
+                id
+                name
+                createdAt
+                displayFinancialStatus
+                totalPriceSet { shopMoney { amount currencyCode } }
+                lineItems(first: 25) {
+                  edges { node { title quantity variant { id sku price } } }
+                }
+              }
+            }
+          }
+        }
+      `);
+      res.json(data.orders.edges.map(edge => edge.node));
+    } catch (error) {
+      res.status(502).json({ error: error instanceof Error ? error.message : 'shopify_orders_failed' });
+    }
+  });
 
   app.get('/api/shopify/install', (req, res) => {
     const clientId = process.env.SHOPIFY_CLIENT_ID;

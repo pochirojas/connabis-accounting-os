@@ -13,12 +13,56 @@ const STATUS_META = {
 
 export default function Integracion() {
   const phases = useQuery<IntegrationPhase[]>({ queryKey: ['/api/integration-phases'] });
+  const shopifyStatus = useQuery<{
+    connected: boolean;
+    mode: string;
+    shopName?: string;
+    shopDomain?: string;
+    primaryDomain?: string;
+    apiVersion?: string;
+    scopes?: string[];
+    note?: string;
+  }>({ queryKey: ['/api/shopify/status'] });
 
   return (
     <Layout
       title="Plan de integración"
       subtitle="Hoja de ruta para llevar Connabis Accounting OS de prototipo a app embebida en Shopify"
     >
+      <section className="mb-6">
+        <Card className="p-5 bg-card border-card-border" data-testid="card-shopify-live-status">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground mb-2">Shopify live check</div>
+              <h2 className="text-sm font-semibold tracking-tight">
+                {shopifyStatus.data?.connected ? 'Admin API conectada en modo solo lectura' : 'Shopify todavía en modo prototipo'}
+              </h2>
+              <p className="mt-1 text-[13px] text-muted-foreground">
+                {shopifyStatus.data?.connected
+                  ? `${shopifyStatus.data.shopName} · ${shopifyStatus.data.shopDomain} · API ${shopifyStatus.data.apiVersion}`
+                  : shopifyStatus.data?.note || 'Esperando configuración de OAuth/scopes.'}
+              </p>
+            </div>
+            <Badge
+              variant="outline"
+              className={shopifyStatus.data?.connected ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/15 text-amber-300 border-amber-500/30'}
+              data-testid="badge-shopify-live-status"
+            >
+              {shopifyStatus.data?.connected ? 'LIVE READ-ONLY' : 'SEED'}
+            </Badge>
+          </div>
+          {shopifyStatus.data?.scopes && shopifyStatus.data.scopes.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-1.5">
+              {shopifyStatus.data.scopes.map(scope => (
+                <code key={scope} className="text-[11.5px] font-mono px-2 py-1 rounded bg-background border border-card-border" data-testid={`scope-${scope}`}>
+                  {scope}
+                </code>
+              ))}
+            </div>
+          )}
+        </Card>
+      </section>
+
       <section className="mb-6">
         <Card className="p-5 bg-card border-card-border" data-testid="card-architecture-note">
           <h2 className="text-sm font-semibold tracking-tight mb-3">Arquitectura objetivo</h2>
