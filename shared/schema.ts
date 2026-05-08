@@ -166,9 +166,12 @@ export type Expense = {
   amount: number;
   paidTo?: string;
   paidWith?: string;
+  paidBy?: string;
   currency?: 'COP' | 'USD';
   originalAmount?: number;
   fxRate?: number;
+  tax?: number;
+  notes?: string;
   source: 'shopify' | 'sheet' | 'manual';
 };
 

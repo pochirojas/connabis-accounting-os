@@ -155,10 +155,10 @@ export default function Gastos() {
   }
 
   return (
-    <Layout title="Gastos & Contabilidad" subtitle="Ingresos desde Shopify live · gastos solo reales/manuales hasta conectar bancos/contabilidad">
+    <Layout title="Gastos & Contabilidad" subtitle="Ingresos desde Shopify live · gastos históricos desde Expenses sheet + gastos manuales nuevos">
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard label="Ingresos totales" value={formatCOP(totalIncome)} icon={TrendingUp} emphasis="emerald" testId="kpi-gastos-ingresos" />
-        <KpiCard label="Gastos reales" value={formatCOP(totalExpenses)} icon={Receipt} testId="kpi-gastos-totales" hint="Manual/persistente" />
+        <KpiCard label="Gastos reales" value={formatCOP(totalExpenses)} icon={Receipt} testId="kpi-gastos-totales" hint="Expenses + manual" />
         <KpiCard label="Utilidad" value={formatCOP(totalProfit)} icon={totalProfit >= 0 ? TrendingUp : TrendingDown} emphasis="gold" testId="kpi-gastos-utilidad" />
         <KpiCard label="Meses con pérdida" value={`${lossMonths} / ${monthsWithManual.length || 5}`} icon={AlertTriangle} testId="kpi-meses-perdida" hint="Incluye manuales guardados" />
       </section>
@@ -169,10 +169,10 @@ export default function Gastos() {
             <div>
               <h2 className="text-sm font-semibold tracking-tight">Agregar gasto manual</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Guarda gastos reales. Ya no se suman gastos seed; lo que no ingreses aquí no se cuenta como gasto.
+                Guarda gastos nuevos reales. El histórico viene del tab Expenses del Excel contable.
               </p>
             </div>
-            <Badge variant="outline" className="text-[11px]">Real/manual</Badge>
+            <Badge variant="outline" className="text-[11px]">Manual nuevo</Badge>
           </div>
           <form onSubmit={addExpense} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[140px_150px_180px_1fr_150px_120px_170px_auto] gap-3 items-end">
             <label className="space-y-1.5">
@@ -309,9 +309,9 @@ export default function Gastos() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-sm font-semibold tracking-tight">P&L mensual</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Ingresos Shopify live contra gastos reales/manuales</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Ingresos Shopify live contra Expenses sheet + manuales</p>
             </div>
-            <Badge variant="outline" className="text-[11px]">Sin seed</Badge>
+            <Badge variant="outline" className="text-[11px]">Expenses sheet</Badge>
           </div>
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -403,7 +403,7 @@ export default function Gastos() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-sm font-semibold tracking-tight">Detalle de gastos</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Origen actual: gastos manuales reales guardados en la app. Sheet/seed queda fuera de totales.</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Origen actual: Expenses sheet histórico + gastos manuales nuevos. Seed queda fuera de totales.</p>
             </div>
           </div>
           <Table>
@@ -414,6 +414,7 @@ export default function Gastos() {
                 <TableHead>Descripción</TableHead>
                 <TableHead>Pagado a</TableHead>
                 <TableHead>Pagado con</TableHead>
+                <TableHead>Pagado por</TableHead>
                 <TableHead>Origen</TableHead>
                 <TableHead>Moneda</TableHead>
                 <TableHead className="text-right">Monto</TableHead>
@@ -430,6 +431,7 @@ export default function Gastos() {
                   <TableCell className="text-sm">{e.description}</TableCell>
                   <TableCell className="text-sm">{e.paidTo ?? '—'}</TableCell>
                   <TableCell className="text-sm">{e.paidWith ?? '—'}</TableCell>
+                  <TableCell className="text-sm">{e.paidBy ?? '—'}</TableCell>
                   <TableCell>
                     <Badge variant={e.source === 'shopify' ? 'default' : e.source === 'manual' ? 'outline' : 'secondary'} className="text-[10px] uppercase tracking-wide">
                       {e.source}

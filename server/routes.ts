@@ -7,7 +7,7 @@ import { insertExpenseSchema, updateCashAccountSchema, updateCloseChecklistSchem
 import { storage } from './storage';
 import {
   channels, years, months, kpis, products,
-  materials, purchaseOrders, expenses, alerts, integrationPhases,
+  materials, purchaseOrders, alerts, integrationPhases,
   dailyPerformance, glossaryTerms, accountingSuggestions,
   incomeDetails, restockRecommendations,
   ceoMetrics, pnlRows, cashFlowSnapshots, inventoryAccountingRows, closeChecklist,
@@ -16,6 +16,15 @@ import {
 const SHOPIFY_API_VERSION = '2026-04';
 const MATERIAL_MANAGER_BOM_PATH = '/home/user/workspace/material-manager-export-material-product.csv';
 const MATERIAL_MANAGER_MATERIALS_PATH = '/home/user/workspace/material-manager-export.csv';
+const HISTORICAL_EXPENSES_PATH = '/home/user/workspace/connabis-accounting-os/server/data/historical-expenses.json';
+
+function loadHistoricalExpenses() {
+  if (!fs.existsSync(HISTORICAL_EXPENSES_PATH)) return [];
+  const payload = JSON.parse(fs.readFileSync(HISTORICAL_EXPENSES_PATH, 'utf-8')) as {
+    expenses?: Array<Record<string, unknown>>;
+  };
+  return payload.expenses ?? [];
+}
 
 function parseCsvLine(line: string) {
   const cells: string[] = [];
@@ -406,7 +415,7 @@ function summarizeMonths(orders: LiveIncomeOrder[]) {
     expenses: 0,
     profit: row.income,
     partial: month === new Date().toISOString().slice(0, 7),
-    note: `${row.orders} órdenes Shopify live; gastos reales se suman desde manual/contabilidad.`,
+    note: `${row.orders} órdenes Shopify live; gastos reales se suman desde Expenses/manual.`,
   })).sort((a, b) => a.month.localeCompare(b.month));
 }
 
@@ -609,9 +618,9 @@ export async function registerRoutes(
   app.get('/api/months', async (_req, res) => {
     try {
       const orders = await loadLiveShopifyIncomeOrders();
-      const manualExpenses = await storage.listManualExpenses();
-      const expenseByMonth = manualExpenses.reduce((map, expense) => {
-        map.set(expense.month, (map.get(expense.month) ?? 0) + expense.amount);
+      const allExpenses = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())] as Array<{ month: string; amount: number }>;
+      const expenseByMonth = allExpenses.reduce((map, expense) => {
+        map.set(expense.month, (map.get(expense.month) ?? 0) + Number(expense.amount || 0));
         return map;
       }, new Map<string, number>());
       const liveMonths = summarizeMonths(orders);
@@ -625,7 +634,7 @@ export async function registerRoutes(
             expenses: expenseAmount,
             profit: -expenseAmount,
             partial: true,
-            note: 'Mes creado por gasto real/manual.',
+            note: 'Mes creado por gasto real desde Expenses/manual.',
           });
         }
       });
@@ -667,7 +676,7 @@ export async function registerRoutes(
   });
   app.get('/api/expenses', async (_req, res) => {
     const manualExpenses = await storage.listManualExpenses();
-    res.json(manualExpenses);
+    res.json([...loadHistoricalExpenses(), ...manualExpenses]);
   });
   app.get('/api/export/income.csv', async (req, res) => {
     try {
@@ -701,7 +710,22 @@ export async function registerRoutes(
   app.get('/api/export/expenses.csv', async (req, res) => {
     const month = typeof req.query.month === 'string' ? req.query.month : undefined;
     const year = typeof req.query.year === 'string' ? req.query.year : undefined;
-    const rows = (await storage.listManualExpenses())
+    const rows = ([...loadHistoricalExpenses(), ...(await storage.listManualExpenses())] as Array<{
+      date: string;
+      month: string;
+      category: string;
+      description: string;
+      paidTo?: string;
+      paidWith?: string;
+      paidBy?: string;
+      currency?: 'COP' | 'USD';
+      originalAmount?: number;
+      fxRate?: number;
+      tax?: number;
+      amount: number;
+      source: 'sheet' | 'manual' | 'shopify';
+      notes?: string;
+    }>)
       .filter(expense => !month || expense.month === month)
       .filter(expense => !year || expense.month.startsWith(`${year}-`))
       .map(expense => ({
@@ -711,15 +735,18 @@ export async function registerRoutes(
         descripcion: expense.description,
         pagado_a: expense.paidTo ?? '',
         pagado_con: expense.paidWith ?? '',
+        pagado_por: expense.paidBy ?? '',
         moneda: expense.currency ?? 'COP',
         monto_original: expense.originalAmount ?? expense.amount,
         trm: expense.fxRate ?? '',
+        impuesto_cop: expense.tax ?? '',
         monto_cop: Math.round(expense.amount),
         origen: expense.source,
+        notas: expense.notes ?? '',
       }));
     sendCsv(res, `connabis-gastos-${month ?? year ?? 'all-time'}.csv`, rows, [
       'fecha', 'mes', 'categoria', 'descripcion', 'pagado_a', 'pagado_con',
-      'moneda', 'monto_original', 'trm', 'monto_cop', 'origen',
+      'pagado_por', 'moneda', 'monto_original', 'trm', 'impuesto_cop', 'monto_cop', 'origen', 'notas',
     ]);
   });
   app.post('/api/expenses', async (req, res) => {
@@ -811,7 +838,7 @@ export async function registerRoutes(
         scopes,
         hasReadProducts: scopes.includes('read_products'),
         hasReadOrders: scopes.includes('read_orders'),
-        note: 'Shopify Admin API conectado en modo solo lectura. Ingresos, productos y exportaciones salen de Shopify live; gastos salen solo de registros manuales reales hasta conectar bancos/contabilidad.',
+        note: 'Shopify Admin API conectado en modo solo lectura. Ingresos y productos salen de Shopify live; gastos históricos salen del sheet Expenses y nuevos gastos de registros manuales.',
       });
     } catch (error) {
       res.json({
