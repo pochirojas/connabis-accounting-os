@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
+import crypto from 'node:crypto';
 import { insertExpenseSchema, updateCashAccountSchema, updateCloseChecklistSchema } from '@shared/schema';
 import { storage } from './storage';
 import {
@@ -113,6 +114,89 @@ export async function registerRoutes(
     lastSync: null,
     note: 'MVP usa datos sembrados. Ver Plan de integración para conectar Shopify Admin API.',
   }));
+
+  app.get('/api/shopify/install', (req, res) => {
+    const clientId = process.env.SHOPIFY_CLIENT_ID;
+    const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
+    const rawShop = typeof req.query.shop === 'string' ? req.query.shop : '';
+    const shop = rawShop.endsWith('.myshopify.com') ? rawShop : `${rawShop}.myshopify.com`;
+
+    if (!clientId || !clientSecret) {
+      return res.status(500).send('Shopify OAuth no está configurado en el servidor. Falta SHOPIFY_CLIENT_ID o SHOPIFY_CLIENT_SECRET.');
+    }
+
+    if (!/^[-a-z0-9]+\.myshopify\.com$/i.test(shop)) {
+      return res.status(400).send('Shopify shop inválido. Usa /api/shopify/install?shop=2f979e-24.myshopify.com');
+    }
+
+    const host = req.get('x-forwarded-host') || req.get('host');
+    const protocol = req.get('x-forwarded-proto') || req.protocol || 'https';
+    const redirectUri = `${protocol}://${host}/api/shopify/callback`;
+    const scopes = [
+      'read_products',
+      'read_inventory',
+      'read_locations',
+      'read_orders',
+      'read_draft_orders',
+      'read_customers',
+      'read_reports',
+    ].join(',');
+    const state = crypto.randomBytes(16).toString('hex');
+    const authUrl = new URL(`https://${shop}/admin/oauth/authorize`);
+    authUrl.searchParams.set('client_id', clientId);
+    authUrl.searchParams.set('scope', scopes);
+    authUrl.searchParams.set('redirect_uri', redirectUri);
+    authUrl.searchParams.set('state', state);
+
+    res.redirect(authUrl.toString());
+  });
+
+  app.get('/api/shopify/callback', async (req, res) => {
+    const clientId = process.env.SHOPIFY_CLIENT_ID;
+    const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
+    const shop = typeof req.query.shop === 'string' ? req.query.shop : '';
+    const code = typeof req.query.code === 'string' ? req.query.code : '';
+    const hmac = typeof req.query.hmac === 'string' ? req.query.hmac : '';
+
+    if (!clientId || !clientSecret) {
+      return res.status(500).send('Shopify OAuth no está configurado en el servidor.');
+    }
+
+    if (!/^[-a-z0-9]+\.myshopify\.com$/i.test(shop) || !code || !hmac) {
+      return res.status(400).send('Callback Shopify incompleto.');
+    }
+
+    const message = Object.entries(req.query)
+      .filter(([key]) => key !== 'hmac' && key !== 'signature')
+      .map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(',') : value}`)
+      .sort()
+      .join('&');
+    const digest = crypto.createHmac('sha256', clientSecret).update(message).digest('hex');
+    const isValid = crypto.timingSafeEqual(Buffer.from(digest, 'hex'), Buffer.from(hmac, 'hex'));
+    if (!isValid) {
+      return res.status(401).send('Firma Shopify inválida.');
+    }
+
+    const tokenResponse = await fetch(`https://${shop}/admin/oauth/access_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code }),
+    });
+    const tokenData = await tokenResponse.json() as { access_token?: string; scope?: string; error?: string; error_description?: string };
+
+    if (!tokenResponse.ok || !tokenData.access_token) {
+      return res.status(400).send(`Shopify no completó instalación: ${tokenData.error_description || tokenData.error || 'error desconocido'}`);
+    }
+
+    res.send(`
+      <main style="font-family: Inter, system-ui, sans-serif; padding: 32px; max-width: 720px; margin: auto;">
+        <h1>Connabis Accounting OS conectado</h1>
+        <p>Shop instalado: <strong>${shop}</strong></p>
+        <p>Scopes concedidos: <code>${tokenData.scope || 'sin scopes reportados'}</code></p>
+        <p>Ya puedes volver a Perplexity para validar productos, órdenes e inventario en modo solo lectura.</p>
+      </main>
+    `);
+  });
 
   return httpServer;
 }
