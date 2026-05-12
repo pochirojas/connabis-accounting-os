@@ -60,6 +60,17 @@ export default function Glosario() {
               <Badge variant="outline" className="text-[10px] uppercase">{term.category}</Badge>
             </div>
             <p className="mt-3 text-sm text-foreground/90 leading-relaxed">{term.short}</p>
+            {term.referenceUrl && (
+              <a
+                href={term.referenceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 inline-flex text-xs text-primary hover:underline"
+                data-testid={`link-reference-${term.id}`}
+              >
+                Referencia: {term.referenceLabel ?? term.referenceUrl}
+              </a>
+            )}
             {term.formula && (
               <div className="mt-3 rounded-md border border-border bg-muted/25 p-3">
                 <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Fórmula</div>

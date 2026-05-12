@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { useQuery } from '@tanstack/react-query';
 import type { Alert } from '@shared/schema';
 import { AlertTriangle, AlertCircle, Info, ArrowRight } from 'lucide-react';
+import { Link } from 'wouter';
 
 const LEVEL_META = {
   critical: { icon: AlertTriangle, label: 'Crítica', cls: 'bg-destructive/15 text-rose-300 border-destructive/30' },
@@ -63,6 +64,11 @@ export default function Alertas() {
                     </Badge>
                   </div>
                   <p className="text-sm text-muted-foreground mt-2 leading-relaxed" data-testid={`alert-desc-${a.id}`}>{a.description}</p>
+                  {a.skus && a.skus.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {a.skus.map(sku => <Badge key={sku} variant="outline" className="text-[10px]">{sku}</Badge>)}
+                    </div>
+                  )}
                   <div className="mt-3 flex items-start gap-2 rounded-md border border-card-border bg-muted/30 px-3 py-2.5">
                     <ArrowRight className="h-4 w-4 mt-0.5 text-primary shrink-0" />
                     <p className="text-[13px] leading-relaxed" data-testid={`alert-rec-${a.id}`}>
@@ -70,6 +76,13 @@ export default function Alertas() {
                       {a.recommendation}
                     </p>
                   </div>
+                  {a.href && (
+                    <Link href={a.href}>
+                      <a className="mt-3 inline-flex text-xs text-primary hover:underline" data-testid={`alert-link-${a.id}`}>
+                        Abrir pantalla relacionada
+                      </a>
+                    </Link>
+                  )}
                 </div>
               </div>
             </Card>

@@ -102,6 +102,17 @@ export type Product = {
   contributionMargin: number;  // 0..1
   alert: 'ok' | 'warn' | 'danger';
   alertReason?: string;
+  bomCoverage?: 'complete' | 'partial' | 'missing';
+  missingBomSales?: number;
+  missingLabor?: boolean;
+  missingShopifyCost?: boolean;
+  keyMaterialWarnings?: string[];
+  inventoryQuantity?: number;
+  variantCount?: number;
+  flavorOptions?: string[];
+  presentation?: string | null;
+  shopifyProductId?: string;
+  shopifyHandle?: string;
 };
 
 export type CostBreakdownItem = {
@@ -183,6 +194,7 @@ export type Expense = {
   fxRate?: number;
   tax?: number;
   notes?: string;
+  classification?: 'operating' | 'inventory' | 'capex' | 'uncategorized';
   source: 'shopify' | 'sheet' | 'manual';
 };
 
@@ -190,12 +202,20 @@ export const insertExpenseSchema = z.object({
   date: z.string().min(1),
   category: z.string().min(1),
   description: z.string().min(1),
-  amount: z.number().positive(),
+  amount: z.number().positive().max(500_000_000),
   paidTo: z.string().optional(),
   paidWith: z.string().optional(),
   currency: z.enum(['COP', 'USD']).default('COP'),
   originalAmount: z.number().positive().optional(),
   fxRate: z.number().positive().optional(),
+}).superRefine((value, ctx) => {
+  if (value.currency === 'USD' && (!value.fxRate || !value.originalAmount)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['fxRate'],
+      message: 'Los gastos en USD requieren monto original y TRM.',
+    });
+  }
 });
 
 export type InsertExpense = z.infer<typeof insertExpenseSchema>;
@@ -205,8 +225,11 @@ export type DailyPerformance = {
   month: string;
   orders: number;
   revenue: number;
+  cogs?: number;
+  grossProfit?: number;
   expenses: number;
   profit: number;
+  netMargin?: number;
   aov: number;
   topProduct: string;
   topProductRevenue: number;
@@ -222,6 +245,8 @@ export type GlossaryTerm = {
   formula?: string;
   connabisExample: string;
   action: string;
+  referenceLabel?: string;
+  referenceUrl?: string;
 };
 
 export type AccountingSuggestion = {
@@ -242,6 +267,10 @@ export type Alert = {
   description: string;
   recommendation: string;
   area: 'ingresos' | 'gastos' | 'productos' | 'inventario' | 'sistema';
+  skus?: string[];
+  href?: string;
+  source?: 'real' | 'seed';
+  metric?: string;
 };
 
 export type IntegrationPhase = {

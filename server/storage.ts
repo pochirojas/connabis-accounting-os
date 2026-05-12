@@ -66,6 +66,16 @@ const CASH_ACCOUNT_DEFAULTS: Record<CashAccount['id'], number> = {
   nu_credit_card_debt: 0,
 };
 
+function normalizePaidWith(value?: string | null): CashAccount['id'] | null {
+  const text = (value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (text.includes('nequi')) return 'nequi';
+  if (text.includes('nu') && text.includes('deb')) return 'nu_debit';
+  if (text.includes('nu') && (text.includes('cred') || text.includes('credit'))) return 'nu_credit_card_debt';
+  if (text.includes('mercado') && (text.includes('no liber') || text.includes('pend'))) return 'mercado_pago_unreleased';
+  if (text.includes('mercado')) return 'mercado_pago_released';
+  return null;
+}
+
 export class DatabaseStorage implements IStorage {
   async getUser(id: number): Promise<User | undefined> {
     return db.select().from(users).where(eq(users.id, id)).get();
@@ -105,6 +115,17 @@ export class DatabaseStorage implements IStorage {
   async createManualExpense(expense: InsertExpense): Promise<Expense> {
     const id = `manual-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     const month = expense.date.slice(0, 7);
+    const currency = expense.currency ?? 'COP';
+    const originalAmount = currency === 'USD' ? Number(expense.originalAmount ?? expense.amount) : Number(expense.amount);
+    const fxRate = currency === 'USD' ? Number(expense.fxRate ?? 0) : undefined;
+    if (currency === 'USD' && (!fxRate || fxRate <= 0)) {
+      throw new Error('Los gastos USD requieren una TRM válida.');
+    }
+    const amountCop = currency === 'USD' ? originalAmount * Number(fxRate) : Number(expense.amount);
+    if (!Number.isFinite(amountCop) || amountCop <= 0 || amountCop > 500_000_000) {
+      throw new Error('Monto de gasto inválido.');
+    }
+    const roundedAmount = Math.round(amountCop);
     sqlite.prepare(`
       INSERT INTO manual_expenses
         (id, date, month, category, description, amount, paid_to, paid_with, currency, original_amount, fx_rate, created_at)
@@ -116,14 +137,15 @@ export class DatabaseStorage implements IStorage {
       month,
       category: expense.category,
       description: expense.description,
-      amount: Math.round(expense.amount),
+      amount: roundedAmount,
       paidTo: expense.paidTo ?? null,
       paidWith: expense.paidWith ?? null,
-      currency: expense.currency ?? 'COP',
-      originalAmount: expense.originalAmount ?? null,
-      fxRate: expense.fxRate ?? null,
+      currency,
+      originalAmount: currency === 'USD' ? originalAmount : null,
+      fxRate: fxRate ?? null,
       createdAt: new Date().toISOString(),
     });
+    this.applyExpenseToCash(expense.paidWith, roundedAmount, 'expense');
 
     return {
       id,
@@ -131,19 +153,35 @@ export class DatabaseStorage implements IStorage {
       month,
       category: expense.category,
       description: expense.description,
-      amount: Math.round(expense.amount),
+      amount: roundedAmount,
       paidTo: expense.paidTo,
       paidWith: expense.paidWith,
-      currency: expense.currency ?? 'COP',
-      originalAmount: expense.originalAmount,
-      fxRate: expense.fxRate,
+      currency,
+      originalAmount: currency === 'USD' ? originalAmount : undefined,
+      fxRate,
       source: 'manual',
     };
   }
 
   async deleteManualExpense(id: string): Promise<boolean> {
+    const row = sqlite.prepare('SELECT paid_with, amount FROM manual_expenses WHERE id = ?').get(id) as { paid_with?: string; amount?: number } | undefined;
     const result = sqlite.prepare('DELETE FROM manual_expenses WHERE id = ?').run(id);
+    if (result.changes > 0 && row) {
+      this.applyExpenseToCash(row.paid_with, Number(row.amount || 0), 'reversal');
+    }
     return result.changes > 0;
+  }
+
+  private applyExpenseToCash(paidWith: string | undefined | null, amount: number, mode: 'expense' | 'reversal') {
+    const accountId = normalizePaidWith(paidWith);
+    if (!accountId || !Number.isFinite(amount) || amount <= 0) return;
+    const account = this.listCashAccountsSync().find(item => item.id === accountId);
+    if (!account) return;
+    const direction = mode === 'expense' ? 1 : -1;
+    const nextAmount = account.type === 'liability'
+      ? account.amount + amount * direction
+      : account.amount - amount * direction;
+    this.upsertCashAmount(accountId, Math.max(0, Math.round(nextAmount)));
   }
 
   async mergeCloseChecklist(seedItems: CloseChecklistItem[]): Promise<CloseChecklistItem[]> {
@@ -164,6 +202,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async listCashAccounts(): Promise<CashAccount[]> {
+    return this.listCashAccountsSync();
+  }
+
+  private listCashAccountsSync(): CashAccount[] {
     const rows = sqlite.prepare('SELECT id, amount FROM cash_accounts').all() as Array<{ id: CashAccount['id']; amount: number }>;
     const amountById = new Map(rows.map(row => [row.id, row.amount]));
     return CASH_ACCOUNT_DEFS.map(def => ({
@@ -172,14 +214,18 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
-  async updateCashAccount(id: CashAccount['id'], amount: number): Promise<CashAccount | undefined> {
-    const exists = CASH_ACCOUNT_DEFS.some(def => def.id === id);
-    if (!exists) return undefined;
+  private upsertCashAmount(id: CashAccount['id'], amount: number) {
     sqlite.prepare(`
       INSERT INTO cash_accounts (id, amount, updated_at)
       VALUES (?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET amount = excluded.amount, updated_at = excluded.updated_at
     `).run(id, Math.round(amount), new Date().toISOString());
+  }
+
+  async updateCashAccount(id: CashAccount['id'], amount: number): Promise<CashAccount | undefined> {
+    const exists = CASH_ACCOUNT_DEFS.some(def => def.id === id);
+    if (!exists) return undefined;
+    this.upsertCashAmount(id, amount);
     return (await this.listCashAccounts()).find(account => account.id === id);
   }
 }

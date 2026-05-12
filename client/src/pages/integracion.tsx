@@ -25,9 +25,9 @@ export default function Integracion() {
   }>({ queryKey: ['/api/shopify/status'] });
 
   return (
-    <Layout
-      title="Plan de integración"
-      subtitle="Hoja de ruta para llevar Connabis Accounting OS de prototipo a app embebida en Shopify"
+      <Layout
+        title="Plan de integración"
+        subtitle="Arquitectura interna: Shopify + Material Manager + gastos reales hoy; MM replacement en Phase 2; Dataico futuro"
     >
       <section className="mb-6">
         <Card className="p-5 bg-card border-card-border" data-testid="card-shopify-live-status">
@@ -68,21 +68,21 @@ export default function Integracion() {
           <h2 className="text-sm font-semibold tracking-tight mb-3">Arquitectura objetivo</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[13px] leading-relaxed">
             <div className="rounded-md border border-card-border bg-muted/30 p-3">
-              <div className="font-medium text-primary mb-1">Shopify = fuente única</div>
+              <div className="font-medium text-primary mb-1">Shopify = ingresos y catálogo</div>
               <p className="text-muted-foreground">
-                Pedidos, productos, variantes, inventario y <span className="font-mono text-accent">variant.cost</span> viven en Shopify. Es el gold standard de ingresos y de costos.
+                Pedidos, ventas totales, shipping cobrado, refunds, productos activos, variantes y SKUs viven en Shopify. Es el gold standard de ingresos y productos.
               </p>
             </div>
             <div className="rounded-md border border-card-border bg-muted/30 p-3">
-              <div className="font-medium text-accent mb-1">Sheet = puente temporal</div>
+              <div className="font-medium text-accent mb-1">Material Manager = BOM / COGS</div>
               <p className="text-muted-foreground">
-                La hoja contable solo aporta gastos históricos y registros que aún no existen en Shopify. Se reemplaza fila por fila a medida que se cargan en la plataforma.
+                BOM, proporciones de materiales, costos unitarios e inventario de materiales siguen viniendo de MM hasta que Phase 2 lo reemplace dentro del OS.
               </p>
             </div>
             <div className="rounded-md border border-card-border bg-muted/30 p-3">
-              <div className="font-medium mb-1">Connabis OS = capa de análisis</div>
+              <div className="font-medium mb-1">Sheet / manual = gastos reales</div>
               <p className="text-muted-foreground">
-                Calcula márgenes, alertas y P&L sobre los datos sincronizados. No reemplaza la contabilidad oficial; la enriquece con visión operativa.
+                Gastos históricos y gastos agregados en la app alimentan utilidad neta. Compras de inventario y capex se separan del gasto operativo mensual.
               </p>
             </div>
           </div>
@@ -144,30 +144,30 @@ export default function Integracion() {
           <h2 className="text-sm font-semibold tracking-tight mb-3">Mapeo de datos por origen</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-[13px]">
             <div>
-              <div className="text-[11px] uppercase tracking-[0.14em] text-primary font-medium mb-2">Shopify (gold standard)</div>
+              <div className="text-[11px] uppercase tracking-[0.14em] text-primary font-medium mb-2">Shopify (gold standard ingresos/productos)</div>
               <ul className="space-y-1.5 text-muted-foreground">
-                <li>• Órdenes, line items, refunds, descuentos</li>
-                <li>• Productos, variantes, SKU, inventario</li>
-                <li>• <span className="font-mono text-foreground">variant.cost</span> → COGS por SKU</li>
-                <li>• Shopify Payments fees, payouts</li>
+                <li>• Órdenes, ventas totales, line items, refunds, descuentos</li>
+                <li>• Shipping cobrado al usuario incluido en ventas totales</li>
+                <li>• Productos activos, variantes, SKU e inventario de Shopify</li>
+                <li>• Canales y clientes para análisis comercial</li>
                 <li>• Customers, segmentos, recurrencia</li>
                 <li>• Canales: Online Store, Draft Orders, Mobile</li>
               </ul>
             </div>
             <div>
-              <div className="text-[11px] uppercase tracking-[0.14em] text-accent font-medium mb-2">Sheet (bridge temporal)</div>
+              <div className="text-[11px] uppercase tracking-[0.14em] text-accent font-medium mb-2">MM + Sheet/manual</div>
               <ul className="space-y-1.5 text-muted-foreground">
-                <li>• Gastos históricos antes de la migración</li>
-                <li>• Servicios, software, arriendos, nómina</li>
-                <li>• Marketing pagado fuera de Shopify</li>
-                <li>• Ajustes manuales y categorización contable</li>
-                <li>• Costos antiguos hasta cargar en Shopify <span className="font-mono text-foreground">variant.cost</span></li>
+                <li>• Material Manager: BOM, COGS, materiales, proporciones</li>
+                <li>• Sheet Expenses: gastos históricos reales</li>
+                <li>• Manual OS: gastos nuevos, pagado con, moneda, TRM</li>
+                <li>• Caja operativa: Nequi, Nu, Mercado Pago y deuda Nu crédito</li>
+                <li>• Dataico: Phase 3 futura, no implementado todavía</li>
               </ul>
             </div>
           </div>
           <div className="mt-4 flex items-center gap-2 text-[12px] text-muted-foreground">
             <ExternalLink className="h-3.5 w-3.5" />
-            Plan: cada categoría del Sheet se reemplaza por su equivalente nativo en Shopify hasta retirar la hoja por completo.
+            Plan: Phase 2 reemplaza Material Manager dentro del OS; Phase 3 evalúa Dataico para capa fiscal/contable, sin asumir integración hoy.
           </div>
         </Card>
       </section>

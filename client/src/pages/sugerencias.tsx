@@ -43,14 +43,14 @@ export default function Sugerencias() {
   }, [restockRows]);
 
   return (
-    <Layout
-      title="Predicciones & sugerencias"
-      subtitle="Análisis contable, recomendaciones y recordatorios tributarios · Phase 2 para automatización"
-    >
-      <Card className="p-4 border-amber-500/30 bg-amber-500/8" data-testid="banner-suggestions-phase2">
-        <h2 className="text-sm font-semibold text-amber-200">Phase 2: inteligencia contable y recordatorios</h2>
+      <Layout
+        title="Predicciones & sugerencias"
+        subtitle="Sugerencias Phase 1 con datos reales; restock y recordatorios avanzados quedan como Phase 2"
+      >
+        <Card className="p-4 border-amber-500/30 bg-amber-500/8" data-testid="banner-suggestions-phase2">
+        <h2 className="text-sm font-semibold text-amber-200">Separación clara: sugerencias reales vs modelos Phase 2</h2>
         <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-          Esta sección define qué debe analizar el sistema cuando conectemos datos reales. Los recordatorios tributarios de Colombia deben validarse con contador antes de automatizarlos.
+          Las tarjetas de sugerencias usan ventas totales de Shopify, COGS de MM y gastos reales. El dashboard de restock sigue marcado como modelo Phase 2 hasta reemplazar Material Manager dentro del OS.
         </p>
       </Card>
 

@@ -14,6 +14,7 @@ import { KpiCard } from '@/components/kpi-card';
 import { CalendarDays, Crown, Package, TrendingUp } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { sortByDate, type ChartSortOrder } from '@/lib/chart-sort';
+import { apiRequest } from '@/lib/queryClient';
 
 export default function Performance() {
   const daily = useQuery<DailyPerformance[]>({ queryKey: ['/api/daily-performance'] });
@@ -21,11 +22,40 @@ export default function Performance() {
   const [selectedMonth, setSelectedMonth] = useState('2026-04');
   const [compareMonth, setCompareMonth] = useState('2026-03');
   const [dailyChartSort, setDailyChartSort] = useState<ChartSortOrder>('oldest');
+  const [periodMode, setPeriodMode] = useState<'month' | 'year' | 'ytd' | 'week' | 'custom'>('month');
+  const [selectedYear, setSelectedYear] = useState('2026');
+  const [weekStart, setWeekStart] = useState('2026-04-01');
+  const [customStart, setCustomStart] = useState('2026-04-01');
+  const [customEnd, setCustomEnd] = useState('2026-04-30');
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
-  const rows = useMemo(
-    () => (daily.data ?? []).filter(r => r.month === selectedMonth).sort((a, b) => a.date.localeCompare(b.date)),
-    [daily.data, selectedMonth],
-  );
+  const monthOptions = useMemo(() => (months.data ?? []).filter(m => {
+    if (periodMode === 'year' || periodMode === 'ytd') return m.month.startsWith(`${selectedYear}-`);
+    if (periodMode === 'week' || periodMode === 'custom') return (!customStart || m.month >= customStart.slice(0, 7)) && (!customEnd || m.month <= customEnd.slice(0, 7));
+    return true;
+  }), [customEnd, customStart, months.data, periodMode, selectedYear]);
+  const rows = useMemo(() => {
+    const all = daily.data ?? [];
+    const weekEnd = new Date(`${weekStart}T00:00:00`);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    const weekEndText = weekEnd.toISOString().slice(0, 10);
+    return all.filter(r => {
+      if (periodMode === 'month') return r.month === selectedMonth;
+      if (periodMode === 'year') return r.month.startsWith(`${selectedYear}-`);
+      if (periodMode === 'ytd') return r.date >= `${selectedYear}-01-01` && r.date <= new Date().toISOString().slice(0, 10);
+      if (periodMode === 'week') return r.date >= weekStart && r.date <= weekEndText;
+      return r.date >= customStart && r.date <= customEnd;
+    }).sort((a, b) => a.date.localeCompare(b.date));
+  }, [customEnd, customStart, daily.data, periodMode, selectedMonth, selectedYear, weekStart]);
+  const dayDetails = useQuery<{
+    date: string;
+    income: Array<{ orderName: string; product: string; sku: string; qty: number; netRevenue: number; cogsSold: number; hasBom: boolean }>;
+    expenses: Array<{ description: string; category: string; amount: number; paidTo?: string; classification?: string }>;
+  }>({
+    queryKey: ['/api/day-details', selectedDay],
+    queryFn: async () => (await apiRequest('GET', `/api/day-details?date=${selectedDay}`)).json(),
+    enabled: Boolean(selectedDay),
+  });
   const dailyChartRows = useMemo(() => sortByDate(rows, dailyChartSort), [rows, dailyChartSort]);
   const month = (months.data ?? []).find(m => m.month === selectedMonth);
   const bestDay = rows.reduce<DailyPerformance | undefined>((best, row) => !best || row.revenue > best.revenue ? row : best, undefined);
@@ -70,21 +100,47 @@ export default function Performance() {
   return (
     <Layout
       title="Performance mensual"
-      subtitle="Drilldown por mes, día y producto ganador · seed hasta conectar Shopify Orders"
+      subtitle="Drilldown real por período, día, ingresos, COGS, gastos y producto ganador"
     >
       <section className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
         <Card className="p-5 bg-card border-card-border" data-testid="card-month-selector">
-          <h2 className="text-sm font-semibold tracking-tight">Seleccionar mes</h2>
+          <h2 className="text-sm font-semibold tracking-tight">Filtro de fecha</h2>
           <p className="text-xs text-muted-foreground mt-0.5 mb-4">
-            Con Shopify live, aquí aparecerán todos los meses y cada día con ventas reales.
+            Estilo Shopify Analytics: mes, año, YTD, semana o rango.
           </p>
+          <select
+            value={periodMode}
+            onChange={e => setPeriodMode(e.target.value as typeof periodMode)}
+            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm mb-3"
+            data-testid="select-performance-period"
+          >
+            <option value="month">Mes</option>
+            <option value="year">Año</option>
+            <option value="ytd">YTD</option>
+            <option value="week">Semana</option>
+            <option value="custom">Rango</option>
+          </select>
+          {(periodMode === 'year' || periodMode === 'ytd') && (
+            <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm mb-3" data-testid="select-performance-year">
+              {Array.from(new Set((months.data ?? []).map(m => m.month.slice(0, 4)))).sort().reverse().map(year => <option key={year} value={year}>{year}</option>)}
+            </select>
+          )}
+          {periodMode === 'week' && (
+            <input type="date" value={weekStart} onChange={e => setWeekStart(e.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm mb-3" data-testid="input-performance-week" />
+          )}
+          {periodMode === 'custom' && (
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} className="h-10 rounded-md border border-input bg-background px-3 text-sm" data-testid="input-performance-start" />
+              <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} className="h-10 rounded-md border border-input bg-background px-3 text-sm" data-testid="input-performance-end" />
+            </div>
+          )}
           <select
             value={selectedMonth}
             onChange={e => setSelectedMonth(e.target.value)}
             className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
             data-testid="select-performance-month"
           >
-            {(months.data ?? []).map(m => (
+            {monthOptions.map(m => (
               <option key={m.month} value={m.month}>{m.label}</option>
             ))}
           </select>
@@ -99,7 +155,7 @@ export default function Performance() {
         </Card>
 
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-          <KpiCard label="Días con data" value={formatNumber(rows.length)} icon={CalendarDays} testId="kpi-days-with-data" />
+          <KpiCard label="Días del período" value={formatNumber(rows.length)} icon={CalendarDays} testId="kpi-days-with-data" />
           <KpiCard label="Mejor día ventas" value={bestDay ? formatDate(bestDay.date) : '—'} icon={Crown} emphasis="gold" testId="kpi-best-day" hint={bestDay ? formatCOP(bestDay.revenue) : undefined} />
           <KpiCard label="AOV diario" value={formatCOP(aov)} icon={TrendingUp} testId="kpi-performance-aov" />
           <KpiCard label="Producto ganador" value={topProduct?.topProductUnits ? `${topProduct.topProductUnits} u` : '—'} icon={Package} testId="kpi-top-product-day" hint={topProduct?.topProduct} />
@@ -183,7 +239,10 @@ export default function Performance() {
           </div>
           <div className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={dailyChartRows} margin={{ left: -8, right: 8, top: 8 }}>
+              <ComposedChart data={dailyChartRows} margin={{ left: -8, right: 8, top: 8 }} onClick={(state) => {
+                const payload = state?.activePayload?.[0]?.payload as DailyPerformance | undefined;
+                if (payload?.date) setSelectedDay(payload.date);
+              }}>
                 <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false}
                   tickFormatter={(v: string) => v.slice(5)} />
@@ -197,6 +256,7 @@ export default function Performance() {
                 />
                 <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
                 <Bar dataKey="revenue" name="Ingresos" fill="hsl(var(--chart-1))" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="cogs" name="COGS" fill="hsl(var(--chart-4))" radius={[3, 3, 0, 0]} />
                 <Bar dataKey="expenses" name="Gastos" fill="hsl(var(--chart-2))" radius={[3, 3, 0, 0]} />
                 <Line type="monotone" dataKey="profit" name="Utilidad" stroke="hsl(var(--chart-3))" strokeWidth={2.5} dot={{ r: 3 }} />
               </ComposedChart>
@@ -204,6 +264,52 @@ export default function Performance() {
           </div>
         </Card>
       </section>
+
+      {selectedDay && (
+        <section className="mt-6">
+          <Card className="p-5 bg-card border-card-border" data-testid="card-day-drilldown">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <h2 className="text-sm font-semibold tracking-tight">Drilldown diario · {formatDate(selectedDay)}</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Ingresos y gastos específicos del día seleccionado en la gráfica.</p>
+              </div>
+              <Badge variant="outline" className="text-[11px]">Click en gráfica</Badge>
+            </div>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <div className="rounded-md border border-border overflow-hidden">
+                <div className="px-3 py-2 text-xs font-semibold bg-muted/30">Ingresos del día</div>
+                <Table>
+                  <TableHeader><TableRow><TableHead>Orden / producto</TableHead><TableHead className="text-right">Neto</TableHead><TableHead className="text-right">COGS</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {(dayDetails.data?.income ?? []).map((line, index) => (
+                      <TableRow key={`${line.orderName}-${index}`}>
+                        <TableCell className="text-xs"><div className="font-medium">{line.orderName}</div><div className="text-muted-foreground">{line.product} · {line.qty} u · {line.sku}</div></TableCell>
+                        <TableCell className="text-right tabular">{formatCOP(line.netRevenue)}</TableCell>
+                        <TableCell className={`text-right tabular ${line.hasBom ? '' : 'text-amber-300'}`}>{line.hasBom ? formatCOP(line.cogsSold) : 'Sin BOM'}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="rounded-md border border-border overflow-hidden">
+                <div className="px-3 py-2 text-xs font-semibold bg-muted/30">Gastos del día</div>
+                <Table>
+                  <TableHeader><TableRow><TableHead>Gasto</TableHead><TableHead>Clase</TableHead><TableHead className="text-right">COP</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {(dayDetails.data?.expenses ?? []).map((expense, index) => (
+                      <TableRow key={`${expense.description}-${index}`}>
+                        <TableCell className="text-xs"><div className="font-medium">{expense.description}</div><div className="text-muted-foreground">{expense.paidTo ?? 'Sin proveedor'} · {expense.category}</div></TableCell>
+                        <TableCell><Badge variant="outline" className="text-[10px]">{expense.classification ?? 'operating'}</Badge></TableCell>
+                        <TableCell className="text-right tabular">{formatCOP(expense.amount)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </Card>
+        </section>
+      )}
 
       <section className="mt-6 grid grid-cols-1 xl:grid-cols-2 gap-6">
         <Card className="p-5 bg-card border-card-border" data-testid="card-best-days">

@@ -23,6 +23,7 @@ export default function Productos() {
   const products = useQuery<Product[]>({ queryKey: ['/api/products'] });
   const shopifyStatus = useQuery<{ connected: boolean; mode: string }>({ queryKey: ['/api/shopify/status'] });
   const [overrides, setOverrides] = useState<Record<string, number>>({});
+  const [priceOverrides, setPriceOverrides] = useState<Record<string, number>>({});
   const [search, setSearch] = useState('');
   const [family, setFamily] = useState('Todas');
   const [selectedId, setSelectedId] = useState<string>('p1');
@@ -31,17 +32,23 @@ export default function Productos() {
     return (products.data ?? []).filter(p => p.active).map(p => {
       const override = overrides[p.id];
       const cogs = override ?? p.cogsUsed;
-      const variableCost = cogs + p.packaging + p.unitPrice * p.fees + p.shippingSubsidy;
-      const grossMargin = (p.unitPrice - cogs) / p.unitPrice;
-      const contributionMargin = (p.unitPrice - variableCost) / p.unitPrice;
+      const unitPrice = priceOverrides[p.id] ?? p.unitPrice;
+      const variableCost = cogs + p.packaging + unitPrice * p.fees + p.shippingSubsidy;
+      const grossMargin = unitPrice > 0 ? (unitPrice - cogs) / unitPrice : 0;
+      const contributionMargin = unitPrice > 0 ? (unitPrice - variableCost) / unitPrice : 0;
+      const idealPrice = cogs > 0 ? Math.ceil((cogs + p.packaging + p.shippingSubsidy) / (1 - p.fees - 0.45) / 100) * 100 : p.idealPrice;
+      const maxProfitableDiscount = unitPrice > 0
+        ? Math.max(0, Math.min(0.7, 1 - ((cogs + p.packaging + p.shippingSubsidy) / (unitPrice * (1 - p.fees))) / 0.30))
+        : 0;
       let alert: Product['alert'] = 'ok';
       let alertReason: string | undefined;
-      if (p.cogsSource === 'fallback' && override === undefined) { alert = 'warn'; alertReason = 'Costo Shopify ausente — usando estimación'; }
+      if (p.bomCoverage === 'missing' || p.cogsSource === 'fallback') { alert = 'warn'; alertReason = 'Falta BOM/costo real para este SKU'; }
+      if (p.missingLabor) { alert = 'warn'; alertReason = 'BOM sin mano de obra/producción explícita'; }
       if (contributionMargin < 0.30) { alert = 'warn'; alertReason = 'Margen de contribución bajo'; }
       if (contributionMargin < 0.10) { alert = 'danger'; alertReason = 'Margen crítico — riesgo con descuentos'; }
-      return { ...p, cogsUsed: cogs, grossMargin, contributionMargin, alert, alertReason, edited: override !== undefined };
+      return { ...p, unitPrice, cogsUsed: cogs, grossMargin, contributionMargin, idealPrice, maxProfitableDiscount, alert, alertReason, edited: override !== undefined || priceOverrides[p.id] !== undefined };
     });
-  }, [products.data, overrides]);
+  }, [products.data, overrides, priceOverrides]);
 
   const families = useMemo(() => ['Todas', ...Array.from(new Set(computed.map(p => p.family)))], [computed]);
   const filtered = useMemo(() => {
@@ -54,9 +61,10 @@ export default function Productos() {
   }, [computed, family, search]);
   const selected = computed.find(p => p.id === selectedId) ?? computed[0];
 
-  const avgGM = computed.length ? computed.reduce((s, p) => s + p.grossMargin, 0) / computed.length : 0;
-  const avgCM = computed.length ? computed.reduce((s, p) => s + p.contributionMargin, 0) / computed.length : 0;
-  const missingCosts = computed.filter(p => p.cogsSource === 'fallback').length;
+  const avgGM = filtered.length ? filtered.reduce((s, p) => s + p.grossMargin, 0) / filtered.length : 0;
+  const avgCM = filtered.length ? filtered.reduce((s, p) => s + p.contributionMargin, 0) / filtered.length : 0;
+  const missingCosts = filtered.filter(p => p.bomCoverage === 'missing' || p.cogsSource === 'fallback').length;
+  const chartRows = useMemo(() => filtered.slice().sort((a, b) => b.revenue - a.revenue).slice(0, 10), [filtered]);
   const isLive = Boolean(shopifyStatus.data?.connected);
   const sourceLabel = (p: Product) => p.marginSource === 'material_manager' ? 'Material Manager' : p.cogsSource === 'shopify' ? 'Shopify' : 'Fallback temporal';
 
@@ -74,7 +82,7 @@ export default function Productos() {
             </h2>
             <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
               {isLive
-                ? 'Esta vista usa todos los productos activos disponibles vía Shopify Admin API. Ingresos/unidades por SKU siguen en 0 hasta conectar el histórico de órdenes por variante.'
+                ? 'Esta vista usa productos activos de Shopify, ventas reales por SKU/línea y COGS desde BOM de Material Manager cuando existe. El simulador de precio es local: no cambia Shopify.'
                 : 'Esta tabla todavía no contiene todo el catálogo real. Cuando conectemos la API, Productos & Márgenes usará únicamente productos activos de Shopify.'}
             </p>
           </div>
@@ -82,7 +90,7 @@ export default function Productos() {
       </Card>
 
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard label="SKUs activos" value={formatNumber(computed.length)} icon={Package} emphasis="emerald" testId="kpi-prod-ingresos" />
+        <KpiCard label={family === 'Todas' ? 'SKUs activos' : `SKUs ${family}`} value={formatNumber(filtered.length)} icon={Package} emphasis="emerald" testId="kpi-prod-ingresos" />
         <KpiCard label="Margen bruto promedio" value={formatPct(avgGM, 1)} icon={ShieldCheck} testId="kpi-gm-prom" hint="(Precio − COGS) / Precio" />
         <KpiCard label="Margen contribución" value={formatPct(avgCM, 1)} icon={ShieldCheck} emphasis="gold" testId="kpi-cm-prom" hint="Después de fees, packaging, envío" />
         <KpiCard label="SKUs sin costo" value={`${missingCosts}`} icon={ShieldAlert} testId="kpi-skus-riesgo" hint="Variantes sin unitCost en Shopify" />
@@ -158,7 +166,7 @@ export default function Productos() {
               <MiniMetric label="Descuento máximo" value={formatPct(selected.maxProfitableDiscount)} testId="metric-selected-max-discount" />
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed mb-4" data-testid="text-pricing-note">
-              Precio ideal usa un objetivo de margen de contribución de 45%. Precio de competencia es placeholder hasta hacer scraping/research y debe reemplazarse con mercado real.
+              Precio ideal usa un objetivo de margen de contribución de 45%. Precio de competencia es placeholder hasta hacer benchmark formal; el simulador no cambia Shopify.
             </p>
             <Table>
               <TableHeader>
@@ -228,7 +236,7 @@ export default function Productos() {
           </div>
           <div className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={computed.slice(0, 10)} layout="vertical" margin={{ left: 0, right: 16, top: 4, bottom: 4 }}>
+              <BarChart data={chartRows} layout="vertical" margin={{ left: 0, right: 16, top: 4, bottom: 4 }}>
                 <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" horizontal={false} />
                 <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false}
                   tickFormatter={(v) => formatCOPCompact(Number(v))} />
@@ -241,7 +249,7 @@ export default function Productos() {
                   formatter={(v: number) => formatCOP(v)}
                 />
                 <Bar dataKey="revenue" radius={[0, 3, 3, 0]}>
-                  {computed.slice(0, 10).map((p, i) => (
+                  {chartRows.map((p, i) => (
                     <Cell key={i} fill={p.alert === 'danger' ? 'hsl(var(--destructive))' : p.alert === 'warn' ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'} />
                   ))}
                 </Bar>
@@ -257,11 +265,11 @@ export default function Productos() {
             <div>
               <h2 className="text-sm font-semibold tracking-tight">Tabla de márgenes</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Editar COGS para simular escenarios. <span className="text-accent">Origen del costo</span> indica si viene de Shopify o de fallback.
+                Editar precio para simular margen sin cambiar Shopify. <span className="text-accent">Origen del costo</span> indica si viene de MM, Shopify o fallback.
               </p>
             </div>
-            {Object.keys(overrides).length > 0 && (
-              <Button variant="outline" size="sm" onClick={() => setOverrides({})} data-testid="button-reset-overrides">
+            {Object.keys(overrides).length + Object.keys(priceOverrides).length > 0 && (
+              <Button variant="outline" size="sm" onClick={() => { setOverrides({}); setPriceOverrides({}); }} data-testid="button-reset-overrides">
                 Restablecer
               </Button>
             )}
@@ -297,26 +305,28 @@ export default function Productos() {
                     <TableCell className="font-medium text-[13px] leading-snug max-w-[300px]">
                       <div>{p.name}</div>
                       <div className="text-[11px] text-muted-foreground tabular mt-0.5">
-                        {p.sku ?? 'sin SKU'} · stock {formatNumber((p as Product & { inventoryQuantity?: number }).inventoryQuantity ?? 0)} · {p.revenue > 0 ? formatCOP(p.revenue) : 'ingresos por SKU pendiente'}
-                        {' · '}{formatNumber((p as Product & { variantCount?: number }).variantCount ?? 1)} sabores
+                        {p.sku ?? 'sin SKU'} · stock {formatNumber(p.inventoryQuantity ?? 0)} · ventas {formatNumber(p.unitsSold)} u · {formatCOP(p.revenue)}
+                        {' · '}{formatNumber(p.variantCount ?? 1)} sabores
                       </div>
                     </TableCell>
                   <TableCell><Badge variant="outline" className="text-[10.5px]">{p.family}</Badge></TableCell>
-                    <TableCell className="text-right tabular">{formatCOP(p.unitPrice)}</TableCell>
                     <TableCell className="text-right tabular">
                       <div className="flex items-center justify-end gap-1.5">
                         <Input
-                          value={p.cogsUsed}
+                          value={p.unitPrice}
                           type="number"
                           onChange={e => {
                             const val = Number(e.target.value);
-                            setOverrides(prev => ({ ...prev, [p.id]: Number.isFinite(val) ? val : 0 }));
+                            setPriceOverrides(prev => ({ ...prev, [p.id]: Number.isFinite(val) ? val : 0 }));
                           }}
                           className="h-8 w-[110px] text-right tabular text-[12.5px]"
-                          data-testid={`input-cogs-${p.id}`}
+                          data-testid={`input-price-${p.id}`}
                         />
-                        {p.edited && <Pencil className="h-3 w-3 text-accent" aria-label="Editado" />}
+                        {p.edited && <Pencil className="h-3 w-3 text-accent" aria-label="Simulado" />}
                       </div>
+                    </TableCell>
+                    <TableCell className="text-right tabular">
+                      {formatCOP(p.cogsUsed)}
                     </TableCell>
                     <TableCell>
                       <UiTooltip>
@@ -337,9 +347,12 @@ export default function Productos() {
                             ? 'Costo desglosado desde Material Manager: cantidad de material usada × costo unitario por material.'
                             : p.cogsSource === 'shopify'
                             ? 'Costo tomado del campo cost de la variante en Shopify.'
-                            : 'Costo Shopify vacío. Usando estimación de costo aterrizado. Cargar costo en Shopify para fuente única de verdad.'}
+                            : 'Costo Shopify/MM vacío. No se inventa costo real; aparece como alerta hasta completar BOM o matching.'}
                         </TooltipContent>
                       </UiTooltip>
+                      {p.keyMaterialWarnings && p.keyMaterialWarnings.length > 0 && (
+                        <div className="mt-1 text-[10.5px] text-amber-300">{p.keyMaterialWarnings[0]}</div>
+                      )}
                     </TableCell>
                     <TableCell className="text-right tabular text-muted-foreground">{formatCOP(p.packaging)}</TableCell>
                     <TableCell className="text-right tabular text-muted-foreground">{formatPct(p.fees)}</TableCell>

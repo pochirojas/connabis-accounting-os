@@ -1,49 +1,57 @@
-# Connabis Accounting OS — Definiciones de métricas
+# Connabis Accounting OS — METRICS
 
 Última actualización: 2026-05-12
 
 ## Fuentes oficiales
 
-- Shopify es la fuente oficial para órdenes, ingresos, productos activos, variantes, cantidades vendidas, descuentos, refunds y shipping cobrado al cliente.
-- Material Manager es la fuente oficial para BOM y COGS por producto/variante. Cuando existe BOM en Material Manager, el costo se calcula desde sus componentes.
+- Shopify es la fuente oficial para órdenes, ventas totales, productos activos, variantes, SKUs, cantidades vendidas, descuentos, refunds y shipping cobrado al cliente.
+- Material Manager es la fuente oficial para BOM, proporciones de materiales, costo unitario por material y COGS por producto/variante.
 - Gastos reales vienen del histórico del sheet contable `Expenses` y de gastos manuales creados en la app.
-- Seed/prototipo no debe mezclarse silenciosamente con métricas reales. Si una pantalla todavía usa seed, debe estar marcada como prototipo.
+- Seed/prototipo no debe mezclarse silenciosamente con métricas reales. Si una pantalla todavía usa seed, debe estar marcada como `seed`, `prototipo` o `Phase 2 model`.
 
 ## Ingresos
 
-### Ingreso bruto de productos
+### Base oficial: ventas totales Shopify
 
-Suma de `originalTotalSet` de cada línea de orden Shopify.
+Connabis usa siempre `ventas totales` de Shopify como base de ingresos. En el backend esto se lee desde `currentTotalPriceSet` cuando Shopify lo entrega; si no existe, usa `totalPriceSet`.
 
-No incluye shipping.
+Regla práctica:
 
-### Descuentos
+`ingreso base período = suma(currentTotalPriceSet / totalPriceSet de órdenes Shopify incluidas en el período)`
 
-Por línea:
+Esto incluye lo que pagó el usuario según Shopify, incluyendo productos, descuentos aplicados, shipping cobrado y ajustes que Shopify ya refleje dentro de ventas totales.
 
-`descuento = originalTotalSet - discountedTotalSet`
+### Asignación por línea/SKU
 
-### Shipping cobrado
+Para poder calcular margen por producto sin duplicar shipping o ajustes de orden, la venta total de la orden se asigna a sus líneas proporcionalmente al valor descontado de cada línea:
 
-Shipping cobrado al cliente en Shopify, tomado desde `totalShippingPriceSet`.
+`ingreso línea = totalPriceSet orden × (discountedTotalSet línea / suma(discountedTotalSet líneas de la orden))`
 
-Regla de Connabis: el shipping cobrado sí hace parte del ingreso neto porque es valor pagado por el usuario. El costo de recargar Skydropx se registra como gasto operativo cuando aparece en gastos reales.
+Si una orden no tiene base de líneas usable, se reparte en partes iguales entre líneas.
 
-### Refunds
+### Campos informativos
 
-Refunds tomados desde `totalRefundedSet` de la orden.
+- `ingreso bruto productos`: suma de `originalTotalSet` de líneas.
+- `descuentos`: `originalTotalSet - discountedTotalSet`.
+- `shipping cobrado`: `totalShippingPriceSet`.
+- `refunds`: `totalRefundedSet`.
 
-### Ingreso neto
+Estos campos ayudan a explicar diferencias, pero el KPI principal de ingresos usa ventas totales Shopify.
 
-Definición oficial usada por Dashboard y resúmenes mensuales:
+## Órdenes incluidas y excluidas
 
-`ingreso neto = productos descontados + shipping cobrado - refunds`
+Incluidas:
 
-Equivalente:
+- Órdenes Shopify con `createdAt` dentro del período seleccionado.
+- Líneas de orden con cantidad vendida.
+- Órdenes con estado financiero reconocido como venta pagada o parcialmente ajustada.
 
-`ingreso neto = suma(discountedTotalSet de líneas) + totalShippingPriceSet - totalRefundedSet`
+Exclusiones/pendientes:
 
-Nota técnica: en vistas por línea, el shipping y los refunds de la orden se asignan a la primera línea de la orden para evitar duplicarlos. En totales por orden/mes, esto suma correctamente.
+- Órdenes `pending` o `refunded` se excluyen para acercar la app al comportamiento de Shopify Analytics en ventas totales.
+- Si Shopify expone órdenes de prueba, canceladas o completamente anuladas, deben excluirse explícitamente en una siguiente validación contra el reporte oficial.
+- La app todavía debe validarse contra el timezone operacional de Colombia para cortes diarios.
+- Refunds se tratan según cómo Shopify los refleje en `totalPriceSet`; si una auditoría muestra diferencia contra Shopify Analytics, el ajuste debe hacerse una sola vez en el helper de ingresos.
 
 ## COGS vendido
 
@@ -51,56 +59,53 @@ Fuente oficial: Material Manager.
 
 Para cada línea de orden Shopify:
 
-1. Se identifica la variante Shopify vendida.
-2. Se toma el BOM de Material Manager asociado al `Variant ID`.
-3. Si una orden histórica trae variante borrada/null o un `Variant ID` que no está en el export actual de MM, se intenta match por nombre de producto contra el BOM promedio de ese producto en Material Manager.
-4. Se calcula el costo unitario como:
+1. Se identifica la variante vendida por `variantId`, SKU o nombre normalizado.
+2. Se busca el BOM correspondiente en Material Manager.
+3. Se calcula costo unitario BOM:
 
-`costo unitario BOM = suma(cantidad de material usada × costo unitario del material)`
+`costo unitario BOM = suma(cantidad componente × costo unitario material)`
 
-5. Se calcula COGS vendido de la línea:
+4. Se calcula COGS vendido de la línea:
 
 `COGS vendido línea = cantidad vendida × costo unitario BOM`
 
-6. Se suma por período:
+5. Se suma por período:
 
 `COGS vendido período = suma(COGS vendido línea)`
 
-Supuestos actuales:
+Supuestos Phase 1:
 
-- Si una línea no tiene BOM asociado, su COGS vendido queda en 0 y debe tratarse como problema de calidad de datos.
-- El Dashboard muestra la cobertura BOM de líneas vendidas. Si la cobertura es menor a 100%, COGS y utilidad neta son parciales y probablemente sobreestiman utilidad.
-- El costo usado es el costo actual exportado desde Material Manager, no costo histórico por batch.
-- No hay FIFO, promedio ponderado ni costo por lote en esta fase.
+- Si una línea vendida no tiene BOM, su COGS queda en 0 y se marca como alerta de datos.
+- La cobertura BOM se mide como líneas vendidas con costo real dividido por líneas vendidas totales.
+- El costo usado viene del export actual de Material Manager, no de costo histórico por lote.
+- No hay FIFO, promedio ponderado ni batch costing histórico en Phase 1.
 
 ## Gastos operativos
 
-Fuente oficial: sheet contable `Expenses` + gastos manuales.
+Fuente oficial: sheet `Expenses` + gastos manuales OS.
 
-Los gastos operativos son gastos reales del período que no corresponden a compra/capitalización de inventario.
+Clasificación:
 
-Actualmente se excluyen de gasto operativo las filas que parecen compra de inventario o capital por categoría, descripción, proveedor o nota con palabras como:
+- `operating`: gasto real del período que reduce utilidad neta.
+- `inventory`: compra de inventario/materiales; no se lleva como gasto directo mensual.
+- `capex`: compra de activos/equipos; no se lleva como gasto operativo mensual.
+- `uncategorized`: gasto real sin categoría clara; se incluye conservadoramente en gasto operativo y se alerta.
 
-- `Gilded Extracts`
-- `Materials`
-- `Microingredients`
-- `Supplies`
-- `Equipment`
-- cartuchos, destilado, terpenos, insumos, materia prima, hardware, empaque, imprenta
+Regla:
 
-Estas compras se muestran como `comprasInventarioExcluidas` y no se llevan a gasto directo del mes.
+`gastos operativos período = operating + uncategorized`
 
-Pendiente: normalizar categorías del histórico para separar con más precisión gasto operativo, inventario y activos/capex.
+`compras inventario/capex excluidas = inventory + capex`
 
 ## Utilidad y márgenes
 
 ### Utilidad bruta
 
-`utilidad bruta = ingreso neto - COGS vendido`
+`utilidad bruta = ventas totales Shopify - COGS vendido MM`
 
 ### Margen bruto
 
-`margen bruto = utilidad bruta / ingreso neto`
+`margen bruto = utilidad bruta / ventas totales Shopify`
 
 ### Utilidad neta
 
@@ -108,33 +113,39 @@ Pendiente: normalizar categorías del histórico para separar con más precisió
 
 ### Margen neto
 
-`margen neto = utilidad neta / ingreso neto`
+`margen neto = utilidad neta / ventas totales Shopify`
 
-## Dashboard actual
+## Caja operativa
 
-KPIs reales en Dashboard:
+Cuentas Phase 1:
 
-- Ingresos netos
-- COGS vendido
-- Utilidad bruta
-- Gastos operativos
-- Utilidad neta
-- Órdenes
-- AOV neto
-- Compras de inventario/capital excluidas del gasto operativo
+- Nequi
+- Nu débito
+- Nu crédito
+- Mercado Pago liberado
+- Mercado Pago no liberado
+- Efectivo/Otro cuando aplique
 
-Elementos todavía prototipo/seed:
+Cuando se agrega un gasto manual:
 
-- Panel CEO secundario excepto caja editable.
-- Alertas.
-- Predicciones/restock.
-- Inventario y compras.
-- P&L financiero detallado.
+- Si se paga con cuenta de activo, el balance baja.
+- Si se paga con Nu crédito, sube la deuda de tarjeta.
+- Si se borra un gasto manual, se revierte el efecto de caja.
 
-## Pendientes de calidad de datos
+## KPIs confiables en Phase 1
 
-- Validar timezone Shopify vs Colombia para fechas de órdenes.
-- Normalizar categorías de gastos históricos.
-- Definir exclusiones de órdenes Shopify: canceladas, test, pendientes o parcialmente refunded.
-- Implementar COGS histórico por batch/lote en Phase 2.
-- Implementar ingresos y COGS por SKU agrupando variantes según reglas de negocio.
+- Ventas totales por período desde Shopify.
+- Órdenes y AOV basado en ventas totales.
+- COGS vendido para líneas con BOM en Material Manager.
+- Cobertura BOM y lista de SKUs/líneas sin costo.
+- Gastos operativos reales clasificados.
+- Utilidad bruta y neta con advertencia cuando BOM coverage sea menor a 100%.
+- Unidades e ingresos por SKU cuando hay match Shopify ↔ MM/SKU.
+
+## Elementos todavía prototipo/Phase 2
+
+- Inventario y órdenes de compra como reemplazo completo de Material Manager.
+- Restock planner automático basado en inventario de materiales, lead times y calendario de compras.
+- Batch costing histórico, FIFO/promedio ponderado y trazabilidad por lote.
+- Calculadora de blends/carts integrada.
+- Dataico, facturación/fiscal y declaraciones automáticas: Phase 3, no implementado.

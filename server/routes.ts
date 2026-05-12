@@ -4,7 +4,7 @@ import type { Server } from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { insertExpenseSchema, updateCashAccountSchema, updateCloseChecklistSchema } from '@shared/schema';
-import type { DailyPerformance } from '@shared/schema';
+import type { Alert, DailyPerformance, Expense, Product } from '@shared/schema';
 import { storage } from './storage';
 import {
   channels, years, months, kpis, products,
@@ -313,6 +313,7 @@ function getOrderAccountingRevenue(order: LiveIncomeOrder) {
   const discounts = Math.max(0, grossProductRevenue - discountedProductRevenue);
   const shipping = moneyAmount(order.totalShippingPriceSet);
   const refunds = moneyAmount(order.totalRefundedSet);
+  const totalSales = moneyAmount(order.currentTotalPriceSet ?? order.totalPriceSet);
 
   return {
     grossProductRevenue,
@@ -320,7 +321,8 @@ function getOrderAccountingRevenue(order: LiveIncomeOrder) {
     discounts,
     shipping,
     refunds,
-    netRevenue: discountedProductRevenue + shipping - refunds,
+    totalSales,
+    netRevenue: totalSales,
   };
 }
 
@@ -337,14 +339,32 @@ function getExpenseText(expense: Record<string, unknown>) {
   ].filter(Boolean).join(' ').toLowerCase();
 }
 
-function isInventoryOrCapitalExpense(expense: Record<string, unknown>) {
+type ExpenseClassification = NonNullable<Expense['classification']>;
+
+function classifyExpense(expense: Record<string, unknown>): ExpenseClassification {
   const text = getExpenseText(expense);
-  return [
+  const category = String(expense.category ?? '').trim().toLowerCase();
+  if (!category || category === '.' || category === '-' || category.includes('sin categor') || category === 'otros' || category === 'other') {
+    return 'uncategorized';
+  }
+  if ([
+    'equipment',
+    'equipo',
+    'maquina',
+    'máquina',
+    'computador',
+    'impresora',
+    'mueble',
+    'capex',
+    'activo fijo',
+  ].some(keyword => text.includes(keyword))) {
+    return 'capex';
+  }
+  if ([
     'gilded extracts',
     'materials',
     'microingredients',
     'supplies',
-    'equipment',
     'cartucho',
     'cartuchos',
     'destilado',
@@ -356,19 +376,28 @@ function isInventoryOrCapitalExpense(expense: Record<string, unknown>) {
     'hardware',
     'empaque',
     'imprenta',
-  ].some(keyword => text.includes(keyword));
+    'inventario',
+    'materia',
+  ].some(keyword => text.includes(keyword))) {
+    return 'inventory';
+  }
+  return 'operating';
 }
 
 function splitOperatingAndInventoryExpenses(expenses: Array<Record<string, unknown>>) {
   return expenses.reduce((summary, expense) => {
     const amount = getExpenseAmount(expense);
-    if (isInventoryOrCapitalExpense(expense)) {
+    const classification = classifyExpense(expense);
+    if (classification === 'inventory') {
       summary.inventoryPurchases += amount;
+    } else if (classification === 'capex') {
+      summary.capex += amount;
     } else {
       summary.operatingExpenses += amount;
+      if (classification === 'uncategorized') summary.uncategorized += amount;
     }
     return summary;
-  }, { operatingExpenses: 0, inventoryPurchases: 0 });
+  }, { operatingExpenses: 0, inventoryPurchases: 0, capex: 0, uncategorized: 0 });
 }
 
 function monthLabel(month: string) {
@@ -390,7 +419,14 @@ function normalizeFulfillmentStatus(status: string): 'fulfilled' | 'unfulfilled'
   return 'unfulfilled';
 }
 
-function getPeriodQuery(params: { month?: string; year?: string }) {
+type PeriodParams = { month?: string; year?: string; start?: string; end?: string };
+
+function getPeriodQuery(params: PeriodParams) {
+  if (params.start && params.end && /^\d{4}-\d{2}-\d{2}$/.test(params.start) && /^\d{4}-\d{2}-\d{2}$/.test(params.end)) {
+    const end = new Date(`${params.end}T00:00:00`);
+    end.setUTCDate(end.getUTCDate() + 1);
+    return `created_at:>=${params.start} created_at:<${end.toISOString().slice(0, 10)}`;
+  }
   if (params.month && /^\d{4}-\d{2}$/.test(params.month)) {
     const start = `${params.month}-01`;
     const end = new Date(`${start}T00:00:00`);
@@ -404,6 +440,41 @@ function getPeriodQuery(params: { month?: string; year?: string }) {
   return 'created_at:>=2024-01-01';
 }
 
+function getPeriodParams(query: Record<string, unknown>): PeriodParams {
+  return {
+    month: typeof query.month === 'string' ? query.month : undefined,
+    year: typeof query.year === 'string' ? query.year : undefined,
+    start: typeof query.start === 'string' ? query.start : undefined,
+    end: typeof query.end === 'string' ? query.end : undefined,
+  };
+}
+
+function expenseInPeriod(expense: Record<string, unknown>, params: PeriodParams) {
+  const date = String(expense.date ?? '');
+  const month = String(expense.month ?? date.slice(0, 7));
+  if (params.month) return month === params.month;
+  if (params.year) return month.startsWith(`${params.year}-`);
+  if (params.start && date < params.start) return false;
+  if (params.end && date > params.end) return false;
+  return true;
+}
+
+function orderInPeriod(order: LiveIncomeOrder, params: PeriodParams) {
+  const paymentStatus = normalizePaymentStatus(order.displayFinancialStatus);
+  if (paymentStatus === 'pending' || paymentStatus === 'refunded') return false;
+  const date = order.createdAt.slice(0, 10);
+  const month = date.slice(0, 7);
+  if (params.month) return month === params.month;
+  if (params.year) return month.startsWith(`${params.year}-`);
+  if (params.start && date < params.start) return false;
+  if (params.end && date > params.end) return false;
+  return true;
+}
+
+function withExpenseClassification<T extends Record<string, unknown>>(expense: T): T & { classification: ExpenseClassification } {
+  return { ...expense, classification: classifyExpense(expense) };
+}
+
 type LiveIncomeOrder = {
   id: string;
   name: string;
@@ -412,6 +483,7 @@ type LiveIncomeOrder = {
   displayFulfillmentStatus: string;
   sourceName: string | null;
   totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
+  currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
   subtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
   totalDiscountsSet: { shopMoney: { amount: string; currencyCode: string } } | null;
   totalShippingPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
@@ -441,6 +513,7 @@ type AccountingLine = {
   product: string;
   productFamily: string;
   sku: string;
+  variantId: string;
   qty: number;
   grossRevenue: number;
   discounts: number;
@@ -450,11 +523,12 @@ type AccountingLine = {
   cogsUnit: number;
   cogsSold: number;
   hasBom: boolean;
+  bomMatchType: 'variant' | 'product_name' | 'missing';
   paymentStatus: 'paid' | 'pending' | 'refunded' | 'partially_refunded';
   fulfillmentStatus: 'fulfilled' | 'unfulfilled' | 'partial';
 };
 
-async function loadLiveShopifyIncomeOrders(params: { month?: string; year?: string } = {}) {
+async function loadLiveShopifyIncomeOrders(params: PeriodParams = {}) {
   const query = `
     query LiveIncomeOrders($cursor: String, $query: String!) {
       orders(first: 100, after: $cursor, sortKey: CREATED_AT, reverse: false, query: $query) {
@@ -468,6 +542,7 @@ async function loadLiveShopifyIncomeOrders(params: { month?: string; year?: stri
             displayFulfillmentStatus
             sourceName
             totalPriceSet { shopMoney { amount currencyCode } }
+            currentTotalPriceSet { shopMoney { amount currencyCode } }
             subtotalPriceSet { shopMoney { amount currencyCode } }
             totalDiscountsSet { shopMoney { amount currencyCode } }
             totalShippingPriceSet { shopMoney { amount currencyCode } }
@@ -504,21 +579,23 @@ async function loadLiveShopifyIncomeOrders(params: { month?: string; year?: stri
     hasNextPage = data.orders.pageInfo.hasNextPage;
     cursor = data.orders.pageInfo.endCursor;
   }
-  return allOrders;
+  return allOrders.filter(order => orderInPeriod(order, params));
 }
 
 function mapOrdersToAccountingLines(orders: LiveIncomeOrder[]): AccountingLine[] {
   return orders.flatMap(order => {
     const date = order.createdAt.slice(0, 10);
     const month = date.slice(0, 7);
-    const { shipping, refunds } = getOrderAccountingRevenue(order);
+    const { shipping, refunds, totalSales } = getOrderAccountingRevenue(order);
     const lineCount = Math.max(order.lineItems.edges.length, 1);
+    const discountedOrderProducts = sumOrderDiscountedLineRevenue(order);
     const customerOrders = Number(order.customer?.numberOfOrders ?? 1);
 
     return order.lineItems.edges.map((edge, index) => {
       const line = edge.node;
       const grossRevenue = moneyAmount(line.originalTotalSet);
       const netRevenue = moneyAmount(line.discountedTotalSet);
+      const allocationBase = discountedOrderProducts > 0 ? netRevenue / discountedOrderProducts : 1 / lineCount;
       const bom = getBomUnitCostByVariantId(line.variant?.id, line.title);
       return {
         orderId: order.id,
@@ -531,15 +608,17 @@ function mapOrdersToAccountingLines(orders: LiveIncomeOrder[]): AccountingLine[]
         product: line.title,
         productFamily: inferProductFamily(line.title),
         sku: line.variant?.sku ?? '—',
+        variantId: parseShopifyLegacyId(line.variant?.id),
         qty: line.quantity,
         grossRevenue,
         discounts: Math.max(0, grossRevenue - netRevenue),
         shipping: index === 0 ? shipping : 0,
         refunds: index === 0 ? refunds : 0,
-        netRevenue: netRevenue + (index === 0 ? shipping - refunds : 0),
+        netRevenue: totalSales * allocationBase,
         cogsUnit: bom.unitCost,
         cogsSold: bom.unitCost * line.quantity,
         hasBom: bom.hasBom,
+        bomMatchType: bom.matchType,
         paymentStatus: normalizePaymentStatus(order.displayFinancialStatus),
         fulfillmentStatus: normalizeFulfillmentStatus(order.displayFulfillmentStatus),
       };
@@ -575,11 +654,12 @@ function listDatesInMonth(month: string) {
 }
 
 async function buildDailyPerformanceRows(): Promise<DailyPerformance[]> {
-  const incomeRows = mapOrdersToIncomeDetails(await loadLiveShopifyIncomeOrders());
-  const expenseRows = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())] as Array<{
+  const incomeRows = mapOrdersToAccountingLines(await loadLiveShopifyIncomeOrders());
+  const expenseRows = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())].map(withExpenseClassification) as Array<{
     date: string;
     month: string;
     amount: number;
+    classification: ExpenseClassification;
   }>;
 
   const monthsWithData = new Set<string>();
@@ -589,6 +669,7 @@ async function buildDailyPerformanceRows(): Promise<DailyPerformance[]> {
   const byDate = new Map<string, {
     orders: Set<string>;
     revenue: number;
+    cogs: number;
     expenses: number;
     products: Map<string, { revenue: number; units: number }>;
   }>();
@@ -599,6 +680,7 @@ async function buildDailyPerformanceRows(): Promise<DailyPerformance[]> {
     const created = {
       orders: new Set<string>(),
       revenue: 0,
+      cogs: 0,
       expenses: 0,
       products: new Map<string, { revenue: number; units: number }>(),
     };
@@ -608,8 +690,9 @@ async function buildDailyPerformanceRows(): Promise<DailyPerformance[]> {
 
   for (const row of incomeRows) {
     const day = ensureDate(row.date);
-    day.orders.add(row.orderName);
+    day.orders.add(row.orderId);
     day.revenue += row.netRevenue;
+    day.cogs += row.cogsSold;
     const product = day.products.get(row.product) ?? { revenue: 0, units: 0 };
     product.revenue += row.netRevenue;
     product.units += row.qty;
@@ -617,6 +700,7 @@ async function buildDailyPerformanceRows(): Promise<DailyPerformance[]> {
   }
 
   for (const row of expenseRows) {
+    if (row.classification === 'inventory' || row.classification === 'capex') continue;
     const day = ensureDate(row.date);
     day.expenses += Number(row.amount || 0);
   }
@@ -629,15 +713,21 @@ async function buildDailyPerformanceRows(): Promise<DailyPerformance[]> {
       const productEntries = day ? Array.from(day.products.entries()) : [];
       const topProduct = productEntries.sort((a, b) => b[1].revenue - a[1].revenue)[0];
       const revenue = day?.revenue ?? 0;
+      const cogs = day?.cogs ?? 0;
       const expenses = day?.expenses ?? 0;
       const orders = day?.orders.size ?? 0;
+      const grossProfit = revenue - cogs;
+      const profit = grossProfit - expenses;
       return {
         date,
         month: date.slice(0, 7),
         orders,
         revenue,
+        cogs,
+        grossProfit,
         expenses,
-        profit: revenue - expenses,
+        profit,
+        netMargin: revenue ? profit / revenue : 0,
         aov: orders ? revenue / orders : 0,
         topProduct: topProduct?.[0] ?? '—',
         topProductRevenue: topProduct?.[1].revenue ?? 0,
@@ -703,7 +793,8 @@ function summarizeMonths(orders: LiveIncomeOrder[], expenses: Array<Record<strin
     if (!month) continue;
     const current = ensureMonth(month);
     const amount = getExpenseAmount(expense);
-    if (isInventoryOrCapitalExpense(expense)) {
+    const classification = classifyExpense(expense);
+    if (classification === 'inventory' || classification === 'capex') {
       current.inventoryPurchasesExcluded += amount;
     } else {
       current.operatingExpenses += amount;
@@ -721,7 +812,7 @@ function summarizeMonths(orders: LiveIncomeOrder[], expenses: Array<Record<strin
     netMargin: row.income ? (row.income - row.cogs - row.operatingExpenses) / row.income : 0,
     inventoryPurchasesExcluded: row.inventoryPurchasesExcluded,
     partial: month === new Date().toISOString().slice(0, 7),
-    note: `${row.orders.size} órdenes Shopify live; COGS vendido por BOM MM; gastos operativos reales. Compras de inventario/capital excluidas: ${Math.round(row.inventoryPurchasesExcluded).toLocaleString('es-CO')} COP.`,
+    note: `${row.orders.size} órdenes Shopify live; COGS vendido por BOM MM; gastos operativos reales. Compras de inventario/capex excluidas: ${Math.round(row.inventoryPurchasesExcluded).toLocaleString('es-CO')} COP.`,
   })).sort((a, b) => a.month.localeCompare(b.month));
 }
 
@@ -744,12 +835,106 @@ function summarizeChannels(orders: LiveIncomeOrder[]) {
   })).sort((a, b) => b.revenue - a.revenue);
 }
 
+function summarizeBomCoverage(lines: AccountingLine[]) {
+  const soldLines = lines.filter(line => line.qty > 0 && line.netRevenue !== 0);
+  const missing = soldLines.filter(line => !line.hasBom);
+  const grouped = new Map<string, {
+    product: string;
+    sku: string;
+    variantId: string;
+    units: number;
+    revenue: number;
+    lines: number;
+    orders: Set<string>;
+  }>();
+  for (const line of missing) {
+    const key = `${line.variantId || line.sku || 'sin-variante'}::${line.product}`;
+    const current = grouped.get(key) ?? {
+      product: line.product,
+      sku: line.sku,
+      variantId: line.variantId,
+      units: 0,
+      revenue: 0,
+      lines: 0,
+      orders: new Set<string>(),
+    };
+    current.units += line.qty;
+    current.revenue += line.netRevenue;
+    current.lines += 1;
+    current.orders.add(line.orderName);
+    grouped.set(key, current);
+  }
+  return {
+    totalSoldLines: soldLines.length,
+    matchedSoldLines: soldLines.length - missing.length,
+    coverage: soldLines.length ? (soldLines.length - missing.length) / soldLines.length : 1,
+    missingRevenue: missing.reduce((sum, line) => sum + line.netRevenue, 0),
+    missingUnits: missing.reduce((sum, line) => sum + line.qty, 0),
+    missingSkus: Array.from(grouped.values())
+      .map(row => ({
+        product: row.product,
+        sku: row.sku,
+        variantId: row.variantId,
+        units: row.units,
+        revenue: row.revenue,
+        lines: row.lines,
+        orders: row.orders.size,
+      }))
+      .sort((a, b) => b.revenue - a.revenue),
+  };
+}
+
+function addSalesToProducts(productRows: Product[], lines: AccountingLine[]): Product[] {
+  const bySku = new Map<string, { units: number; revenue: number; cogs: number; missingBomSales: number }>();
+  const byTitle = new Map<string, { units: number; revenue: number; cogs: number; missingBomSales: number }>();
+  const add = (map: Map<string, { units: number; revenue: number; cogs: number; missingBomSales: number }>, key: string, line: AccountingLine) => {
+    if (!key || key === '—') return;
+    const current = map.get(key) ?? { units: 0, revenue: 0, cogs: 0, missingBomSales: 0 };
+    current.units += line.qty;
+    current.revenue += line.netRevenue;
+    current.cogs += line.cogsSold;
+    if (!line.hasBom) current.missingBomSales += line.netRevenue;
+    map.set(key, current);
+  };
+  for (const line of lines) {
+    add(bySku, line.sku, line);
+    add(byTitle, normalizeProductMatchKey(line.product), line);
+  }
+  return productRows.map(product => {
+    const skuSummary = product.sku ? bySku.get(product.sku) : undefined;
+    const titleKey = normalizeProductMatchKey(product.name.split(' · ')[0] ?? product.name);
+    const titleSummary = byTitle.get(titleKey)
+      ?? Array.from(byTitle.entries()).find(([key]) => key.includes(titleKey) || titleKey.includes(key))?.[1];
+    const summary = skuSummary ?? titleSummary;
+    const missingBomSales = summary?.missingBomSales ?? 0;
+    const bomCoverage = product.cogsSource === 'material_manager'
+      ? missingBomSales > 0 ? 'partial' : 'complete'
+      : 'missing';
+    const warnings = [
+      product.cogsSource !== 'material_manager' ? 'Sin BOM MM para costo desglosado' : '',
+      product.cogsBreakdown.some(item => item.source === 'manual') ? 'Incluye mano de obra manual/no automatizada' : '',
+      product.cogsShopify === null ? 'Sin Shopify unitCost' : '',
+      product.cogsBreakdown.length === 0 || product.cogsBreakdown.every(item => item.amount === 0) ? 'Sin materiales clave en BOM' : '',
+    ].filter(Boolean);
+    return {
+      ...product,
+      unitsSold: summary?.units ?? 0,
+      revenue: summary?.revenue ?? 0,
+      missingBomSales,
+      bomCoverage,
+      missingLabor: !product.cogsBreakdown.some(item => /obra|producci|ensamble|qa|control|labor/i.test(item.label)),
+      missingShopifyCost: product.cogsShopify === null,
+      keyMaterialWarnings: warnings,
+    };
+  });
+}
+
 function buildDashboardKpis(orders: LiveIncomeOrder[], expenses: Array<Record<string, unknown>>) {
   const lines = mapOrdersToAccountingLines(orders);
   const orderIds = new Set(lines.map(line => line.orderId));
   const ingresos = lines.reduce((sum, line) => sum + line.netRevenue, 0);
   const cogsVendido = lines.reduce((sum, line) => sum + line.cogsSold, 0);
-  const { operatingExpenses, inventoryPurchases } = splitOperatingAndInventoryExpenses(expenses);
+  const { operatingExpenses, inventoryPurchases, capex, uncategorized } = splitOperatingAndInventoryExpenses(expenses);
   const utilidadBruta = ingresos - cogsVendido;
   const utilidadNeta = utilidadBruta - operatingExpenses;
   const recurrentOrderIds = new Set(lines.filter(line => line.customerType === 'recurrente').map(line => line.orderId));
@@ -769,7 +954,7 @@ function buildDashboardKpis(orders: LiveIncomeOrder[], expenses: Array<Record<st
     margenBruto: ingresos ? utilidadBruta / ingresos : 0,
     gastos: operatingExpenses,
     gastosOperativos: operatingExpenses,
-    comprasInventarioExcluidas: inventoryPurchases,
+    comprasInventarioExcluidas: inventoryPurchases + capex,
     utilidadNeta,
     margenEstimado: ingresos ? utilidadNeta / ingresos : 0,
     aov: orderIds.size ? ingresos / orderIds.size : 0,
@@ -777,10 +962,147 @@ function buildDashboardKpis(orders: LiveIncomeOrder[], expenses: Array<Record<st
     clientesRecurrentes: recurrentOrderIds.size,
     clientesRecurrentesPct: orderIds.size ? recurrentOrderIds.size / orderIds.size : 0,
     topProductFamily,
-    alertasActivas: 0,
+    alertasActivas: buildRealAlerts(lines, expenses).length,
     asOf: new Date().toISOString().slice(0, 10),
-    dataQualityNote: `${qualityPrefix}: Shopify ingresos/productos + MM BOM/COGS + gastos sheet/manual. Cobertura BOM en líneas vendidas: ${coverageText}; líneas sin BOM quedan en COGS 0 hasta corregir MM/matching. Compras inventario/capital excluidas de gastos operativos: ${Math.round(inventoryPurchases).toLocaleString('es-CO')} COP.`,
+    dataQualityNote: `${qualityPrefix}: Shopify ingresos/productos + MM BOM/COGS + gastos sheet/manual. Cobertura BOM en líneas vendidas: ${coverageText}; líneas sin BOM quedan en COGS 0 hasta corregir MM/matching. Compras inventario/capex excluidas de gastos operativos: ${Math.round(inventoryPurchases + capex).toLocaleString('es-CO')} COP. Gastos sin categoría incluidos como operativos y alertados: ${Math.round(uncategorized).toLocaleString('es-CO')} COP.`,
   };
+}
+
+function buildRealAlerts(lines: AccountingLine[], expenses: Array<Record<string, unknown>>): Alert[] {
+  const coverage = summarizeBomCoverage(lines);
+  const expenseRows = expenses.map(withExpenseClassification);
+  const uncategorized = expenseRows.filter(expense => expense.classification === 'uncategorized');
+  const operatingByCategory = expenseRows
+    .filter(expense => expense.classification === 'operating' || expense.classification === 'uncategorized')
+    .reduce((map, expense) => {
+      const category = expense.classification === 'uncategorized'
+        ? 'Sin categoría'
+        : (String(expense.category ?? '').trim() || 'Sin categoría');
+      map.set(category, (map.get(category) ?? 0) + getExpenseAmount(expense));
+      return map;
+    }, new Map<string, number>());
+  const topExpense = Array.from(operatingByCategory.entries()).sort((a, b) => b[1] - a[1])[0];
+  const alertsOut: Alert[] = [];
+  if (coverage.missingSkus.length > 0) {
+    alertsOut.push({
+      id: 'real-missing-bom',
+      level: coverage.coverage < 0.9 ? 'critical' : 'warn',
+      title: `${coverage.missingSkus.length} SKU/líneas vendidas sin BOM`,
+      description: `Cobertura BOM vendida ${(coverage.coverage * 100).toFixed(1)}%. Ingresos sin COGS reconocido: ${Math.round(coverage.missingRevenue).toLocaleString('es-CO')} COP.`,
+      recommendation: 'Abrir Productos & Márgenes y corregir matching Variant ID/SKU/handle en Material Manager. No inventar costo; cargar BOM real.',
+      area: 'productos',
+      href: '/productos',
+      source: 'real',
+      metric: 'bom_coverage',
+      skus: coverage.missingSkus.slice(0, 8).map(item => item.sku && item.sku !== '—' ? item.sku : item.product),
+    });
+  }
+  if (uncategorized.length > 0) {
+    const amount = uncategorized.reduce((sum, expense) => sum + getExpenseAmount(expense), 0);
+    alertsOut.push({
+      id: 'real-uncategorized-expenses',
+      level: amount > 1_000_000 ? 'critical' : 'warn',
+      title: `${uncategorized.length} gastos sin categoría contable útil`,
+      description: `Hay ${Math.round(amount).toLocaleString('es-CO')} COP clasificados como sin categoría/Otros. Se incluyen como gasto operativo para no inflar utilidad.`,
+      recommendation: 'Revisar Gastos y reclasificar en operación, inventario o capex antes de usar el cierre mensual.',
+      area: 'gastos',
+      href: '/gastos',
+      source: 'real',
+      metric: 'uncategorized_expenses',
+    });
+  }
+  if (topExpense) {
+    const totalRevenue = lines.reduce((sum, line) => sum + line.netRevenue, 0);
+    alertsOut.push({
+      id: 'real-top-expense-drag',
+      level: topExpense[1] > totalRevenue * 0.2 ? 'warn' : 'info',
+      title: `Mayor presión sobre utilidad: ${topExpense[0]}`,
+      description: `${topExpense[0]} suma ${Math.round(topExpense[1]).toLocaleString('es-CO')} COP en gastos operativos reales.`,
+      recommendation: 'Auditar esta categoría primero: buscar gastos recurrentes, duplicados, descuentos de proveedor o pagos que deban capitalizarse como inventario.',
+      area: 'gastos',
+      href: '/gastos',
+      source: 'real',
+      metric: 'top_operating_expense',
+    });
+  }
+  alertsOut.push({
+    id: 'real-phase1-scope',
+    level: 'info',
+    title: 'Phase 2 será reemplazar Material Manager',
+    description: 'Inventario, BOM, órdenes de compra, costos por material y batch costing siguen como roadmap de Phase 2. Dataico queda Phase 3.',
+    recommendation: 'Cerrar Phase 1 con métricas confiables y después diseñar el módulo interno que sustituye MM.',
+    area: 'sistema',
+    href: '/integracion',
+    source: 'real',
+  });
+  return alertsOut;
+}
+
+function buildRealSuggestions(lines: AccountingLine[], expenses: Array<Record<string, unknown>>) {
+  const monthsSummary = summarizeMonths([], expenses);
+  const byCategory = expenses.map(withExpenseClassification)
+    .filter(expense => expense.classification === 'operating' || expense.classification === 'uncategorized')
+    .reduce((map, expense) => {
+      const category = String(expense.category ?? 'Sin categoría') || 'Sin categoría';
+      map.set(category, (map.get(category) ?? 0) + getExpenseAmount(expense));
+      return map;
+    }, new Map<string, number>());
+  const topExpense = Array.from(byCategory.entries()).sort((a, b) => b[1] - a[1])[0];
+  const byProduct = lines.reduce((map, line) => {
+    const current = map.get(line.product) ?? { revenue: 0, cogs: 0, units: 0 };
+    current.revenue += line.netRevenue;
+    current.cogs += line.cogsSold;
+    current.units += line.qty;
+    map.set(line.product, current);
+    return map;
+  }, new Map<string, { revenue: number; cogs: number; units: number }>());
+  const topMargin = Array.from(byProduct.entries())
+    .filter(([, row]) => row.revenue > 0 && row.cogs > 0)
+    .map(([product, row]) => ({ product, ...row, grossProfit: row.revenue - row.cogs, margin: (row.revenue - row.cogs) / row.revenue }))
+    .sort((a, b) => b.grossProfit - a.grossProfit)[0];
+  const bomCoverage = summarizeBomCoverage(lines);
+  return [
+    topExpense ? {
+      id: 'real-save-top-expense',
+      type: 'sugerencia' as const,
+      priority: 'alta' as const,
+      title: `Ahorro: auditar ${topExpense[0]}`,
+      description: `${topExpense[0]} es la categoría operativa más pesada con ${Math.round(topExpense[1]).toLocaleString('es-CO')} COP.`,
+      whyItMatters: 'Cada peso reducido aquí mejora utilidad neta sin tocar precio ni calidad.',
+      suggestedAction: 'Exportar gastos del mes/año, revisar recurrencias, renegociar proveedor y reclasificar lo que sea inventario/capex.',
+      phase: 1 as const,
+    } : null,
+    {
+      id: 'real-bom-coverage-action',
+      type: 'analisis' as const,
+      priority: bomCoverage.coverage < 0.95 ? 'alta' as const : 'media' as const,
+      title: `COGS: cobertura BOM ${(bomCoverage.coverage * 100).toFixed(1)}%`,
+      description: `${bomCoverage.missingSkus.length} SKU/líneas vendidas todavía no reconocen COGS desde MM.`,
+      whyItMatters: 'La utilidad se sobreestima donde el COGS queda en 0.',
+      suggestedAction: 'Corregir Variant ID/SKU en Material Manager para los SKUs listados en Alertas antes de decidir descuentos fuertes.',
+      phase: 1 as const,
+    },
+    topMargin ? {
+      id: 'real-push-margin-winners',
+      type: 'sugerencia' as const,
+      priority: 'media' as const,
+      title: `Empujar ganador rentable: ${topMargin.product}`,
+      description: `Este SKU/familia aporta ${Math.round(topMargin.grossProfit).toLocaleString('es-CO')} COP de utilidad bruta con margen ${(topMargin.margin * 100).toFixed(1)}%.`,
+      whyItMatters: 'Subir volumen en SKUs con margen real positivo mejora caja sin depender solo de más tráfico.',
+      suggestedAction: 'Usarlo en bundles, campañas de recompra y cross-sell con productos de baja rotación.',
+      phase: 1 as const,
+    } : null,
+    {
+      id: 'real-monthly-close',
+      type: 'recordatorio' as const,
+      priority: 'media' as const,
+      title: 'Cierre mensual: exportar ingresos y gastos',
+      description: `${monthsSummary.length} meses tienen P&L calculado con Shopify + MM + gastos reales.`,
+      whyItMatters: 'Mantiene el archivo del contador consistente y reduce ajustes manuales.',
+      suggestedAction: 'Al cierre, exportar ingresos y gastos del mes desde el OS y revisar alertas de categorías antes de enviar al contador.',
+      phase: 1 as const,
+    },
+  ].filter(Boolean);
 }
 
 function csvEscape(value: unknown) {
@@ -946,10 +1268,12 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   // KPIs / dashboard
-  app.get('/api/kpis', async (_req, res) => {
+  app.get('/api/kpis', async (req, res) => {
     try {
-      const orders = await loadLiveShopifyIncomeOrders();
-      const allExpenses = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())];
+      const period = getPeriodParams(req.query);
+      const orders = await loadLiveShopifyIncomeOrders(period);
+      const allExpenses = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())]
+        .filter(expense => expenseInPeriod(expense, period));
       res.json(buildDashboardKpis(orders, allExpenses));
     } catch (error) {
       console.error('[kpis] failed to calculate real dashboard metrics', error);
@@ -975,10 +1299,12 @@ export async function registerRoutes(
       res.json([]);
     }
   });
-  app.get('/api/months', async (_req, res) => {
+  app.get('/api/months', async (req, res) => {
     try {
-      const orders = await loadLiveShopifyIncomeOrders();
-      const allExpenses = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())];
+      const period = getPeriodParams(req.query);
+      const orders = await loadLiveShopifyIncomeOrders(period);
+      const allExpenses = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())]
+        .filter(expense => expenseInPeriod(expense, period));
       res.json(summarizeMonths(orders, allExpenses));
     } catch {
       res.json([]);
@@ -996,7 +1322,11 @@ export async function registerRoutes(
   // Tabs
   app.get('/api/products', async (_req, res) => {
     try {
-      res.json(await loadLiveShopifyProducts());
+      const [productRows, orders] = await Promise.all([
+        loadLiveShopifyProducts(),
+        loadLiveShopifyIncomeOrders(),
+      ]);
+      res.json(addSalesToProducts(productRows, mapOrdersToAccountingLines(orders)));
     } catch {
       res.json(products);
     }
@@ -1014,7 +1344,7 @@ export async function registerRoutes(
   });
   app.get('/api/expenses', async (_req, res) => {
     const manualExpenses = await storage.listManualExpenses();
-    res.json([...loadHistoricalExpenses(), ...manualExpenses]);
+    res.json([...loadHistoricalExpenses(), ...manualExpenses].map(withExpenseClassification));
   });
   app.get('/api/export/income.csv', async (req, res) => {
     try {
@@ -1048,7 +1378,7 @@ export async function registerRoutes(
   app.get('/api/export/expenses.csv', async (req, res) => {
     const month = typeof req.query.month === 'string' ? req.query.month : undefined;
     const year = typeof req.query.year === 'string' ? req.query.year : undefined;
-    const rows = ([...loadHistoricalExpenses(), ...(await storage.listManualExpenses())] as Array<{
+      const rows = ([...loadHistoricalExpenses(), ...(await storage.listManualExpenses())].map(withExpenseClassification) as Array<{
       date: string;
       month: string;
       category: string;
@@ -1063,6 +1393,7 @@ export async function registerRoutes(
       amount: number;
       source: 'sheet' | 'manual' | 'shopify';
       notes?: string;
+      classification: ExpenseClassification;
     }>)
       .filter(expense => !month || expense.month === month)
       .filter(expense => !year || expense.month.startsWith(`${year}-`))
@@ -1079,12 +1410,13 @@ export async function registerRoutes(
         trm: expense.fxRate ?? '',
         impuesto_cop: expense.tax ?? '',
         monto_cop: Math.round(expense.amount),
+        clasificacion: expense.classification,
         origen: expense.source,
         notas: expense.notes ?? '',
       }));
     sendCsv(res, `connabis-gastos-${month ?? year ?? 'all-time'}.csv`, rows, [
       'fecha', 'mes', 'categoria', 'descripcion', 'pagado_a', 'pagado_con',
-      'pagado_por', 'moneda', 'monto_original', 'trm', 'impuesto_cop', 'monto_cop', 'origen', 'notas',
+      'pagado_por', 'moneda', 'monto_original', 'trm', 'impuesto_cop', 'monto_cop', 'clasificacion', 'origen', 'notas',
     ]);
   });
   app.post('/api/expenses', async (req, res) => {
@@ -1092,8 +1424,12 @@ export async function registerRoutes(
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid expense', details: parsed.error.flatten() });
     }
-    const created = await storage.createManualExpense(parsed.data);
-    res.status(201).json(created);
+    try {
+      const created = await storage.createManualExpense(parsed.data);
+      res.status(201).json(created);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'expense_create_failed' });
+    }
   });
   app.delete('/api/expenses/:id', async (req, res) => {
     if (!req.params.id.startsWith('manual-')) {
@@ -1109,10 +1445,48 @@ export async function registerRoutes(
       res.json(dailyPerformance);
     }
   });
-  app.get('/api/alerts', (_req, res) => res.json(alerts));
+  app.get('/api/day-details', async (req, res) => {
+    try {
+      const date = typeof req.query.date === 'string' ? req.query.date : '';
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date inválida' });
+      const orders = await loadLiveShopifyIncomeOrders({ start: date, end: date });
+      const income = mapOrdersToAccountingLines(orders).filter(line => line.date === date);
+      const expenses = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())]
+        .map(withExpenseClassification)
+        .filter(expense => String(expense.date) === date && expense.classification !== 'inventory' && expense.classification !== 'capex');
+      res.json({ date, income, expenses });
+    } catch (error) {
+      res.status(502).json({ error: error instanceof Error ? error.message : 'day_details_failed' });
+    }
+  });
+  app.get('/api/bom-coverage', async (_req, res) => {
+    try {
+      const lines = mapOrdersToAccountingLines(await loadLiveShopifyIncomeOrders());
+      res.json(summarizeBomCoverage(lines));
+    } catch (error) {
+      res.status(502).json({ error: error instanceof Error ? error.message : 'bom_coverage_failed' });
+    }
+  });
+  app.get('/api/alerts', async (_req, res) => {
+    try {
+      const orders = await loadLiveShopifyIncomeOrders();
+      const allExpenses = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())];
+      res.json(buildRealAlerts(mapOrdersToAccountingLines(orders), allExpenses));
+    } catch {
+      res.json(alerts.map(alert => ({ ...alert, source: 'seed' })));
+    }
+  });
   app.get('/api/integration-phases', (_req, res) => res.json(integrationPhases));
   app.get('/api/glossary', (_req, res) => res.json(glossaryTerms));
-  app.get('/api/accounting-suggestions', (_req, res) => res.json(accountingSuggestions));
+  app.get('/api/accounting-suggestions', async (_req, res) => {
+    try {
+      const orders = await loadLiveShopifyIncomeOrders();
+      const allExpenses = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())];
+      res.json(buildRealSuggestions(mapOrdersToAccountingLines(orders), allExpenses));
+    } catch {
+      res.json(accountingSuggestions);
+    }
+  });
   app.get('/api/restock-plan', (_req, res) => res.json(restockRecommendations));
   app.get('/api/pnl', (_req, res) => res.json(pnlRows));
   app.get('/api/cash-accounts', async (_req, res) => res.json(await storage.listCashAccounts()));

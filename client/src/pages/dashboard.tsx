@@ -17,6 +17,7 @@ import { Link } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { useMemo, useState } from 'react';
 import { sortByMonth, type ChartSortOrder } from '@/lib/chart-sort';
+import { apiRequest } from '@/lib/queryClient';
 
 const CHART_COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))'];
 
@@ -34,8 +35,24 @@ function formatCeoValue(metric: CeoMetric) {
 }
 
 export default function Dashboard() {
-  const kpis = useQuery<DashboardKPIs>({ queryKey: ['/api/kpis'] });
-  const months = useQuery<MonthlyRow[]>({ queryKey: ['/api/months'] });
+  const [periodMode, setPeriodMode] = useState<'all' | 'month' | 'year' | 'ytd'>('all');
+  const [selectedMonth, setSelectedMonth] = useState('2026-04');
+  const [selectedYear, setSelectedYear] = useState('2026');
+  const periodQuery = periodMode === 'month'
+    ? `?month=${selectedMonth}`
+    : periodMode === 'year'
+    ? `?year=${selectedYear}`
+    : periodMode === 'ytd'
+    ? `?start=${selectedYear}-01-01&end=${new Date().toISOString().slice(0, 10)}`
+    : '';
+  const kpis = useQuery<DashboardKPIs>({
+    queryKey: ['/api/kpis', periodQuery],
+    queryFn: async () => (await apiRequest('GET', `/api/kpis${periodQuery}`)).json(),
+  });
+  const months = useQuery<MonthlyRow[]>({
+    queryKey: ['/api/months', periodQuery],
+    queryFn: async () => (await apiRequest('GET', `/api/months${periodQuery}`)).json(),
+  });
   const channels = useQuery<Channel[]>({ queryKey: ['/api/channels'] });
   const alerts = useQuery<Alert[]>({ queryKey: ['/api/alerts'] });
   const ceoMetrics = useQuery<CeoMetric[]>({ queryKey: ['/api/ceo-metrics'] });
@@ -58,6 +75,29 @@ export default function Dashboard() {
               <p className="text-[11px] text-amber-100/85 mt-2 leading-relaxed" data-testid="text-dashboard-data-quality">
                 {k.dataQualityNote}
               </p>
+            )}
+          </div>
+        </div>
+      </Card>
+
+      <Card className="mb-6 p-4 bg-card border-card-border" data-testid="card-dashboard-date-filter">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold tracking-tight">Filtro de fecha global</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Dashboard usa el mismo criterio que Performance: ingresos totales Shopify + MM + gastos reales.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <select value={periodMode} onChange={e => setPeriodMode(e.target.value as typeof periodMode)} className="h-9 rounded-md border border-input bg-background px-3 text-xs" data-testid="select-dashboard-period">
+              <option value="all">All-time</option>
+              <option value="month">Mes</option>
+              <option value="year">Año</option>
+              <option value="ytd">YTD</option>
+            </select>
+            {periodMode === 'month' && (
+              <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-xs" data-testid="input-dashboard-month" />
+            )}
+            {(periodMode === 'year' || periodMode === 'ytd') && (
+              <input value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="h-9 w-24 rounded-md border border-input bg-background px-3 text-xs" data-testid="input-dashboard-year" />
             )}
           </div>
         </div>

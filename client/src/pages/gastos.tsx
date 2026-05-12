@@ -46,11 +46,11 @@ export default function Gastos() {
   const expenses = useQuery<Expense[]>({ queryKey: ['/api/expenses'] });
   const [draft, setDraft] = useState({
     date: new Date().toISOString().slice(0, 10),
-    category: 'Inventario',
+    category: 'Operación',
     description: '',
     paidTo: 'Shopify',
     paidToOther: '',
-    paidWith: 'Bancolombia',
+    paidWith: 'Nequi',
     currency: 'COP' as 'COP' | 'USD',
     amount: '',
     originalAmount: '',
@@ -116,21 +116,29 @@ export default function Gastos() {
     }) => (await apiRequest('POST', '/api/expenses', payload)).json() as Promise<Expense>,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/cash-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/cash-flow'] });
       setDraft(prev => ({ ...prev, description: '', paidToOther: '', amount: '', originalAmount: '', fxRate: '' }));
     },
   });
 
   const deleteExpense = useMutation({
     mutationFn: async (id: string) => (await apiRequest('DELETE', `/api/expenses/${id}`)).json(),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['/api/expenses'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/cash-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/cash-flow'] });
+    },
   });
 
   function addExpense(e: FormEvent) {
     e.preventDefault();
-    const amount = parseAmountInput(draft.amount);
-    if (!draft.date || !draft.description.trim() || !Number.isFinite(amount) || amount <= 0) return;
-    const originalAmount = draft.currency === 'USD' ? parseAmountInput(draft.originalAmount || draft.amount) : amount;
+    const copAmount = parseAmountInput(draft.amount);
+    const originalAmount = draft.currency === 'USD' ? parseAmountInput(draft.originalAmount || draft.amount) : copAmount;
     const fxRate = draft.currency === 'USD' ? parseAmountInput(draft.fxRate || '0') : undefined;
+    const amount = draft.currency === 'USD' ? originalAmount * (fxRate ?? 0) : copAmount;
+    if (!draft.date || !draft.category || !draft.description.trim() || !Number.isFinite(amount) || amount <= 0) return;
+    if (draft.currency === 'USD' && (!fxRate || fxRate <= 0 || !originalAmount)) return;
     const paidTo = draft.paidTo === 'Otro' ? draft.paidToOther.trim() : draft.paidTo;
     createExpense.mutate({
       date: draft.date,
@@ -199,7 +207,7 @@ export default function Gastos() {
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 data-testid="select-expense-category"
               >
-                {['Inventario', 'Marketing', 'Logística', 'Comisiones', 'Operación', 'Impuestos', 'Muestras', 'Reposiciones', 'Software', 'Otros'].map(c => (
+                {['Operación', 'Inventario', 'Capex', 'Marketing', 'Logística', 'Comisiones', 'Impuestos', 'Muestras', 'Reposiciones', 'Software', 'Nómina', 'Servicios profesionales', 'Otros'].map(c => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
@@ -243,7 +251,7 @@ export default function Gastos() {
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 data-testid="select-expense-paid-with"
               >
-                {['Bancolombia', 'Nequi', 'Nu crédito', 'Nu débito', 'Daviplata', 'Tarjeta crédito', 'Tarjeta débito', 'Efectivo', 'PayPal', 'Wise', 'Cripto', 'Otro'].map(c => (
+                {['Nequi', 'Nu crédito', 'Nu débito', 'Mercado Pago liberado', 'Mercado Pago no liberado', 'Efectivo', 'Otro'].map(c => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
@@ -261,14 +269,15 @@ export default function Gastos() {
               </select>
             </label>
             <label className="space-y-1.5">
-              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Monto COP</span>
+              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{draft.currency === 'USD' ? 'Monto COP calculado' : 'Monto COP'}</span>
               <Input
                 type="text"
                 inputMode="numeric"
-                value={draft.amount}
+                value={draft.currency === 'USD' && draft.originalAmount && draft.fxRate ? formatAmountInput(String(parseAmountInput(draft.originalAmount) * parseAmountInput(draft.fxRate))) : draft.amount}
                 onChange={e => setDraft(prev => ({ ...prev, amount: formatAmountInput(e.target.value) }))}
                 placeholder="0"
                 className="text-right tabular pr-4"
+                disabled={draft.currency === 'USD'}
                 data-testid="input-expense-amount"
               />
             </label>
