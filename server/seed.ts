@@ -202,7 +202,11 @@ export const materials: MaterialCost[] = [
 ];
 
 // ----- Purchase orders -----
-export const purchaseOrders: PurchaseOrder[] = [
+// DEPRECATED (Phase 2.2): no longer served by any API. Real POs come from the
+// MM purchase order CSVs imported by `material-manager-purchase-orders.ts`.
+// Kept here only to avoid a structural change to seed.ts in this PR — nothing
+// imports this constant.
+const _deprecatedSeedPurchaseOrders: PurchaseOrder[] = [
   {
     id: 'po1', date: '2026-04-08', supplier: 'Noids Hardware MX', category: 'Cartuchos 2.25mL', qty: 200,
     unitCost: 6_356.26, shipping: 350_000, tax: 241_538, landedCost: 1_862_790, status: 'recibido',

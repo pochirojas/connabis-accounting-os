@@ -640,3 +640,54 @@ export type MmMaterialEffective = MmMaterialRow & {
   override: MmMaterialOverrideRow | null;
   baseMaterial: MmMaterialRow;   // pristine MM row (for rollback display)
 };
+
+// ---------- Real Material Manager purchase orders (Phase 2.2) ----------
+// Imported from the per-PO CSV files exported from Material Manager. The data
+// here is the only source of truth for purchase orders in the UI — the legacy
+// seed PO list under `seed.ts` is no longer rendered. PO10 is intentionally
+// missing from the CSV set (cancelled) and is represented here with status
+// `cancelled` so totals/stock are not affected but the gap is visible.
+export type MmPoStatus = 'received' | 'cancelled';
+
+export type MmPurchaseOrderLine = {
+  id: number;
+  purchaseOrderId: number;
+  poNumber: string;
+  product: string;
+  sku: string;
+  quantity: number;   // float — never rounded
+  unitCost: number;
+  taxPct: number;
+  totalCop: number;
+  lineIndex: number;
+};
+
+export type MmPurchaseOrder = {
+  id: number;
+  poNumber: string;          // e.g. "PO1"
+  date: string;              // ISO date
+  supplier: string;
+  shipTo: string;
+  currency: string;
+  referenceNumber: string | null;
+  notes: string | null;
+  subtotal: number;
+  taxes: number;
+  shipping: number;
+  total: number;
+  status: MmPoStatus;
+  sourceFile: string | null;
+  importedAt: string;
+  lineCount: number;
+  lines?: MmPurchaseOrderLine[];
+};
+
+export type MmPurchaseOrdersStatus = {
+  totalPos: number;
+  cancelledPos: number;
+  receivedPos: number;
+  totalAmount: number;       // sum of received POs only
+  totalLines: number;
+  suppliers: number;
+  lastImportedAt: string | null;
+};

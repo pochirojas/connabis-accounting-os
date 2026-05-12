@@ -14,9 +14,10 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
-import { formatCOP, formatDate, formatNumber } from '@/lib/format';
+import { formatCOP, formatDate, formatNumber, formatQty } from '@/lib/format';
 import type {
-  MaterialCost, MmBomRow, MmCostHistoryRow, MmMaterialRow, MmMirrorStatus, PurchaseOrder,
+  MaterialCost, MmBomRow, MmCostHistoryRow, MmMaterialRow, MmMirrorStatus,
+  MmPurchaseOrder, MmPurchaseOrdersStatus,
 } from '@shared/schema';
 import { MaterialDetailView } from '@/components/material-detail';
 import { ProductBomEditor } from '@/components/product-bom-editor';
@@ -54,8 +55,28 @@ export default function MaterialManagerPage() {
 
   // Legacy "Inventario & Compras" data — Purchase Orders + material lastCost reference list.
   const materialsLegacy = useQuery<MaterialCost[]>({ queryKey: ['/api/materials'] });
-  const purchaseOrders = useQuery<PurchaseOrder[]>({ queryKey: ['/api/purchase-orders'] });
-  const [selectedPoId, setSelectedPoId] = useState<string | null>(null);
+  // Real MM purchase orders — replaces seed data entirely.
+  const purchaseOrders = useQuery<MmPurchaseOrder[]>({ queryKey: ['/api/material-manager/purchase-orders'] });
+  const purchaseOrderStatus = useQuery<MmPurchaseOrdersStatus>({ queryKey: ['/api/material-manager/purchase-orders/status'] });
+  const [selectedPoNumber, setSelectedPoNumber] = useState<string | null>(null);
+  const selectedPoDetail = useQuery<MmPurchaseOrder>({
+    queryKey: ['/api/material-manager/purchase-orders', selectedPoNumber],
+    enabled: Boolean(selectedPoNumber),
+    queryFn: async () => {
+      const response = await fetch(`/api/material-manager/purchase-orders/${selectedPoNumber}`);
+      if (!response.ok) throw new Error(`PO ${selectedPoNumber} → ${response.status}`);
+      return response.json();
+    },
+  });
+  const reimportPos = useMutation({
+    mutationFn: () => postJson('/api/material-manager/purchase-orders/import'),
+    onSuccess: () => {
+      toast({ title: 'Órdenes de compra reimportadas', description: 'Datos recargados desde los CSV reales.' });
+      queryClient.invalidateQueries({ queryKey: ['/api/material-manager/purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/material-manager/purchase-orders/status'] });
+    },
+    onError: (error) => toast({ title: 'No se pudieron reimportar las POs', description: String(error), variant: 'destructive' }),
+  });
 
   const importMutation = useMutation({
     mutationFn: () => postJson('/api/material-manager/import') as Promise<ImportResponse>,
@@ -125,10 +146,8 @@ export default function MaterialManagerPage() {
 
   const s = status.data;
   const lastQa = s?.lastQa;
-  const selectedPO = useMemo(
-    () => (purchaseOrders.data ?? []).find(p => p.id === selectedPoId) ?? (purchaseOrders.data ?? [])[0],
-    [purchaseOrders.data, selectedPoId],
-  );
+  const realPos = purchaseOrders.data ?? [];
+  const selectedPO = selectedPoDetail.data ?? realPos.find(p => p.poNumber === selectedPoNumber) ?? null;
 
   // If a material is selected, render its detail page (full layout).
   if (selectedMaterialId) {
@@ -231,7 +250,7 @@ export default function MaterialManagerPage() {
                       <TableCell className="text-[12px]">{m.supplier || <span className="text-muted-foreground">desconocido</span>}</TableCell>
                       <TableCell className="text-right tabular">{formatCOP(m.cost)}</TableCell>
                       <TableCell className="text-[11.5px] text-muted-foreground">{m.measurement || '—'}</TableCell>
-                      <TableCell className="text-right tabular">{formatNumber(m.stock)}</TableCell>
+                      <TableCell className="text-right tabular">{formatQty(m.stock)}</TableCell>
                       <TableCell className="space-x-1">
                         {m.isInsumo && <Badge variant="outline" className="text-[10px]">Insumo</Badge>}
                         {m.isNoid && <Badge variant="outline" className="text-[10px]">Noid</Badge>}
@@ -280,7 +299,7 @@ export default function MaterialManagerPage() {
                       <TableCell className="text-[12.5px]">{row.productName}</TableCell>
                       <TableCell className="text-[12px] text-muted-foreground">{row.variantName}</TableCell>
                       <TableCell className="text-[12.5px]">{row.materialName}</TableCell>
-                      <TableCell className="text-right tabular">{formatNumber(row.quantity)}</TableCell>
+                      <TableCell className="text-right tabular">{formatQty(row.quantity)}</TableCell>
                       <TableCell className="text-right">
                         <Button
                           size="sm"
@@ -305,74 +324,85 @@ export default function MaterialManagerPage() {
         <TabsContent value="purchase" className="mt-4 space-y-4">
           <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <KpiCard
-              label="Compras período"
-              value={formatCOP((purchaseOrders.data ?? []).reduce((s, p) => s + p.landedCost, 0))}
+              label="Compras totales (POs reales)"
+              value={formatCOP(purchaseOrderStatus.data?.totalAmount ?? 0)}
               icon={Package2}
               emphasis="emerald"
               testId="kpi-compras-total"
             />
             <KpiCard
-              label="POs en tránsito"
-              value={`${(purchaseOrders.data ?? []).filter(p => p.status === 'en_transito').length}`}
+              label="POs reales importadas"
+              value={`${purchaseOrderStatus.data?.receivedPos ?? 0}`}
               icon={Truck}
-              testId="kpi-pos-transito"
+              testId="kpi-pos-real"
             />
             <KpiCard
-              label="POs pendientes"
-              value={`${(purchaseOrders.data ?? []).filter(p => p.status === 'pendiente').length}`}
-              icon={Package2}
-              testId="kpi-pos-pendientes"
+              label="POs canceladas"
+              value={`${purchaseOrderStatus.data?.cancelledPos ?? 0}`}
+              icon={FileWarning}
+              testId="kpi-pos-canceladas"
             />
             <KpiCard
-              label="SKUs materiales (legacy)"
-              value={`${materialsLegacy.data?.length ?? 0}`}
+              label="Proveedores"
+              value={`${purchaseOrderStatus.data?.suppliers ?? 0}`}
               icon={Boxes}
               emphasis="gold"
-              testId="kpi-skus-materiales"
+              testId="kpi-pos-proveedores"
             />
           </section>
 
           <Card className="p-5" data-testid="card-purchase-orders">
             <div className="flex items-center justify-between mb-3">
               <div>
-                <h3 className="text-sm font-semibold tracking-tight">Órdenes de compra (legacy)</h3>
-                <p className="text-xs text-muted-foreground">Estas vienen del seed prototipo. Se mantendrán en este tab hasta que reemplacemos PO con la fuente MM.</p>
+                <h3 className="text-sm font-semibold tracking-tight">Órdenes de compra (Material Manager · datos reales)</h3>
+                <p className="text-xs text-muted-foreground">
+                  Importadas desde los CSVs de Material Manager en <code>/home/user/workspace/purchase_order_po*.csv</code>.
+                  PO10 está cancelada (sin CSV) y se muestra para visibilidad, pero <strong>no</strong> suma a totales/stock.
+                  Click en una fila para ver líneas y resumen.
+                </p>
               </div>
-              <Badge variant="outline" className="text-[11px]">{purchaseOrders.data?.length ?? 0} órdenes</Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[11px]">{realPos.length} órdenes</Badge>
+                <Button size="sm" variant="outline" onClick={() => reimportPos.mutate()} disabled={reimportPos.isPending} data-testid="button-reimport-pos">
+                  <RefreshCcw className="h-3.5 w-3.5 mr-1.5" />
+                  {reimportPos.isPending ? 'Reimportando…' : 'Reimportar CSV'}
+                </Button>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>PO</TableHead>
                     <TableHead>Fecha</TableHead>
                     <TableHead>Proveedor</TableHead>
-                    <TableHead>Categoría</TableHead>
-                    <TableHead className="text-right">Cant.</TableHead>
-                    <TableHead className="text-right">Costo unit.</TableHead>
-                    <TableHead className="text-right">Costo aterrizado</TableHead>
+                    <TableHead className="text-right">Líneas</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
                     <TableHead>Estado</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(purchaseOrders.data ?? []).map(p => (
+                  {realPos.length === 0 ? (
+                    <TableRow><TableCell colSpan={6} className="text-center text-xs text-muted-foreground py-4">Sin órdenes importadas. Click "Reimportar CSV".</TableCell></TableRow>
+                  ) : null}
+                  {realPos.map(p => (
                     <TableRow
-                      key={p.id}
+                      key={p.poNumber}
                       role="button"
                       tabIndex={0}
-                      onClick={() => setSelectedPoId(p.id)}
-                      className={`cursor-pointer transition-colors hover:bg-muted/35 ${selectedPO?.id === p.id ? 'bg-accent/8' : ''}`}
-                      data-testid={`row-po-${p.id}`}
+                      onClick={() => setSelectedPoNumber(p.poNumber)}
+                      className={`cursor-pointer transition-colors hover:bg-muted/35 ${selectedPoNumber === p.poNumber ? 'bg-accent/8' : ''} ${p.status === 'cancelled' ? 'opacity-60' : ''}`}
+                      data-testid={`row-po-${p.poNumber}`}
                     >
-                      <TableCell className="text-sm tabular">{formatDate(p.date)}</TableCell>
-                      <TableCell className="text-[13px] font-medium">{p.supplier}</TableCell>
-                      <TableCell><Badge variant="outline" className="text-[10.5px]">{p.category}</Badge></TableCell>
-                      <TableCell className="text-right tabular">{formatNumber(p.qty)}</TableCell>
-                      <TableCell className="text-right tabular">{formatCOP(p.unitCost)}</TableCell>
-                      <TableCell className="text-right tabular font-semibold">{formatCOP(p.landedCost)}</TableCell>
+                      <TableCell className="text-[13px] font-semibold tabular">{p.poNumber}</TableCell>
+                      <TableCell className="text-sm tabular">{p.date ? formatDate(p.date) : '—'}</TableCell>
+                      <TableCell className="text-[13px]">{p.supplier || (p.status === 'cancelled' ? <span className="text-muted-foreground italic">Cancelada</span> : '—')}</TableCell>
+                      <TableCell className="text-right tabular">{formatNumber(p.lineCount)}</TableCell>
+                      <TableCell className="text-right tabular font-semibold">{formatCOP(p.total)}</TableCell>
                       <TableCell>
-                        {p.status === 'recibido' && <Badge className="text-[10px] bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/15">Recibido</Badge>}
-                        {p.status === 'en_transito' && <Badge className="text-[10px] bg-sky-500/15 text-sky-300 border-sky-500/30 hover:bg-sky-500/15">En tránsito</Badge>}
-                        {p.status === 'pendiente' && <Badge variant="outline" className="text-[10px]">Pendiente</Badge>}
+                        {p.status === 'cancelled'
+                          ? <Badge variant="outline" className="text-[10px] border-rose-500/40 text-rose-300">Cancelada</Badge>
+                          : <Badge className="text-[10px] bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/15">Recibida</Badge>}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -385,32 +415,52 @@ export default function MaterialManagerPage() {
             <Card className="p-5" data-testid="card-po-detail">
               <div className="flex items-center justify-between mb-3">
                 <div>
-                  <h3 className="text-sm font-semibold tracking-tight">{selectedPO.id.toUpperCase()} · {selectedPO.supplier}</h3>
-                  <p className="text-[11px] text-muted-foreground">Fecha {formatDate(selectedPO.date)} · {selectedPO.paymentMethod} · {selectedPO.currency}</p>
+                  <h3 className="text-sm font-semibold tracking-tight">{selectedPO.poNumber} · {selectedPO.supplier || (selectedPO.status === 'cancelled' ? 'Cancelada' : '—')}</h3>
+                  <p className="text-[11px] text-muted-foreground">
+                    {selectedPO.date ? `Fecha ${formatDate(selectedPO.date)} · ` : ''}
+                    Moneda {selectedPO.currency}
+                    {selectedPO.referenceNumber ? ` · Ref ${selectedPO.referenceNumber}` : ''}
+                  </p>
+                  {selectedPO.notes ? <p className="text-[11px] text-amber-300 mt-1">{selectedPO.notes}</p> : null}
                 </div>
-                <Badge variant="outline" className="text-[11px]">{selectedPO.items.length} items</Badge>
+                <Badge variant="outline" className="text-[11px]">{(selectedPO.lines ?? []).length} líneas</Badge>
               </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Material</TableHead>
-                    <TableHead className="text-right">Cant.</TableHead>
-                    <TableHead className="text-right">Subtotal</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {selectedPO.items.map((item, index) => (
-                    <TableRow key={`${selectedPO.id}-${index}`} data-testid={`row-po-item-${selectedPO.id}-${index}`}>
-                      <TableCell>
-                        <div className="text-[13px] font-medium">{item.material}</div>
-                        <div className="text-[11px] text-muted-foreground font-mono">{item.sku ?? 'SKU pendiente'}</div>
-                      </TableCell>
-                      <TableCell className="text-right tabular">{formatNumber(item.qty)}</TableCell>
-                      <TableCell className="text-right tabular font-medium">{formatCOP(item.subtotal)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              {selectedPO.status === 'cancelled' ? (
+                <p className="text-[11.5px] text-muted-foreground">
+                  Esta orden está marcada como cancelada y no aporta al total de compras ni al inventario.
+                </p>
+              ) : (
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Producto</TableHead>
+                        <TableHead>SKU</TableHead>
+                        <TableHead className="text-right">Cant.</TableHead>
+                        <TableHead className="text-right">Costo unit.</TableHead>
+                        <TableHead className="text-right">Total COP</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(selectedPO.lines ?? []).map((line) => (
+                        <TableRow key={line.id} data-testid={`row-po-line-${selectedPO.poNumber}-${line.lineIndex}`}>
+                          <TableCell className="text-[13px] font-medium">{line.product}</TableCell>
+                          <TableCell className="text-[11.5px] font-mono text-muted-foreground">{line.sku || '—'}</TableCell>
+                          <TableCell className="text-right tabular">{formatQty(line.quantity)}</TableCell>
+                          <TableCell className="text-right tabular">{formatCOP(line.unitCost)}</TableCell>
+                          <TableCell className="text-right tabular font-semibold">{formatCOP(line.totalCop)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  <div className="mt-4 ml-auto max-w-xs text-[12.5px]">
+                    <div className="flex justify-between py-0.5"><span className="text-muted-foreground">Subtotal</span><span className="tabular">{formatCOP(selectedPO.subtotal)}</span></div>
+                    <div className="flex justify-between py-0.5"><span className="text-muted-foreground">Impuestos</span><span className="tabular">{formatCOP(selectedPO.taxes)}</span></div>
+                    <div className="flex justify-between py-0.5"><span className="text-muted-foreground">Envío</span><span className="tabular">{formatCOP(selectedPO.shipping)}</span></div>
+                    <div className="flex justify-between py-0.5 border-t border-card-border pt-1 mt-1 font-semibold"><span>Total</span><span className="tabular">{formatCOP(selectedPO.total)}</span></div>
+                  </div>
+                </>
+              )}
             </Card>
           ) : null}
         </TabsContent>

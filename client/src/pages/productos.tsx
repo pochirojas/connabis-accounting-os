@@ -12,7 +12,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell,
 } from 'recharts';
 import type { Product } from '@shared/schema';
-import { formatCOP, formatCOPCompact, formatNumber, formatPct } from '@/lib/format';
+import { formatCOP, formatCOPCompact, formatNumber, formatPct, formatQty } from '@/lib/format';
 import { KpiCard } from '@/components/kpi-card';
 import { Package, ShieldAlert, ShieldCheck, Pencil, Info, Search, Layers3, AlertTriangle } from 'lucide-react';
 // Pencil already imported — used by inline "Editar BOM (draft local)" button.
@@ -330,7 +330,7 @@ export default function Productos() {
                     <TableCell className="font-medium text-[13px] leading-snug max-w-[300px]">
                       <div>{p.name}</div>
                       <div className="text-[11px] text-muted-foreground tabular mt-0.5">
-                        {p.sku ?? 'sin SKU'} · stock {formatNumber(p.inventoryQuantity ?? 0)} · ventas {formatNumber(p.unitsSold)} u · {formatCOP(p.revenue)}
+                        {p.sku ?? 'sin SKU'} · stock {formatQty(p.inventoryQuantity ?? 0)} · ventas {formatNumber(p.unitsSold)} u · {formatCOP(p.revenue)}
                         {' · '}{formatNumber(p.variantCount ?? 1)} sabores
                       </div>
                     </TableCell>

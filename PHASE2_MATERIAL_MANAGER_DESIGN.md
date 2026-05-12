@@ -522,3 +522,36 @@ El espejo MM sigue siendo *bit-exact* para rollback. Para que el OS pueda editar
   2. QA por separado: el CSV de promoción **no** debe coincidir con el rollback (es el cambio); el round-trip clásico contra los CSV originales debe seguir pasando.
   3. Subir esos dos CSVs manualmente a MM, re-importar al OS, y limpiar las tres tablas override.
 - Mientras no exista ese flujo: el export por defecto sigue siendo *rollback*, no *promoción*.
+
+## Phase 2.2 — Real purchase orders + float-strict quantities
+
+### Real POs from MM CSV exports
+
+Las órdenes de compra ya no son seed. Se importan directamente desde los CSVs por-PO exportados desde Material Manager y colocados en `/home/user/workspace/purchase_order_po*.csv`. La importación ocurre automáticamente la primera vez que arranca el servidor con la tabla vacía; también se puede disparar manualmente con `POST /api/material-manager/purchase-orders/import`.
+
+Tablas SQLite:
+
+- `material_manager_purchase_orders` — un registro por PO con `po_number` único, fecha, supplier, ship_to, currency, reference_number, notes, subtotal/taxes/shipping/total y `status` (`received` o `cancelled`).
+- `material_manager_purchase_order_lines` — líneas con `product`, `sku`, `quantity` (REAL), `unit_cost`, `tax_pct`, `total_cop`.
+
+Endpoints:
+
+- `GET  /api/material-manager/purchase-orders` — lista.
+- `GET  /api/material-manager/purchase-orders/:idOrNumber` — detalle con líneas (`/PO16`, `/PO1`, etc.).
+- `GET  /api/material-manager/purchase-orders/status` — KPIs (total, recibidas, canceladas, suppliers).
+- `POST /api/material-manager/purchase-orders/import` — re-importa desde CSV.
+- `GET  /api/purchase-orders` — endpoint legacy preservado para compatibilidad; ahora devuelve las POs reales mapeadas al shape antiguo.
+
+### PO10 cancelada
+
+PO10 no fue exportada por Material Manager (cancelada por el negocio). Se inserta como registro con `status='cancelled'`, `total=0`, sin líneas, y aparece en la lista de la UI con badge "Cancelada". **No** suma al total de compras, no aporta stock, no se usa para cálculo de costos.
+
+### Quantities are ALWAYS float
+
+Toda cantidad de material es float en CSV parser → DB → API → UI. Cambios concretos:
+
+- `material_manager_materials.stock` y `material_manager_material_overrides.stock` migrados de `INTEGER` a `REAL` (incluye migración automática `migrateColumnToReal()` en el `ensureSchema`).
+- `material_manager_bom_components.quantity` y `material_manager_bom_drafts.quantity` ya eran `REAL`.
+- `material_manager_purchase_order_lines.quantity` es `REAL`.
+- En cliente, se introduce `formatQty()` (Intl con `maximumFractionDigits: 6, minimumFractionDigits: 0`, trim de ceros). `formatNumber()` queda para conteos enteros (órdenes, líneas, materiales). Inputs `<input type="number">` para cantidades llevan `step="any"`.
+- El bug visible en el screenshot (productos usando un material mostraban `0` para cantidades decimales) queda resuelto: los valores `0.88`, `0.12`, `0.5`, etc., ahora se renderizan literales.

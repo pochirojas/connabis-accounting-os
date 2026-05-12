@@ -54,7 +54,7 @@ export function ensureMaterialManagerMirrorSchema(sqlite: Database.Database) {
       update_shopify_inventory INTEGER NOT NULL DEFAULT 0,
       limit_shopify_inventory INTEGER NOT NULL DEFAULT 0,
       materials_used_in_all_orders TEXT NOT NULL DEFAULT '',
-      stock INTEGER NOT NULL DEFAULT 0,
+      stock REAL NOT NULL DEFAULT 0,
       is_insumo INTEGER NOT NULL DEFAULT 0,
       is_noid INTEGER NOT NULL DEFAULT 0,
       imported_at TEXT NOT NULL
@@ -144,7 +144,7 @@ export function ensureMaterialManagerMirrorSchema(sqlite: Database.Database) {
       update_shopify_inventory INTEGER,
       limit_shopify_inventory INTEGER,
       materials_used_in_all_orders TEXT,
-      stock INTEGER,
+      stock REAL,
       note TEXT,
       updated_at TEXT NOT NULL
     );
@@ -168,6 +168,34 @@ export function ensureMaterialManagerMirrorSchema(sqlite: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_bom_overrides_variant ON material_manager_bom_overrides(variant_id);
     CREATE INDEX IF NOT EXISTS idx_bom_overrides_material ON material_manager_bom_overrides(material_id);
   `);
+
+  // Migration: in older builds `stock` was INTEGER which silently truncated
+  // float quantities. Re-create the column as REAL if needed.
+  migrateColumnToReal(sqlite, 'material_manager_materials', 'stock');
+  migrateColumnToReal(sqlite, 'material_manager_material_overrides', 'stock');
+}
+
+function migrateColumnToReal(sqlite: Database.Database, table: string, column: string) {
+  try {
+    const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string; type: string }>;
+    const target = cols.find(c => c.name === column);
+    if (!target) return;
+    if (target.type.toUpperCase().startsWith('REAL')) return;
+    // SQLite has no ALTER COLUMN TYPE; safe path is a copy-rename.
+    const colDefs = cols.map(c => `${c.name} ${c.name === column ? 'REAL' : c.type}`).join(', ');
+    const colNames = cols.map(c => c.name).join(', ');
+    sqlite.exec(`
+      BEGIN;
+      CREATE TABLE ${table}__new (${colDefs});
+      INSERT INTO ${table}__new (${colNames}) SELECT ${colNames} FROM ${table};
+      DROP TABLE ${table};
+      ALTER TABLE ${table}__new RENAME TO ${table};
+      COMMIT;
+    `);
+  } catch (error) {
+    // Non-fatal: surface but don't crash the app.
+    console.error(`migrateColumnToReal(${table}.${column}) failed:`, error);
+  }
 }
 
 // ---------- CSV helpers (exact MM format) ----------

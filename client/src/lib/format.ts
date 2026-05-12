@@ -8,6 +8,9 @@ const cop = new Intl.NumberFormat('es-CO', {
 
 const num = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 });
 const num2 = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 2 });
+// Quantity formatter: float-friendly, never rounds decimal quantities to 0.
+// Up to 6 decimals, trailing zeros trimmed by Intl when minimumFractionDigits=0.
+const numQty = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 6, minimumFractionDigits: 0 });
 
 export function formatCOP(value: number): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
@@ -30,6 +33,15 @@ export function formatNumber(value: number): string {
 
 export function formatDecimal(value: number): string {
   return num2.format(value);
+}
+
+// Format a material/BOM quantity. Quantities are ALWAYS floats — never rounded
+// to int. Integer values render without decimals; fractional values render with
+// up to 6 decimals (trailing zeros trimmed). Use this everywhere a quantity is
+// shown so a 0.5 quantity does not display as "0" or "1".
+export function formatQty(value: number): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—';
+  return numQty.format(value);
 }
 
 export function formatPct(value: number, digits = 1): string {

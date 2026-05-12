@@ -29,14 +29,21 @@ import {
   upsertMmBomOverride,
 } from './material-manager-mirror';
 import {
+  importMmPurchaseOrders,
+  listMmPurchaseOrders,
+  getMmPurchaseOrder,
+  getMmPurchaseOrdersStatus,
+} from './material-manager-purchase-orders';
+import {
   insertBomDraftSchema,
   updateBomDraftSchema,
   updateBomOverrideSchema,
   updateMaterialOverrideSchema,
 } from '@shared/schema';
+import type { MmPurchaseOrder, PurchaseOrder } from '@shared/schema';
 import {
   channels, years, months, kpis, products,
-  materials, purchaseOrders, alerts, integrationPhases,
+  materials, alerts, integrationPhases,
   dailyPerformance, glossaryTerms, accountingSuggestions,
   incomeDetails, restockRecommendations,
   ceoMetrics, pnlRows, cashFlowSnapshots, inventoryAccountingRows, closeChecklist,
@@ -46,6 +53,40 @@ const SHOPIFY_API_VERSION = '2026-04';
 const MATERIAL_MANAGER_BOM_PATH = '/home/user/workspace/material-manager-export-material-product.csv';
 const MATERIAL_MANAGER_MATERIALS_PATH = '/home/user/workspace/material-manager-export.csv';
 const HISTORICAL_EXPENSES_PATH = '/home/user/workspace/connabis-accounting-os/server/data/historical-expenses.json';
+
+// Map a real MM purchase order onto the legacy PurchaseOrder shape used by the
+// existing /api/purchase-orders consumers. Quantity is the SUM of all line
+// quantities (kept as float — never rounded).
+function mmPoToLegacy(po: MmPurchaseOrder): PurchaseOrder {
+  const lines = po.lines ?? [];
+  const totalQty = lines.reduce((s, l) => s + l.quantity, 0);
+  const totalSubtotal = lines.reduce((s, l) => s + l.totalCop, 0);
+  const unitCost = totalQty > 0 ? totalSubtotal / totalQty : 0;
+  const status = po.status === 'cancelled' ? 'pendiente' : 'recibido';
+  return {
+    id: po.poNumber.toLowerCase(),
+    date: po.date || po.importedAt.slice(0, 10),
+    supplier: po.supplier || (po.status === 'cancelled' ? 'Cancelado' : ''),
+    category: lines[0]?.product ?? '—',
+    qty: totalQty,
+    unitCost,
+    shipping: po.shipping,
+    tax: po.taxes,
+    landedCost: po.total,
+    status,
+    currency: (po.currency === 'USD' ? 'USD' : 'COP') as 'USD' | 'COP',
+    paymentMethod: '',
+    notes: po.notes ?? undefined,
+    items: lines.map(l => ({
+      material: l.product,
+      sku: l.sku,
+      category: '—',
+      qty: l.quantity,
+      unitCost: l.unitCost,
+      subtotal: l.totalCop,
+    })),
+  };
+}
 
 function loadHistoricalExpenses() {
   if (!fs.existsSync(HISTORICAL_EXPENSES_PATH)) return [];
@@ -1538,7 +1579,33 @@ export async function registerRoutes(
     }
   });
   app.get('/api/materials', (_req, res) => res.json(materials));
-  app.get('/api/purchase-orders', (_req, res) => res.json(purchaseOrders));
+  // Real MM purchase orders — replaces the legacy seed POs entirely.
+  app.get('/api/purchase-orders', (_req, res) => {
+    const real = listMmPurchaseOrders(sqlite).map(po => {
+      const detail = getMmPurchaseOrder(sqlite, po.poNumber);
+      return mmPoToLegacy(detail ?? po);
+    });
+    res.json(real);
+  });
+
+  app.get('/api/material-manager/purchase-orders', (_req, res) => {
+    res.json(listMmPurchaseOrders(sqlite));
+  });
+
+  app.get('/api/material-manager/purchase-orders/status', (_req, res) => {
+    res.json(getMmPurchaseOrdersStatus(sqlite));
+  });
+
+  app.get('/api/material-manager/purchase-orders/:idOrNumber', (req, res) => {
+    const po = getMmPurchaseOrder(sqlite, req.params.idOrNumber);
+    if (!po) return res.status(404).json({ error: 'po_not_found' });
+    res.json(po);
+  });
+
+  app.post('/api/material-manager/purchase-orders/import', (_req, res) => {
+    const result = importMmPurchaseOrders(sqlite);
+    res.json({ ...result, status: getMmPurchaseOrdersStatus(sqlite) });
+  });
   app.get('/api/income-details', async (req, res) => {
     try {
       const month = typeof req.query.month === 'string' ? req.query.month : undefined;

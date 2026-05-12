@@ -9,7 +9,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { formatCOP, formatDate, formatNumber } from '@/lib/format';
+import { formatCOP, formatDate, formatNumber, formatQty } from '@/lib/format';
 import {
   ArrowLeft, Bell, Boxes as BoxesIcon, ChevronRight, Edit2, Mail, RotateCcw, Save, Trash2, TrendingUp, Truck,
 } from 'lucide-react';
@@ -255,12 +255,13 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant }: Props)
               <EditField label="Stock" testId="field-mat-stock">
                 <Input
                   type="number"
+                  step="any"
                   value={edit.stock}
                   onChange={(e) => onFieldChange('stock', e.target.value)}
                   className="h-8"
                   data-testid="input-material-stock"
                 />
-                <p className="text-[10px] text-muted-foreground mt-1">Original MM: {formatNumber(m.baseMaterial?.stock ?? m.stock)}</p>
+                <p className="text-[10px] text-muted-foreground mt-1">Original MM: {formatQty(m.baseMaterial?.stock ?? m.stock)}</p>
               </EditField>
               <EditField label="SKU" testId="field-mat-sku">
                 <Input
@@ -394,7 +395,7 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant }: Props)
                         <div>{row.productName || '—'}</div>
                         <div className="text-[11px] text-muted-foreground">{row.variantName || row.variantId}</div>
                       </TableCell>
-                      <TableCell className="text-right tabular">{formatNumber(row.quantity)}</TableCell>
+                      <TableCell className="text-right tabular">{formatQty(row.quantity)}</TableCell>
                       <TableCell>
                         {row.isDraft
                           ? <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-300">Draft local</Badge>
@@ -433,6 +434,7 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant }: Props)
                         <div className="flex items-center gap-1.5">
                           <Input
                             type="number"
+                            step="any"
                             className="h-8 w-[100px] text-right tabular"
                             value={edited.quantity ?? d.quantity}
                             onChange={(e) => setDraftEdits(prev => ({ ...prev, [d.id]: { ...prev[d.id], quantity: Number(e.target.value) || 0 } }))}
@@ -471,7 +473,7 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant }: Props)
           <Card className="p-4" data-testid="card-material-inventory">
             <div className="flex items-center gap-2"><BoxesIcon className="h-4 w-4 text-accent" /><h3 className="text-sm font-semibold">Inventario</h3></div>
             <dl className="mt-3 text-[12.5px] space-y-1.5">
-              <div className="flex justify-between"><dt className="text-muted-foreground">Stock disponible</dt><dd className="tabular font-semibold">{formatNumber(m.stock)} {m.measurement}</dd></div>
+              <div className="flex justify-between"><dt className="text-muted-foreground">Stock disponible</dt><dd className="tabular font-semibold">{formatQty(m.stock)} {m.measurement}</dd></div>
               <div className="flex justify-between"><dt className="text-muted-foreground">Update Shopify inventory</dt><dd>{m.updateShopifyInventory ? 'Sí' : 'No'}</dd></div>
               <div className="flex justify-between"><dt className="text-muted-foreground">Limit Shopify inventory</dt><dd>{m.limitShopifyInventory ? 'Sí' : 'No'}</dd></div>
             </dl>
@@ -512,7 +514,7 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant }: Props)
                 {usageByProduct.map(row => (
                   <li key={row.product} className="flex items-center justify-between">
                     <span className="truncate max-w-[60%]">{row.product}</span>
-                    <span className="tabular text-muted-foreground">{formatNumber(row.qty)} {m.measurement}</span>
+                    <span className="tabular text-muted-foreground">{formatQty(row.qty)} {m.measurement}</span>
                   </li>
                 ))}
               </ul>
@@ -528,7 +530,7 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant }: Props)
               {m.stock <= 0 ? (
                 <li className="rounded-md border border-rose-500/30 bg-rose-500/8 p-2 text-rose-200">Sin stock disponible.</li>
               ) : m.stock < 50 ? (
-                <li className="rounded-md border border-amber-500/30 bg-amber-500/8 p-2 text-amber-200">Stock bajo ({formatNumber(m.stock)} {m.measurement}).</li>
+                <li className="rounded-md border border-amber-500/30 bg-amber-500/8 p-2 text-amber-200">Stock bajo ({formatQty(m.stock)} {m.measurement}).</li>
               ) : (
                 <li className="rounded-md border border-emerald-500/30 bg-emerald-500/8 p-2 text-emerald-200">Stock OK.</li>
               )}

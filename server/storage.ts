@@ -4,10 +4,13 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
 import { ensureMaterialManagerMirrorSchema } from './material-manager-mirror';
+import { ensureMmPurchaseOrdersImported } from './material-manager-purchase-orders';
 
 export const sqlite = new Database("data.db");
 sqlite.pragma("journal_mode = WAL");
 ensureMaterialManagerMirrorSchema(sqlite);
+// Real MM purchase orders — auto-import from CSV on first run.
+ensureMmPurchaseOrdersImported(sqlite);
 sqlite.exec(`
 CREATE TABLE IF NOT EXISTS manual_expenses (
   id TEXT PRIMARY KEY,

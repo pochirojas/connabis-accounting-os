@@ -6,7 +6,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import type { AccountingSuggestion, RestockRecommendation } from '@shared/schema';
-import { formatCOP, formatDate, formatNumber } from '@/lib/format';
+import { formatCOP, formatDate, formatNumber, formatQty } from '@/lib/format';
 import { Bell, Brain, Calculator, CalendarCheck, Lightbulb, PackageCheck, WalletCards } from 'lucide-react';
 import { KpiCard } from '@/components/kpi-card';
 import { useMemo } from 'react';
@@ -96,10 +96,10 @@ export default function Sugerencias() {
                         Impacta: {row.productsImpacted.slice(0, 2).join(', ')}{row.productsImpacted.length > 2 ? ` +${row.productsImpacted.length - 2}` : ''}
                       </div>
                     </TableCell>
-                    <TableCell className="text-right tabular">{formatNumber(row.currentStock)} {row.unit}</TableCell>
+                    <TableCell className="text-right tabular">{formatQty(row.currentStock)} {row.unit}</TableCell>
                     <TableCell className="text-right tabular">{row.daysOnHand.toFixed(1)}</TableCell>
-                    <TableCell className="text-right tabular">{formatNumber(row.reorderPoint)}</TableCell>
-                    <TableCell className="text-right tabular font-medium">{formatNumber(row.recommendedQty)}</TableCell>
+                    <TableCell className="text-right tabular">{formatQty(row.reorderPoint)}</TableCell>
+                    <TableCell className="text-right tabular font-medium">{formatQty(row.recommendedQty)}</TableCell>
                     <TableCell className="text-right tabular">{formatCOP(row.estimatedCost)}</TableCell>
                     <TableCell className="text-xs tabular">{formatDate(row.suggestedOrderDate)}</TableCell>
                     <TableCell><RiskBadge risk={row.risk} /></TableCell>

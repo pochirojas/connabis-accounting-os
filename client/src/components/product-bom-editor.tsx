@@ -11,7 +11,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { formatCOP, formatNumber } from '@/lib/format';
+import { formatCOP, formatQty } from '@/lib/format';
 import { Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
 import type { MmBomDraftRow, MmMaterialRow, ProductBomDetail } from '@shared/schema';
 
@@ -235,6 +235,7 @@ export function ProductBomEditor({ open, onClose, productName, variants, initial
                       <TableCell className="text-right">
                         <Input
                           type="number"
+                          step="any"
                           className="h-8 w-[90px] text-right tabular"
                           value={newQty[m.id] ?? ''}
                           onChange={e => setNewQty(prev => ({ ...prev, [m.id]: e.target.value }))}
@@ -319,12 +320,13 @@ function ImportedBomTable({
               <TableCell className="text-[12.5px]">
                 <div>{r.materialName}</div>
                 {r.isModifiedLocal && !r.isRemovedLocal ? (
-                  <div className="text-[10px] text-amber-300">Original MM: {formatNumber(r.originalQuantity)}</div>
+                  <div className="text-[10px] text-amber-300">Original MM: {formatQty(r.originalQuantity)}</div>
                 ) : null}
               </TableCell>
               <TableCell className="text-right">
                 <Input
                   type="number"
+                  step="any"
                   className="h-8 w-[100px] text-right tabular ml-auto"
                   value={currentQty}
                   onChange={(e) => setEdits(prev => ({ ...prev, [r.materialId]: e.target.value }))}
@@ -421,6 +423,7 @@ function DraftRowsTable({ rows, onUpdate, onDelete }: { rows: MmBomDraftRow[]; o
             <TableCell className="text-right">
               <Input
                 type="number"
+                step="any"
                 className="h-8 w-[100px] text-right tabular ml-auto"
                 value={edits[d.id] ?? d.quantity}
                 onChange={e => setEdits(prev => ({ ...prev, [d.id]: e.target.value }))}
