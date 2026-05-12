@@ -25,8 +25,13 @@ export type MonthlyRow = {
   month: string;       // 'YYYY-MM'
   label: string;       // 'Ene 2026'
   income: number;
+  cogs?: number;
+  grossProfit?: number;
+  grossMargin?: number;
   expenses: number;
   profit: number;
+  netMargin?: number;
+  inventoryPurchasesExcluded?: number;
   partial?: boolean;
   note?: string;
 };
@@ -42,7 +47,12 @@ export type YearSummary = {
 
 export type DashboardKPIs = {
   ingresos: number;
+  cogsVendido?: number;
+  utilidadBruta?: number;
+  margenBruto?: number;    // 0..1
   gastos: number;
+  gastosOperativos?: number;
+  comprasInventarioExcluidas?: number;
   utilidadNeta: number;
   margenEstimado: number;   // 0..1
   aov: number;
@@ -52,6 +62,7 @@ export type DashboardKPIs = {
   topProductFamily: string;
   alertasActivas: number;
   asOf: string;
+  dataQualityNote?: string;
 };
 
 export type CeoMetric = {
@@ -81,7 +92,7 @@ export type Product = {
   shippingSubsidy: number;  // COP
   // computed
   cogsUsed: number;
-  cogsSource: 'shopify' | 'fallback';
+  cogsSource: 'shopify' | 'material_manager' | 'fallback';
   marginSource: 'shopify' | 'material_manager' | 'seed';
   dataCompleteness: 'real' | 'partial' | 'placeholder';
   idealPrice: number;

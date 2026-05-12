@@ -76,6 +76,7 @@ function loadMaterialManagerData() {
   ]));
 
   const bomByVariantId = new Map<string, Array<{
+    productName: string;
     materialId: string;
     materialName: string;
     quantity: number;
@@ -98,6 +99,7 @@ function loadMaterialManagerData() {
       quantity,
       unitCost: material.cost,
       amount,
+      productName: row['Product name'] || '',
       category: material.category,
       measurement: material.measurement,
       stock: material.stock,
@@ -105,7 +107,68 @@ function loadMaterialManagerData() {
     bomByVariantId.set(variantId, [...(bomByVariantId.get(variantId) ?? []), item]);
   }
 
-  return { bomByVariantId };
+  const variantCostByProductKey = new Map<string, Map<string, number>>();
+  for (const [variantId, items] of bomByVariantId.entries()) {
+    const productName = items[0]?.productName;
+    if (!productName) continue;
+    const productKey = normalizeProductMatchKey(productName);
+    const variantCosts = variantCostByProductKey.get(productKey) ?? new Map<string, number>();
+    variantCosts.set(variantId, items.reduce((sum, item) => sum + item.amount, 0));
+    variantCostByProductKey.set(productKey, variantCosts);
+  }
+
+  const bomAverageCostByProductKey = new Map<string, number>();
+  for (const [productKey, variantCosts] of variantCostByProductKey.entries()) {
+    const costs = Array.from(variantCosts.values());
+    bomAverageCostByProductKey.set(productKey, costs.reduce((sum, cost) => sum + cost, 0) / Math.max(costs.length, 1));
+  }
+
+  return { bomByVariantId, bomAverageCostByProductKey };
+}
+
+let materialManagerCache: ReturnType<typeof loadMaterialManagerData> | null = null;
+
+function getMaterialManagerData() {
+  materialManagerCache ??= loadMaterialManagerData();
+  return materialManagerCache;
+}
+
+function parseShopifyLegacyId(gid?: string | null) {
+  return gid?.split('/').pop() ?? '';
+}
+
+function normalizeProductMatchKey(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getBomUnitCostByVariantId(variantGid?: string | null, productTitle?: string) {
+  const variantId = parseShopifyLegacyId(variantGid);
+  const { bomByVariantId } = getMaterialManagerData();
+  const items = variantId ? bomByVariantId.get(variantId) ?? [] : [];
+  if (items.length > 0) {
+    return {
+      unitCost: items.reduce((sum, item) => sum + item.amount, 0),
+      hasBom: true,
+      matchType: 'variant' as const,
+    };
+  }
+
+  if (productTitle) {
+    const { bomAverageCostByProductKey } = getMaterialManagerData();
+    const titleKey = normalizeProductMatchKey(productTitle);
+    const exact = bomAverageCostByProductKey.get(titleKey);
+    if (exact !== undefined) return { unitCost: exact, hasBom: true, matchType: 'product_name' as const };
+    const fuzzyMatch = Array.from(bomAverageCostByProductKey.entries())
+      .find(([productKey]) => titleKey.includes(productKey) || productKey.includes(titleKey));
+    if (fuzzyMatch) return { unitCost: fuzzyMatch[1], hasBom: true, matchType: 'product_name' as const };
+  }
+
+  return { unitCost: 0, hasBom: false, matchType: 'missing' as const };
 }
 
 async function getShopifyAccessToken() {
@@ -194,7 +257,7 @@ function getBomComponentKey(materialName: string) {
 }
 
 function buildGroupedBomBreakdown(variantLegacyIds: string[]) {
-  const { bomByVariantId } = loadMaterialManagerData();
+  const { bomByVariantId } = getMaterialManagerData();
   const variantBoms = variantLegacyIds
     .map(id => bomByVariantId.get(id) ?? [])
     .filter(items => items.length > 0);
@@ -234,6 +297,78 @@ function buildGroupedBomBreakdown(variantLegacyIds: string[]) {
 
 function moneyAmount(value?: { shopMoney?: { amount?: string } } | null) {
   return Number(value?.shopMoney?.amount ?? 0) || 0;
+}
+
+function sumOrderOriginalLineRevenue(order: LiveIncomeOrder) {
+  return order.lineItems.edges.reduce((sum, edge) => sum + moneyAmount(edge.node.originalTotalSet), 0);
+}
+
+function sumOrderDiscountedLineRevenue(order: LiveIncomeOrder) {
+  return order.lineItems.edges.reduce((sum, edge) => sum + moneyAmount(edge.node.discountedTotalSet), 0);
+}
+
+function getOrderAccountingRevenue(order: LiveIncomeOrder) {
+  const grossProductRevenue = sumOrderOriginalLineRevenue(order);
+  const discountedProductRevenue = sumOrderDiscountedLineRevenue(order);
+  const discounts = Math.max(0, grossProductRevenue - discountedProductRevenue);
+  const shipping = moneyAmount(order.totalShippingPriceSet);
+  const refunds = moneyAmount(order.totalRefundedSet);
+
+  return {
+    grossProductRevenue,
+    grossRevenueWithShipping: grossProductRevenue + shipping,
+    discounts,
+    shipping,
+    refunds,
+    netRevenue: discountedProductRevenue + shipping - refunds,
+  };
+}
+
+function getExpenseAmount(expense: Record<string, unknown>) {
+  return Number(expense.amount || 0) || 0;
+}
+
+function getExpenseText(expense: Record<string, unknown>) {
+  return [
+    expense.category,
+    expense.description,
+    expense.paidTo,
+    expense.notes,
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function isInventoryOrCapitalExpense(expense: Record<string, unknown>) {
+  const text = getExpenseText(expense);
+  return [
+    'gilded extracts',
+    'materials',
+    'microingredients',
+    'supplies',
+    'equipment',
+    'cartucho',
+    'cartuchos',
+    'destilado',
+    'terpeno',
+    'terpenos',
+    'insumo',
+    'insumos',
+    'materia prima',
+    'hardware',
+    'empaque',
+    'imprenta',
+  ].some(keyword => text.includes(keyword));
+}
+
+function splitOperatingAndInventoryExpenses(expenses: Array<Record<string, unknown>>) {
+  return expenses.reduce((summary, expense) => {
+    const amount = getExpenseAmount(expense);
+    if (isInventoryOrCapitalExpense(expense)) {
+      summary.inventoryPurchases += amount;
+    } else {
+      summary.operatingExpenses += amount;
+    }
+    return summary;
+  }, { operatingExpenses: 0, inventoryPurchases: 0 });
 }
 
 function monthLabel(month: string) {
@@ -295,6 +430,30 @@ type LiveIncomeOrder = {
   };
 };
 
+type AccountingLine = {
+  id: string;
+  orderId: string;
+  orderName: string;
+  date: string;
+  month: string;
+  channel: string;
+  customerType: 'nuevo' | 'recurrente';
+  product: string;
+  productFamily: string;
+  sku: string;
+  qty: number;
+  grossRevenue: number;
+  discounts: number;
+  shipping: number;
+  refunds: number;
+  netRevenue: number;
+  cogsUnit: number;
+  cogsSold: number;
+  hasBom: boolean;
+  paymentStatus: 'paid' | 'pending' | 'refunded' | 'partially_refunded';
+  fulfillmentStatus: 'fulfilled' | 'unfulfilled' | 'partial';
+};
+
 async function loadLiveShopifyIncomeOrders(params: { month?: string; year?: string } = {}) {
   const query = `
     query LiveIncomeOrders($cursor: String, $query: String!) {
@@ -348,12 +507,11 @@ async function loadLiveShopifyIncomeOrders(params: { month?: string; year?: stri
   return allOrders;
 }
 
-function mapOrdersToIncomeDetails(orders: LiveIncomeOrder[]) {
+function mapOrdersToAccountingLines(orders: LiveIncomeOrder[]): AccountingLine[] {
   return orders.flatMap(order => {
     const date = order.createdAt.slice(0, 10);
     const month = date.slice(0, 7);
-    const shipping = moneyAmount(order.totalShippingPriceSet);
-    const refunds = moneyAmount(order.totalRefundedSet);
+    const { shipping, refunds } = getOrderAccountingRevenue(order);
     const lineCount = Math.max(order.lineItems.edges.length, 1);
     const customerOrders = Number(order.customer?.numberOfOrders ?? 1);
 
@@ -361,7 +519,9 @@ function mapOrdersToIncomeDetails(orders: LiveIncomeOrder[]) {
       const line = edge.node;
       const grossRevenue = moneyAmount(line.originalTotalSet);
       const netRevenue = moneyAmount(line.discountedTotalSet);
+      const bom = getBomUnitCostByVariantId(line.variant?.id, line.title);
       return {
+        orderId: order.id,
         id: `${order.id}-${index}`,
         orderName: order.name,
         date,
@@ -369,6 +529,7 @@ function mapOrdersToIncomeDetails(orders: LiveIncomeOrder[]) {
         channel: order.sourceName || 'Shopify',
         customerType: customerOrders > 1 ? 'recurrente' : 'nuevo',
         product: line.title,
+        productFamily: inferProductFamily(line.title),
         sku: line.variant?.sku ?? '—',
         qty: line.quantity,
         grossRevenue,
@@ -376,11 +537,35 @@ function mapOrdersToIncomeDetails(orders: LiveIncomeOrder[]) {
         shipping: index === 0 ? shipping : 0,
         refunds: index === 0 ? refunds : 0,
         netRevenue: netRevenue + (index === 0 ? shipping - refunds : 0),
+        cogsUnit: bom.unitCost,
+        cogsSold: bom.unitCost * line.quantity,
+        hasBom: bom.hasBom,
         paymentStatus: normalizePaymentStatus(order.displayFinancialStatus),
         fulfillmentStatus: normalizeFulfillmentStatus(order.displayFulfillmentStatus),
       };
     }).slice(0, lineCount);
   });
+}
+
+function mapOrdersToIncomeDetails(orders: LiveIncomeOrder[]) {
+  return mapOrdersToAccountingLines(orders).map(line => ({
+    id: line.id,
+    orderName: line.orderName,
+    date: line.date,
+    month: line.month,
+    channel: line.channel,
+    customerType: line.customerType,
+    product: line.product,
+    sku: line.sku,
+    qty: line.qty,
+    grossRevenue: line.grossRevenue,
+    discounts: line.discounts,
+    shipping: line.shipping,
+    refunds: line.refunds,
+    netRevenue: line.netRevenue,
+    paymentStatus: line.paymentStatus,
+    fulfillmentStatus: line.fulfillmentStatus,
+  }));
 }
 
 function listDatesInMonth(month: string) {
@@ -463,58 +648,139 @@ async function buildDailyPerformanceRows(): Promise<DailyPerformance[]> {
 }
 
 function summarizeYears(orders: LiveIncomeOrder[]) {
-  const grouped = new Map<number, { orders: number; revenue: number }>();
-  for (const order of orders) {
-    const year = Number(order.createdAt.slice(0, 4));
-    const revenue = moneyAmount(order.totalPriceSet) - moneyAmount(order.totalRefundedSet);
-    const current = grouped.get(year) ?? { orders: 0, revenue: 0 };
-    grouped.set(year, { orders: current.orders + 1, revenue: current.revenue + revenue });
+  const lines = mapOrdersToAccountingLines(orders);
+  const grouped = new Map<number, { orders: Set<string>; revenue: number }>();
+  for (const line of lines) {
+    const year = Number(line.date.slice(0, 4));
+    const current = grouped.get(year) ?? { orders: new Set<string>(), revenue: 0 };
+    current.orders.add(line.orderId);
+    current.revenue += line.netRevenue;
+    grouped.set(year, current);
   }
   return Array.from(grouped.entries()).map(([year, row]) => ({
     year,
-    orders: row.orders,
+    orders: row.orders.size,
     revenue: row.revenue,
-    aov: row.orders ? row.revenue / row.orders : 0,
+    aov: row.orders.size ? row.revenue / row.orders.size : 0,
     projected: year === 2026 ? Math.round((row.revenue / Math.max(new Date().getMonth() + 1, 1)) * 12) : undefined,
-    note: 'Shopify live, neto de refunds disponibles',
+    note: 'Shopify live: productos descontados + shipping cobrado - refunds',
   })).sort((a, b) => a.year - b.year);
 }
 
-function summarizeMonths(orders: LiveIncomeOrder[]) {
-  const grouped = new Map<string, { orders: number; income: number }>();
-  for (const order of orders) {
-    const month = order.createdAt.slice(0, 7);
-    const income = moneyAmount(order.totalPriceSet) - moneyAmount(order.totalRefundedSet);
-    const current = grouped.get(month) ?? { orders: 0, income: 0 };
-    grouped.set(month, { orders: current.orders + 1, income: current.income + income });
+function summarizeMonths(orders: LiveIncomeOrder[], expenses: Array<Record<string, unknown>>) {
+  const lines = mapOrdersToAccountingLines(orders);
+  const grouped = new Map<string, {
+    orders: Set<string>;
+    income: number;
+    cogs: number;
+    operatingExpenses: number;
+    inventoryPurchasesExcluded: number;
+  }>();
+
+  function ensureMonth(month: string) {
+    const existing = grouped.get(month);
+    if (existing) return existing;
+    const created = {
+      orders: new Set<string>(),
+      income: 0,
+      cogs: 0,
+      operatingExpenses: 0,
+      inventoryPurchasesExcluded: 0,
+    };
+    grouped.set(month, created);
+    return created;
+  }
+
+  for (const line of lines) {
+    const current = ensureMonth(line.month);
+    current.orders.add(line.orderId);
+    current.income += line.netRevenue;
+    current.cogs += line.cogsSold;
+  }
+
+  for (const expense of expenses) {
+    const month = String(expense.month ?? '');
+    if (!month) continue;
+    const current = ensureMonth(month);
+    const amount = getExpenseAmount(expense);
+    if (isInventoryOrCapitalExpense(expense)) {
+      current.inventoryPurchasesExcluded += amount;
+    } else {
+      current.operatingExpenses += amount;
+    }
   }
   return Array.from(grouped.entries()).map(([month, row]) => ({
     month,
     label: monthLabel(month),
     income: row.income,
-    expenses: 0,
-    profit: row.income,
+    cogs: row.cogs,
+    grossProfit: row.income - row.cogs,
+    grossMargin: row.income ? (row.income - row.cogs) / row.income : 0,
+    expenses: row.operatingExpenses,
+    profit: row.income - row.cogs - row.operatingExpenses,
+    netMargin: row.income ? (row.income - row.cogs - row.operatingExpenses) / row.income : 0,
+    inventoryPurchasesExcluded: row.inventoryPurchasesExcluded,
     partial: month === new Date().toISOString().slice(0, 7),
-    note: `${row.orders} órdenes Shopify live; gastos reales se suman desde Expenses/manual.`,
+    note: `${row.orders.size} órdenes Shopify live; COGS vendido por BOM MM; gastos operativos reales. Compras de inventario/capital excluidas: ${Math.round(row.inventoryPurchasesExcluded).toLocaleString('es-CO')} COP.`,
   })).sort((a, b) => a.month.localeCompare(b.month));
 }
 
 function summarizeChannels(orders: LiveIncomeOrder[]) {
-  const grouped = new Map<string, { orders: number; revenue: number }>();
+  const lines = mapOrdersToAccountingLines(orders);
+  const grouped = new Map<string, { orders: Set<string>; revenue: number }>();
   let totalRevenue = 0;
-  for (const order of orders) {
-    const channel = order.sourceName || 'Shopify';
-    const revenue = moneyAmount(order.totalPriceSet) - moneyAmount(order.totalRefundedSet);
-    totalRevenue += revenue;
-    const current = grouped.get(channel) ?? { orders: 0, revenue: 0 };
-    grouped.set(channel, { orders: current.orders + 1, revenue: current.revenue + revenue });
+  for (const line of lines) {
+    totalRevenue += line.netRevenue;
+    const current = grouped.get(line.channel) ?? { orders: new Set<string>(), revenue: 0 };
+    current.orders.add(line.orderId);
+    current.revenue += line.netRevenue;
+    grouped.set(line.channel, current);
   }
   return Array.from(grouped.entries()).map(([name, row]) => ({
     name,
-    orders: row.orders,
+    orders: row.orders.size,
     revenue: row.revenue,
     share: totalRevenue ? row.revenue / totalRevenue : 0,
   })).sort((a, b) => b.revenue - a.revenue);
+}
+
+function buildDashboardKpis(orders: LiveIncomeOrder[], expenses: Array<Record<string, unknown>>) {
+  const lines = mapOrdersToAccountingLines(orders);
+  const orderIds = new Set(lines.map(line => line.orderId));
+  const ingresos = lines.reduce((sum, line) => sum + line.netRevenue, 0);
+  const cogsVendido = lines.reduce((sum, line) => sum + line.cogsSold, 0);
+  const { operatingExpenses, inventoryPurchases } = splitOperatingAndInventoryExpenses(expenses);
+  const utilidadBruta = ingresos - cogsVendido;
+  const utilidadNeta = utilidadBruta - operatingExpenses;
+  const recurrentOrderIds = new Set(lines.filter(line => line.customerType === 'recurrente').map(line => line.orderId));
+  const familyRevenue = lines.reduce((map, line) => {
+    map.set(line.productFamily, (map.get(line.productFamily) ?? 0) + line.netRevenue);
+    return map;
+  }, new Map<string, number>());
+  const topProductFamily = Array.from(familyRevenue.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—';
+  const bomCoverage = lines.length ? lines.filter(line => line.hasBom).length / lines.length : 0;
+  const coverageText = `${(bomCoverage * 100).toFixed(1)}%`;
+  const qualityPrefix = bomCoverage >= 0.999 ? 'Real' : 'Real/parcial';
+
+  return {
+    ingresos,
+    cogsVendido,
+    utilidadBruta,
+    margenBruto: ingresos ? utilidadBruta / ingresos : 0,
+    gastos: operatingExpenses,
+    gastosOperativos: operatingExpenses,
+    comprasInventarioExcluidas: inventoryPurchases,
+    utilidadNeta,
+    margenEstimado: ingresos ? utilidadNeta / ingresos : 0,
+    aov: orderIds.size ? ingresos / orderIds.size : 0,
+    ordenes: orderIds.size,
+    clientesRecurrentes: recurrentOrderIds.size,
+    clientesRecurrentesPct: orderIds.size ? recurrentOrderIds.size / orderIds.size : 0,
+    topProductFamily,
+    alertasActivas: 0,
+    asOf: new Date().toISOString().slice(0, 10),
+    dataQualityNote: `${qualityPrefix}: Shopify ingresos/productos + MM BOM/COGS + gastos sheet/manual. Cobertura BOM en líneas vendidas: ${coverageText}; líneas sin BOM quedan en COGS 0 hasta corregir MM/matching. Compras inventario/capital excluidas de gastos operativos: ${Math.round(inventoryPurchases).toLocaleString('es-CO')} COP.`,
+  };
 }
 
 function csvEscape(value: unknown) {
@@ -654,9 +920,9 @@ async function loadLiveShopifyProducts() {
       fees,
       shippingSubsidy,
       cogsUsed,
-      cogsSource: cogsUsed === 0 ? 'fallback' : 'shopify',
+      cogsSource: bom ? 'material_manager' : cogsUsed === 0 ? 'fallback' : 'shopify',
       marginSource: bom ? 'material_manager' : 'shopify',
-      dataCompleteness: shopifyCost === null ? 'partial' : 'real',
+      dataCompleteness: bom || shopifyCost !== null ? 'real' : 'partial',
       idealPrice,
       competitorPrice: price,
       maxProfitableDiscount,
@@ -680,11 +946,25 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   // KPIs / dashboard
-  app.get('/api/kpis', (_req, res) => res.json(kpis));
+  app.get('/api/kpis', async (_req, res) => {
+    try {
+      const orders = await loadLiveShopifyIncomeOrders();
+      const allExpenses = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())];
+      res.json(buildDashboardKpis(orders, allExpenses));
+    } catch (error) {
+      console.error('[kpis] failed to calculate real dashboard metrics', error);
+      res.json({
+        ...kpis,
+        topProductFamily: `${kpis.topProductFamily} (seed/prototipo)`,
+        dataQualityNote: 'Seed/prototipo: Shopify o Material Manager no respondieron al calcular KPIs reales.',
+      });
+    }
+  });
   app.get('/api/channels', async (_req, res) => {
     try {
       res.json(summarizeChannels(await loadLiveShopifyIncomeOrders()));
-    } catch {
+    } catch (error) {
+      console.error('[months] failed to calculate real monthly metrics', error);
       res.json([]);
     }
   });
@@ -698,30 +978,8 @@ export async function registerRoutes(
   app.get('/api/months', async (_req, res) => {
     try {
       const orders = await loadLiveShopifyIncomeOrders();
-      const allExpenses = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())] as Array<{ month: string; amount: number }>;
-      const expenseByMonth = allExpenses.reduce((map, expense) => {
-        map.set(expense.month, (map.get(expense.month) ?? 0) + Number(expense.amount || 0));
-        return map;
-      }, new Map<string, number>());
-      const liveMonths = summarizeMonths(orders);
-      const existing = new Set(liveMonths.map(month => month.month));
-      expenseByMonth.forEach((expenseAmount, month) => {
-        if (!existing.has(month)) {
-          liveMonths.push({
-            month,
-            label: monthLabel(month),
-            income: 0,
-            expenses: expenseAmount,
-            profit: -expenseAmount,
-            partial: true,
-            note: 'Mes creado por gasto real desde Expenses/manual.',
-          });
-        }
-      });
-      res.json(liveMonths.map(month => {
-        const expenses = expenseByMonth.get(month.month) ?? month.expenses;
-        return { ...month, expenses, profit: month.income - expenses };
-      }).sort((a, b) => a.month.localeCompare(b.month)));
+      const allExpenses = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())];
+      res.json(summarizeMonths(orders, allExpenses));
     } catch {
       res.json([]);
     }

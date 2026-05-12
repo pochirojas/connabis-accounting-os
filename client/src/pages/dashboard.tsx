@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useQuery } from '@tanstack/react-query';
 import {
-  TrendingUp, Receipt, Wallet, Percent, ShoppingCart, Users,
+  TrendingUp, Receipt, Wallet, ShoppingCart, Users,
   Package, AlertTriangle, ArrowRight,
 } from 'lucide-react';
 import {
@@ -50,10 +50,15 @@ export default function Dashboard() {
         <div className="flex gap-3">
           <AlertTriangle className="h-5 w-5 text-amber-300 shrink-0 mt-0.5" />
           <div>
-            <h2 className="text-sm font-semibold text-amber-200">MVP con data parcial</h2>
+            <h2 className="text-sm font-semibold text-amber-200">MVP con métricas contables reales en Dashboard</h2>
             <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-              Los ingresos agregados vienen del reporte Shopify/Sheet actualizado, pero productos, costos, márgenes, inventario y performance diaria siguen siendo seed de prototipo. La versión real debe sincronizar productos activos, precios y costos desde Shopify, y márgenes desde Material Manager/Shopify.
+              KPIs principales y resultado mensual usan Shopify para ingresos, Material Manager para COGS vendido, y gastos reales desde sheet/manual. Panel CEO secundario, alertas, predicciones, inventario y P&L financiero todavía pueden contener seed/prototipo hasta la siguiente ronda.
             </p>
+            {k?.dataQualityNote && (
+              <p className="text-[11px] text-amber-100/85 mt-2 leading-relaxed" data-testid="text-dashboard-data-quality">
+                {k.dataQualityNote}
+              </p>
+            )}
           </div>
         </div>
       </Card>
@@ -87,9 +92,16 @@ export default function Dashboard() {
                     {formatCeoValue(metric)}
                   </div>
                 </div>
-                <Badge variant="outline" className={`text-[10px] uppercase ${CEO_STATUS_CLASS[metric.status]}`}>
-                  {metric.status}
-                </Badge>
+                <div className="flex flex-col items-end gap-1">
+                  <Badge variant="outline" className={`text-[10px] uppercase ${CEO_STATUS_CLASS[metric.status]}`}>
+                    {metric.status}
+                  </Badge>
+                  {metric.id !== 'cash' && (
+                    <Badge variant="outline" className="text-[9px] uppercase border-amber-500/35 text-amber-300 bg-amber-500/10">
+                      seed/prototipo
+                    </Badge>
+                  )}
+                </div>
               </div>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{metric.subtitle}</p>
               <div className="mt-3 rounded-md bg-muted/30 px-3 py-2 text-[11px] leading-relaxed text-foreground/85">
@@ -102,16 +114,16 @@ export default function Dashboard() {
 
       {/* KPI Grid */}
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-4" aria-label="Indicadores clave">
-        <KpiCard label="Ingresos totales" value={k ? formatCOP(k.ingresos) : '—'} icon={TrendingUp} emphasis="emerald" testId="kpi-ingresos"
-          hint="Shopify all-time" />
-        <KpiCard label="Gastos totales" value={k ? formatCOP(k.gastos) : '—'} icon={Receipt} testId="kpi-gastos" hint="Sheet + Shopify" />
-        <KpiCard label="Utilidad neta all-time" value={k ? formatCOP(k.utilidadNeta) : '—'} icon={Wallet} emphasis="gold" testId="kpi-utilidad" hint={k ? `Histórico seed · margen ${formatPct(k.margenEstimado)}` : ''} />
-        <KpiCard label="Margen estimado" value={k ? formatPct(k.margenEstimado, 2) : '—'} icon={Percent} testId="kpi-margen" hint="Sobre ingresos all-time" />
+        <KpiCard label="Ingresos netos" value={k ? formatCOP(k.ingresos) : '—'} icon={TrendingUp} emphasis="emerald" testId="kpi-ingresos"
+          hint="Shopify: productos descontados + shipping - refunds" />
+        <KpiCard label="COGS vendido" value={k ? formatCOP(k.cogsVendido ?? 0) : '—'} icon={Package} testId="kpi-cogs" hint="MM BOM × unidades vendidas" />
+        <KpiCard label="Utilidad bruta" value={k ? formatCOP(k.utilidadBruta ?? 0) : '—'} icon={Wallet} emphasis="gold" testId="kpi-utilidad-bruta" hint={k ? `Margen bruto ${formatPct(k.margenBruto ?? 0)}` : ''} />
+        <KpiCard label="Gastos operativos" value={k ? formatCOP(k.gastosOperativos ?? k.gastos) : '—'} icon={Receipt} testId="kpi-gastos" hint="Sheet/manual · excluye inventario/capital" />
 
-        <KpiCard label="AOV" value={k ? formatCOP(k.aov) : '—'} icon={ShoppingCart} testId="kpi-aov" hint="Ticket promedio" />
-        <KpiCard label="Órdenes" value={k ? formatNumber(k.ordenes) : '—'} icon={Package} testId="kpi-ordenes" hint="All-time Shopify" />
-        <KpiCard label="Clientes recurrentes" value={k ? `${formatNumber(k.clientesRecurrentes)}` : '—'} icon={Users} testId="kpi-recurrentes" hint={k ? `${formatPct(k.clientesRecurrentesPct)} del total` : ''} />
-        <KpiCard label="Familia top" value={k?.topProductFamily ?? '—'} icon={Package} testId="kpi-top-family" hint="Por ingresos" />
+        <KpiCard label="Utilidad neta" value={k ? formatCOP(k.utilidadNeta) : '—'} icon={Wallet} emphasis="gold" testId="kpi-utilidad" hint={k ? `Margen neto ${formatPct(k.margenEstimado)}` : ''} />
+        <KpiCard label="Órdenes" value={k ? formatNumber(k.ordenes) : '—'} icon={ShoppingCart} testId="kpi-ordenes" hint="Shopify all-time" />
+        <KpiCard label="AOV neto" value={k ? formatCOP(k.aov) : '—'} icon={Users} testId="kpi-aov" hint="Ingresos netos / órdenes" />
+        <KpiCard label="Inventario excluido" value={k ? formatCOP(k.comprasInventarioExcluidas ?? 0) : '—'} icon={Package} testId="kpi-inventory-excluded" hint="No llevado a gasto directo" />
       </section>
 
       {/* Charts row */}
@@ -119,8 +131,8 @@ export default function Dashboard() {
         <Card className="lg:col-span-2 p-5 bg-card border-card-border" data-testid="card-monthly-profit">
           <div className="flex items-center justify-between gap-3 mb-4">
             <div>
-              <h2 className="text-sm font-semibold tracking-tight">Resultado mensual 2026</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Ingresos vs gastos · utilidad por mes</p>
+              <h2 className="text-sm font-semibold tracking-tight">Resultado mensual real</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Ingresos netos vs COGS vs gastos operativos · utilidad neta por mes</p>
             </div>
             <div className="flex items-center gap-2">
               <select
@@ -132,7 +144,7 @@ export default function Dashboard() {
                 <option value="oldest">Viejo → nuevo</option>
                 <option value="newest">Nuevo → viejo</option>
               </select>
-              <Badge variant="outline" className="text-[11px]" data-testid="badge-source-monthly">Sheet contable</Badge>
+              <Badge variant="outline" className="text-[11px]" data-testid="badge-source-monthly">Shopify + MM + gastos reales</Badge>
             </div>
           </div>
           <div className="h-[260px]">
@@ -151,8 +163,9 @@ export default function Dashboard() {
                   formatter={(v: number) => formatCOP(v)}
                 />
                 <Bar dataKey="income" name="Ingresos" fill="hsl(var(--chart-1))" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="expenses" name="Gastos" fill="hsl(var(--chart-2))" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="profit" name="Utilidad" radius={[3, 3, 0, 0]}>
+                <Bar dataKey="cogs" name="COGS vendido" fill="hsl(var(--chart-4))" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="expenses" name="Gastos operativos" fill="hsl(var(--chart-2))" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="profit" name="Utilidad neta" radius={[3, 3, 0, 0]}>
                   {monthlyChartRows.map((m, i) => (
                     <Cell key={i} fill={m.profit >= 0 ? 'hsl(var(--chart-3))' : 'hsl(var(--destructive))'} />
                   ))}
