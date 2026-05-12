@@ -113,6 +113,7 @@ export type Product = {
   presentation?: string | null;
   shopifyProductId?: string;
   shopifyHandle?: string;
+  variantLegacyIds?: Array<{ id: string; title: string }>;
 };
 
 export type CostBreakdownItem = {
@@ -480,4 +481,73 @@ export type MmMirrorStatus = {
   conflicts: number;
   lastRun: MmImportRun | null;
   lastQa: MmRoundTripQa | null;
+  draftBomCount?: number;
+};
+
+// Draft BOM overlay — local edits that do NOT mutate MM-imported rows.
+// Kept in its own table so the round-trip export of MM remains pristine.
+export type MmBomDraftRow = {
+  id: number;
+  variantId: string;
+  materialId: string;
+  quantity: number;
+  unit: string;
+  materialName: string;
+  productName: string;
+  variantName: string;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export const insertBomDraftSchema = z.object({
+  variantId: z.string().min(1),
+  materialId: z.string().min(1),
+  quantity: z.number().min(0).max(10_000),
+  unit: z.string().max(40).optional(),
+  productName: z.string().max(200).optional(),
+  variantName: z.string().max(200).optional(),
+  note: z.string().max(500).optional(),
+});
+
+export type InsertBomDraft = z.infer<typeof insertBomDraftSchema>;
+
+export const updateBomDraftSchema = z.object({
+  quantity: z.number().min(0).max(10_000).optional(),
+  unit: z.string().max(40).optional(),
+  note: z.string().max(500).optional(),
+});
+
+export type UpdateBomDraft = z.infer<typeof updateBomDraftSchema>;
+
+export type MaterialDetail = {
+  material: MmMaterialRow;
+  bom: MmBomRow[];                       // MM imported BOM rows for this material
+  bomDrafts: MmBomDraftRow[];            // local draft additions for this material
+  costHistory: MmCostHistoryRow[];
+  productsUsing: Array<{
+    variantId: string;
+    productName: string;
+    variantName: string;
+    quantity: number;
+    isDraft: boolean;
+  }>;
+  totals: {
+    bomVariantCount: number;
+    draftVariantCount: number;
+    totalQuantityUsed: number;
+  };
+};
+
+export type ProductBomDetail = {
+  variantId: string;
+  productName: string;
+  variantName: string;
+  imported: MmBomRow[];
+  drafts: MmBomDraftRow[];
+  totalCost: {
+    imported: number;
+    draftDelta: number;          // sum of drafts only (not synced to MM/Shopify)
+    combined: number;
+  };
 };

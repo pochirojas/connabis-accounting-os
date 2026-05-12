@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   LayoutDashboard, TrendingUp, Receipt, PackageSearch,
   Boxes, AlertTriangle, Settings, Moon, Sun, RefreshCw,
-  CalendarRange, BookOpen, Brain, Landmark, Database,
+  CalendarRange, BookOpen, Brain, Landmark,
 } from 'lucide-react';
 import { ConnabisLogo } from './logo';
 import { useTheme } from './theme-provider';
@@ -13,18 +13,19 @@ import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 const NAV = [
-  { href: '/',           label: 'Dashboard',      icon: LayoutDashboard, testId: 'nav-dashboard' },
-  { href: '/financiero', label: 'Control financiero', icon: Landmark,        testId: 'nav-financiero' },
-  { href: '/ingresos',   label: 'Ingresos',       icon: TrendingUp,      testId: 'nav-ingresos' },
-  { href: '/gastos',     label: 'Gastos',         icon: Receipt,         testId: 'nav-gastos' },
-  { href: '/productos',  label: 'Productos & Márgenes', icon: PackageSearch, testId: 'nav-productos' },
-  { href: '/performance',label: 'Performance mensual', icon: CalendarRange, testId: 'nav-performance' },
-  { href: '/inventario', label: 'Inventario & Compras', icon: Boxes,         testId: 'nav-inventario' },
-  { href: '/material-manager', label: 'MM Mirror (Phase 2)', icon: Database, testId: 'nav-material-manager' },
-  { href: '/alertas',    label: 'Alertas',        icon: AlertTriangle,   testId: 'nav-alertas' },
-  { href: '/sugerencias',label: 'Predicciones',   icon: Brain,           testId: 'nav-sugerencias' },
-  { href: '/glosario',   label: 'Diccionario',    icon: BookOpen,        testId: 'nav-glosario' },
-  { href: '/integracion',label: 'Plan de integración', icon: Settings,        testId: 'nav-integracion' },
+  { href: '/',                  label: 'Dashboard',             icon: LayoutDashboard, testId: 'nav-dashboard' },
+  { href: '/financiero',        label: 'Control financiero',    icon: Landmark,        testId: 'nav-financiero' },
+  { href: '/ingresos',          label: 'Ingresos',              icon: TrendingUp,      testId: 'nav-ingresos' },
+  { href: '/gastos',            label: 'Gastos',                icon: Receipt,         testId: 'nav-gastos' },
+  { href: '/productos',         label: 'Productos & Márgenes',  icon: PackageSearch,   testId: 'nav-productos' },
+  { href: '/performance',       label: 'Performance mensual',   icon: CalendarRange,   testId: 'nav-performance' },
+  // Consolidated module — MM Mirror + Inventario & Compras + draft BOM editor.
+  // `/inventario` and `/material-manager` both render the same page.
+  { href: '/material-manager',  label: 'Inventario & Materiales', icon: Boxes,         testId: 'nav-inventario' },
+  { href: '/alertas',           label: 'Alertas',               icon: AlertTriangle,   testId: 'nav-alertas' },
+  { href: '/sugerencias',       label: 'Predicciones',          icon: Brain,           testId: 'nav-sugerencias' },
+  { href: '/glosario',          label: 'Diccionario',           icon: BookOpen,        testId: 'nav-glosario' },
+  { href: '/integracion',       label: 'Plan de integración',   icon: Settings,        testId: 'nav-integracion' },
 ] as const;
 
 export function Layout({ children, title, subtitle }: { children: ReactNode; title: string; subtitle?: string }) {

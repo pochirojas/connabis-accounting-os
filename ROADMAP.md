@@ -27,28 +27,32 @@ Objetivo:
 
 Convertir Connabis Accounting OS en el sistema que maneja materiales, BOM, inventario, órdenes de compra, costos y producción.
 
-### Phase 2.1 — Mirror read-only (implementado)
+### Phase 2.1 — Mirror read-only + módulo Inventario & Materiales (implementado)
 
 - Espejo interno de Material Manager: materiales, BOM, historial de costos del Excel.
 - Endpoints `/api/material-manager/*` para status, import, listas, export y QA round-trip.
-- Página `/material-manager` en el sidebar con status cards, botones de import/export/QA y tablas filtrables.
+- **Módulo único Inventario & Materiales** en el sidebar. Antes había dos entradas ("Inventario & Compras" + "MM Mirror Phase 2"); ahora hay un solo módulo. Tanto `/inventario` como `/material-manager` apuntan a la misma página.
+- Tabs: Materiales · BOM/Productos · Órdenes de compra · Admin/QA/Costos.
+- **Detalle por material**: click en un material abre dashboard con info + productos que lo usan + cards de Inventario / Procurement / Materials sold trend / Notificaciones (réplica del layout de MM).
+- **Editor de BOM por variante** (modal): seleccionar variante, ver filas MM importadas (solo lectura) y filas draft locales (CRUD), añadir material desde selector, ajustar cantidad/unidad, eliminar.
+- **Draft BOM overlay**: nueva tabla `material_manager_bom_drafts` separada de las filas MM. No se mezcla con `material_manager_bom_components`. Endpoints `GET/POST/PATCH/DELETE /api/material-manager/bom-drafts` y `GET /api/material-manager/variants/:variantId/bom`. UI marca los drafts con badge ámbar "Draft OS BOM · no sincronizado".
+- Export Materials/BOM CSV sigue siendo round-trip exact respecto a MM (excluye drafts). Un futuro "Export drafts preview" en Phase 2.2 permitirá ver el draft completo aparte.
+- Productos & Márgenes cross-links: cada producto activo expone un botón **Editar BOM (draft local)** que abre el mismo modal del módulo Inventario.
 - Export con headers MM exactos para rollback de emergencia.
-- **Sin escrituras a Shopify ni a inventario.** Material Manager sigue siendo la fuente oficial vigente.
+- **Sin escrituras a Shopify ni a Material Manager.** MM sigue siendo la fuente oficial vigente.
 - App correrá eventualmente como Shopify embedded app; antes de cualquier escritura se probará en una tienda separada.
 
 ### Phase 2.2 → 2.5 — pendientes
 
 Módulos:
 
-- Materiales.
-- BOM editor.
-- Inventario de materiales.
-- Órdenes de compra.
-- Landed cost.
-- Batch costing.
+- Promover drafts a MM (escritura segura, requiere stage tienda separada).
+- Materiales: edición/borrado/creación local con sync opt-in a MM.
+- BOM editor con merge MM↔drafts en una sola vista (hoy se muestran lado a lado).
+- Inventario de materiales con receiving real (PO → stock).
+- Landed cost, batch costing.
 - Calculadora de blends/carts.
-- Calendario de restock.
-- Alertas de stock y compras sugeridas.
+- Calendario de restock + alertas de stock + compras sugeridas.
 
 Entrada necesaria:
 

@@ -1,8 +1,10 @@
 import { Layout } from '@/components/layout';
+import { Link } from 'wouter';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useQuery } from '@tanstack/react-query';
+import { ProductBomEditor } from '@/components/product-bom-editor';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -13,6 +15,7 @@ import type { Product } from '@shared/schema';
 import { formatCOP, formatCOPCompact, formatNumber, formatPct } from '@/lib/format';
 import { KpiCard } from '@/components/kpi-card';
 import { Package, ShieldAlert, ShieldCheck, Pencil, Info, Search, Layers3, AlertTriangle } from 'lucide-react';
+// Pencil already imported — used by inline "Editar BOM (draft local)" button.
 import {
   Tooltip as UiTooltip, TooltipContent, TooltipTrigger,
 } from '@/components/ui/tooltip';
@@ -27,6 +30,7 @@ export default function Productos() {
   const [search, setSearch] = useState('');
   const [family, setFamily] = useState('Todas');
   const [selectedId, setSelectedId] = useState<string>('p1');
+  const [bomEditorState, setBomEditorState] = useState<{ variantId: string; productName?: string; variants: Array<{ id: string; name: string }> } | null>(null);
 
   const computed = useMemo(() => {
     return (products.data ?? []).filter(p => p.active).map(p => {
@@ -84,6 +88,8 @@ export default function Productos() {
               {isLive
                 ? 'Esta vista usa productos activos de Shopify, ventas reales por SKU/línea y COGS desde BOM de Material Manager cuando existe. El simulador de precio es local: no cambia Shopify.'
                 : 'Esta tabla todavía no contiene todo el catálogo real. Cuando conectemos la API, Productos & Márgenes usará únicamente productos activos de Shopify.'}
+              {' '}
+              El editor de BOM (botón "Editar BOM" en cada producto) abre la misma vista que <Link href="/material-manager" className="underline text-accent" data-testid="link-banner-inventory">Inventario & Materiales</Link>. Los cambios se guardan como <strong>draft local</strong> y no se sincronizan con MM/Shopify hasta Phase 2.2.
             </p>
           </div>
         </div>
@@ -148,13 +154,32 @@ export default function Productos() {
                   SKU base {selected.sku ?? 'sin SKU'} · {selected.family} · {(selected as Product & { variantCount?: number }).variantCount ?? 1} sabores/variantes · Fuente de costo: {sourceLabel(selected)}
                 </p>
               </div>
-              <Badge
-                variant={selected.cogsSource === 'shopify' ? 'default' : 'outline'}
-                className={`text-[10px] uppercase tracking-wide ${selected.cogsSource === 'fallback' ? 'border-amber-500/40 text-amber-300' : ''}`}
-                data-testid="badge-selected-source"
-              >
-                {selected.marginSource === 'material_manager' ? 'MM BOM' : selected.cogsSource === 'shopify' ? 'Shopify cost' : 'Fallback'}
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant={selected.cogsSource === 'shopify' ? 'default' : 'outline'}
+                  className={`text-[10px] uppercase tracking-wide ${selected.cogsSource === 'fallback' ? 'border-amber-500/40 text-amber-300' : ''}`}
+                  data-testid="badge-selected-source"
+                >
+                  {selected.marginSource === 'material_manager' ? 'MM BOM' : selected.cogsSource === 'shopify' ? 'Shopify cost' : 'Fallback'}
+                </Badge>
+                {selected.variantLegacyIds?.length ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="button-open-bom-editor"
+                    onClick={() => setBomEditorState({
+                      variantId: selected.variantLegacyIds![0].id,
+                      productName: selected.name,
+                      variants: selected.variantLegacyIds!.map(v => ({ id: v.id, name: v.title })),
+                    })}
+                  >
+                    <Pencil className="h-3 w-3 mr-1" /> Editar BOM (draft local)
+                  </Button>
+                ) : null}
+                <Link href="/material-manager" data-testid="link-go-to-inventory">
+                  <Button size="sm" variant="ghost">Ir a Inventario & Materiales →</Button>
+                </Link>
+              </div>
             </div>
           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 mb-4">
               <MiniMetric label="Precio" value={formatCOP(selected.unitPrice)} testId="metric-selected-price" />
@@ -400,6 +425,16 @@ export default function Productos() {
           </div>
         </Card>
       </section>
+
+      {bomEditorState ? (
+        <ProductBomEditor
+          open
+          onClose={() => setBomEditorState(null)}
+          productName={bomEditorState.productName}
+          variants={bomEditorState.variants}
+          initialVariantId={bomEditorState.variantId}
+        />
+      ) : null}
     </Layout>
   );
 }

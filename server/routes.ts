@@ -7,15 +7,22 @@ import { insertExpenseSchema, updateCashAccountSchema, updateCloseChecklistSchem
 import type { Alert, DailyPerformance, Expense, Product } from '@shared/schema';
 import { sqlite, storage } from './storage';
 import {
+  createBomDraft,
+  deleteBomDraft,
   exportMmBomCsv,
   exportMmMaterialsCsv,
+  getMaterialDetail,
   getMirrorStatus,
+  getProductBomDetail,
   importMaterialManagerMirror,
   listMmBomComponents,
+  listMmBomDrafts,
   listMmCostHistory,
   listMmMaterials,
   runRoundTripQa,
+  updateBomDraft,
 } from './material-manager-mirror';
+import { insertBomDraftSchema, updateBomDraftSchema } from '@shared/schema';
 import {
   channels, years, months, kpis, products,
   materials, purchaseOrders, alerts, integrationPhases,
@@ -1437,6 +1444,7 @@ async function loadLiveShopifyProducts() {
       presentation: group.presentation,
       shopifyProductId: product.id,
       shopifyHandle: product.handle,
+      variantLegacyIds: group.variants.map(item => ({ id: String(item.legacyResourceId), title: item.title })),
     };
     });
   });
@@ -1970,6 +1978,54 @@ export async function registerRoutes(
       console.error('[mm-mirror] qa failed', error);
       res.status(500).json({ error: error instanceof Error ? error.message : 'qa_failed' });
     }
+  });
+
+  // Material detail (dashboard view)
+  app.get('/api/material-manager/materials/:id', (req, res) => {
+    const detail = getMaterialDetail(sqlite, req.params.id);
+    if (!detail) return res.status(404).json({ error: 'material_not_found' });
+    res.json(detail);
+  });
+
+  // Product BOM detail by variant id (legacy/numeric Shopify variant id)
+  app.get('/api/material-manager/variants/:variantId/bom', (req, res) => {
+    res.json(getProductBomDetail(sqlite, req.params.variantId));
+  });
+
+  // Draft BOM CRUD — local-only edits, never written into the MM mirror tables.
+  app.get('/api/material-manager/bom-drafts', (req, res) => {
+    res.json(listMmBomDrafts(sqlite, {
+      materialId: req.query.materialId ? String(req.query.materialId) : undefined,
+      variantId: req.query.variantId ? String(req.query.variantId) : undefined,
+    }));
+  });
+
+  app.post('/api/material-manager/bom-drafts', (req, res) => {
+    const parsed = insertBomDraftSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_draft', details: parsed.error.flatten() });
+    }
+    try {
+      const created = createBomDraft(sqlite, parsed.data);
+      res.status(201).json(created);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'create_failed';
+      res.status(message === 'material_not_found' ? 404 : 400).json({ error: message });
+    }
+  });
+
+  app.patch('/api/material-manager/bom-drafts/:id', (req, res) => {
+    const parsed = updateBomDraftSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_draft_update', details: parsed.error.flatten() });
+    }
+    const updated = updateBomDraft(sqlite, Number(req.params.id), parsed.data);
+    if (!updated) return res.status(404).json({ error: 'draft_not_found' });
+    res.json(updated);
+  });
+
+  app.delete('/api/material-manager/bom-drafts/:id', (req, res) => {
+    res.json({ deleted: deleteBomDraft(sqlite, Number(req.params.id)) });
   });
 
   return httpServer;

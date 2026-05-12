@@ -12,7 +12,6 @@ import Ingresos from "@/pages/ingresos";
 import Gastos from "@/pages/gastos";
 import Productos from "@/pages/productos";
 import Performance from "@/pages/performance";
-import Inventario from "@/pages/inventario";
 import MaterialManager from "@/pages/material-manager";
 import Alertas from "@/pages/alertas";
 import Sugerencias from "@/pages/sugerencias";
@@ -28,7 +27,8 @@ function AppRouter() {
       <Route path="/gastos" component={Gastos} />
       <Route path="/productos" component={Productos} />
       <Route path="/performance" component={Performance} />
-      <Route path="/inventario" component={Inventario} />
+      {/* Both /inventario (legacy) and /material-manager point to the consolidated module. */}
+      <Route path="/inventario" component={MaterialManager} />
       <Route path="/material-manager" component={MaterialManager} />
       <Route path="/alertas" component={Alertas} />
       <Route path="/sugerencias" component={Sugerencias} />

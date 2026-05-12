@@ -8,12 +8,17 @@ import Database from 'better-sqlite3';
 import {
   MM_BOM_CSV_HEADERS,
   MM_MATERIALS_CSV_HEADERS,
+  type InsertBomDraft,
+  type MaterialDetail,
+  type MmBomDraftRow,
   type MmBomRow,
   type MmCostHistoryRow,
   type MmImportRun,
   type MmMaterialRow,
   type MmMirrorStatus,
   type MmRoundTripQa,
+  type ProductBomDetail,
+  type UpdateBomDraft,
 } from '@shared/schema';
 
 const MM_MATERIALS_CSV = '/home/user/workspace/material-manager-export.csv';
@@ -97,6 +102,25 @@ export function ensureMaterialManagerMirrorSchema(sqlite: Database.Database) {
       status TEXT NOT NULL,
       payload TEXT NOT NULL
     );
+
+    -- Local draft BOM overlay. Never touched by MM CSV import; lives next to
+    -- the pristine mirror so the round-trip export still matches MM exactly.
+    CREATE TABLE IF NOT EXISTS material_manager_bom_drafts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      variant_id TEXT NOT NULL,
+      material_id TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      unit TEXT NOT NULL DEFAULT '',
+      material_name TEXT NOT NULL DEFAULT '',
+      product_name TEXT NOT NULL DEFAULT '',
+      variant_name TEXT NOT NULL DEFAULT '',
+      note TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(variant_id, material_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_bom_drafts_variant ON material_manager_bom_drafts(variant_id);
+    CREATE INDEX IF NOT EXISTS idx_bom_drafts_material ON material_manager_bom_drafts(material_id);
   `);
 }
 
@@ -489,6 +513,7 @@ export function getMirrorStatus(sqlite: Database.Database): MmMirrorStatus {
   } : null;
   const lastQaRow = sqlite.prepare('SELECT payload FROM material_round_trip_qa ORDER BY id DESC LIMIT 1').get() as { payload?: string } | undefined;
   const lastQa: MmRoundTripQa | null = lastQaRow?.payload ? JSON.parse(lastQaRow.payload) as MmRoundTripQa : null;
+  const draftBomCount = Number((sqlite.prepare('SELECT COUNT(*) AS c FROM material_manager_bom_drafts').get() as { c: number }).c);
   return {
     materialsImported,
     bomImported,
@@ -497,6 +522,7 @@ export function getMirrorStatus(sqlite: Database.Database): MmMirrorStatus {
     conflicts: lastRun?.conflicts ?? 0,
     lastRun,
     lastQa,
+    draftBomCount,
   };
 }
 
@@ -662,4 +688,210 @@ function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
   let equal = true;
   a.forEach(item => { if (!b.has(item)) equal = false; });
   return equal;
+}
+
+// ---------- Material detail / Product BOM accessors ----------
+
+export function getMmMaterial(sqlite: Database.Database, materialId: string): MmMaterialRow | null {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const row = sqlite.prepare(`
+    SELECT id, name, description, measurement, sku, barcode, category, supplier,
+           cost, currency_code, update_shopify_inventory, limit_shopify_inventory,
+           materials_used_in_all_orders, stock, is_insumo, is_noid
+    FROM material_manager_materials
+    WHERE id = ?
+  `).get(materialId) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return {
+    id: String(row.id),
+    name: String(row.name ?? ''),
+    description: String(row.description ?? ''),
+    measurement: String(row.measurement ?? ''),
+    sku: String(row.sku ?? ''),
+    barcode: String(row.barcode ?? ''),
+    category: String(row.category ?? ''),
+    supplier: String(row.supplier ?? ''),
+    cost: Number(row.cost ?? 0),
+    currencyCode: String(row.currency_code ?? 'COP'),
+    updateShopifyInventory: Number(row.update_shopify_inventory) === 1,
+    limitShopifyInventory: Number(row.limit_shopify_inventory) === 1,
+    materialsUsedInAllOrders: String(row.materials_used_in_all_orders ?? ''),
+    stock: Number(row.stock ?? 0),
+    isInsumo: Number(row.is_insumo) === 1,
+    isNoid: Number(row.is_noid) === 1,
+  };
+}
+
+function mapDraftRow(row: Record<string, unknown>): MmBomDraftRow {
+  return {
+    id: Number(row.id),
+    variantId: String(row.variant_id),
+    materialId: String(row.material_id),
+    quantity: Number(row.quantity ?? 0),
+    unit: String(row.unit ?? ''),
+    materialName: String(row.material_name ?? ''),
+    productName: String(row.product_name ?? ''),
+    variantName: String(row.variant_name ?? ''),
+    note: row.note === null || row.note === undefined ? null : String(row.note),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+export function listMmBomDrafts(
+  sqlite: Database.Database,
+  filter?: { materialId?: string; variantId?: string },
+): MmBomDraftRow[] {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (filter?.materialId) { where.push('material_id = ?'); params.push(filter.materialId); }
+  if (filter?.variantId) { where.push('variant_id = ?'); params.push(filter.variantId); }
+  const sql = `
+    SELECT id, variant_id, material_id, quantity, unit, material_name, product_name, variant_name, note, created_at, updated_at
+    FROM material_manager_bom_drafts
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY updated_at DESC, id DESC
+  `;
+  return (sqlite.prepare(sql).all(...params) as Array<Record<string, unknown>>).map(mapDraftRow);
+}
+
+export function createBomDraft(sqlite: Database.Database, payload: InsertBomDraft): MmBomDraftRow {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const material = getMmMaterial(sqlite, payload.materialId);
+  if (!material) throw new Error('material_not_found');
+  const now = new Date().toISOString();
+  // Best-effort enrich variant/product names from any existing BOM row.
+  const bomMeta = sqlite.prepare(`
+    SELECT product_name, variant_name FROM material_manager_bom_components
+    WHERE variant_id = ? LIMIT 1
+  `).get(payload.variantId) as { product_name?: string; variant_name?: string } | undefined;
+  const productName = payload.productName ?? bomMeta?.product_name ?? '';
+  const variantName = payload.variantName ?? bomMeta?.variant_name ?? '';
+  const info = sqlite.prepare(`
+    INSERT INTO material_manager_bom_drafts (
+      variant_id, material_id, quantity, unit, material_name, product_name, variant_name, note, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(variant_id, material_id) DO UPDATE SET
+      quantity = excluded.quantity,
+      unit = excluded.unit,
+      note = excluded.note,
+      updated_at = excluded.updated_at
+  `).run(
+    payload.variantId,
+    payload.materialId,
+    payload.quantity,
+    payload.unit ?? material.measurement ?? '',
+    material.name,
+    productName,
+    variantName,
+    payload.note ?? null,
+    now,
+    now,
+  );
+  const id = Number(info.lastInsertRowid);
+  const row = sqlite.prepare(`
+    SELECT id, variant_id, material_id, quantity, unit, material_name, product_name, variant_name, note, created_at, updated_at
+    FROM material_manager_bom_drafts
+    WHERE id = ? OR (variant_id = ? AND material_id = ?)
+    ORDER BY id DESC LIMIT 1
+  `).get(id, payload.variantId, payload.materialId) as Record<string, unknown>;
+  return mapDraftRow(row);
+}
+
+export function updateBomDraft(sqlite: Database.Database, id: number, payload: UpdateBomDraft): MmBomDraftRow | null {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const existing = sqlite.prepare('SELECT * FROM material_manager_bom_drafts WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  if (!existing) return null;
+  const now = new Date().toISOString();
+  sqlite.prepare(`
+    UPDATE material_manager_bom_drafts
+    SET quantity = COALESCE(?, quantity),
+        unit = COALESCE(?, unit),
+        note = COALESCE(?, note),
+        updated_at = ?
+    WHERE id = ?
+  `).run(
+    payload.quantity ?? null,
+    payload.unit ?? null,
+    payload.note ?? null,
+    now,
+    id,
+  );
+  const row = sqlite.prepare('SELECT * FROM material_manager_bom_drafts WHERE id = ?').get(id) as Record<string, unknown>;
+  return mapDraftRow(row);
+}
+
+export function deleteBomDraft(sqlite: Database.Database, id: number): boolean {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const info = sqlite.prepare('DELETE FROM material_manager_bom_drafts WHERE id = ?').run(id);
+  return info.changes > 0;
+}
+
+export function getMaterialDetail(sqlite: Database.Database, materialId: string): MaterialDetail | null {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const material = getMmMaterial(sqlite, materialId);
+  if (!material) return null;
+  const bom = listMmBomComponents(sqlite, { materialId });
+  const bomDrafts = listMmBomDrafts(sqlite, { materialId });
+  const costHistory = listMmCostHistory(sqlite, { materialKey: material.name ? normalizeMaterialKey(material.name) : undefined, limit: 60 });
+  const productsUsing = [
+    ...bom.map(b => ({
+      variantId: b.variantId,
+      productName: b.productName,
+      variantName: b.variantName,
+      quantity: b.quantity,
+      isDraft: false,
+    })),
+    ...bomDrafts.map(d => ({
+      variantId: d.variantId,
+      productName: d.productName,
+      variantName: d.variantName,
+      quantity: d.quantity,
+      isDraft: true,
+    })),
+  ];
+  return {
+    material,
+    bom,
+    bomDrafts,
+    costHistory,
+    productsUsing,
+    totals: {
+      bomVariantCount: bom.length,
+      draftVariantCount: bomDrafts.length,
+      totalQuantityUsed: productsUsing.reduce((sum, p) => sum + p.quantity, 0),
+    },
+  };
+}
+
+export function getProductBomDetail(sqlite: Database.Database, variantId: string): ProductBomDetail {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const imported = listMmBomComponents(sqlite, { variantId });
+  const drafts = listMmBomDrafts(sqlite, { variantId });
+  const productName = imported[0]?.productName ?? drafts[0]?.productName ?? '';
+  const variantName = imported[0]?.variantName ?? drafts[0]?.variantName ?? '';
+  // Build a unit-cost map from the materials table for cost rollup.
+  const costRows = sqlite.prepare('SELECT id, cost FROM material_manager_materials').all() as Array<{ id: string; cost: number }>;
+  const costById = new Map(costRows.map(r => [r.id, Number(r.cost) || 0]));
+  const importedCost = imported.reduce((sum, b) => sum + (costById.get(b.materialId) ?? 0) * b.quantity, 0);
+  const draftCost = drafts.reduce((sum, d) => sum + (costById.get(d.materialId) ?? 0) * d.quantity, 0);
+  return {
+    variantId,
+    productName,
+    variantName,
+    imported,
+    drafts,
+    totalCost: {
+      imported: importedCost,
+      draftDelta: draftCost,
+      combined: importedCost + draftCost,
+    },
+  };
+}
+
+export function countBomDrafts(sqlite: Database.Database): number {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const row = sqlite.prepare('SELECT COUNT(*) AS c FROM material_manager_bom_drafts').get() as { c: number };
+  return Number(row.c);
 }

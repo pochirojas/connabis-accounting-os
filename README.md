@@ -9,6 +9,7 @@ Dashboard interno de contabilidad, margen y operación para Connabis Colombia.
 - Sheet/manual: fuente real para gastos históricos y nuevos.
 - No mezclar seed con real sin marcarlo en UI.
 - Phase 2: reemplazar Material Manager dentro del OS. Arranca en Phase 2.1 con un mirror solo lectura (shadow mode) que importa y exporta los CSV de MM con headers exactos para rollback de emergencia, sin escribir en Shopify.
+- Phase 2.1+: el módulo **Inventario & Materiales** ya consolida "MM Mirror" + "Inventario & Compras" y agrega un editor de BOM local (drafts) por variante. Los drafts viven en `material_manager_bom_drafts` y nunca se mezclan con las filas MM importadas. El export CSV (Materials/BOM) sigue siendo bit-exact respecto a MM para preservar el rollback; los drafts se exportarán por separado cuando se habilite `Export drafts preview`.
 - La app correrá eventualmente como Shopify embedded app; antes de habilitar escrituras se probará en una tienda de pruebas separada.
 - Phase 3: Dataico/fiscal futuro, no implementado.
 
@@ -37,10 +38,9 @@ npm start
 | `/` | `client/src/pages/dashboard.tsx` | KPIs reales y P&L por período |
 | `/ingresos` | `client/src/pages/ingresos.tsx` | Ingresos Shopify |
 | `/gastos` | `client/src/pages/gastos.tsx` | Gastos reales, clasificación, caja, export |
-| `/productos` | `client/src/pages/productos.tsx` | Productos activos, ventas por SKU, COGS MM, simulador |
+| `/productos` | `client/src/pages/productos.tsx` | Productos activos, ventas por SKU, COGS MM, simulador. Botón **Editar BOM (draft local)** abre el editor compartido con Inventario. |
 | `/performance` | `client/src/pages/performance.tsx` | Filtros por fecha y drilldown diario |
-| `/inventario` | `client/src/pages/inventario.tsx` | Prototipo Phase 2 |
-| `/material-manager` | `client/src/pages/material-manager.tsx` | **Phase 2.1**: mirror MM solo lectura, sin escrituras Shopify |
+| `/inventario` y `/material-manager` | `client/src/pages/material-manager.tsx` | **Inventario & Materiales** (módulo único). Tabs: Materiales · BOM/Productos · Órdenes de compra · Admin/QA/Costos. Click en un material abre dashboard de detalle (info, productos que lo usan, inventario/procurement/notificaciones). Las dos rutas renderizan la misma página para mantener enlaces antiguos. |
 | `/sugerencias` | `client/src/pages/sugerencias.tsx` | Sugerencias reales + restock Phase 2 model |
 | `/alertas` | `client/src/pages/alertas.tsx` | Alertas específicas |
 | `/glosario` | `client/src/pages/glosario.tsx` | Diccionario contable |
@@ -61,6 +61,9 @@ npm start
 | `GET /api/alerts` | Alertas dinámicas |
 | `GET /api/accounting-suggestions` | Sugerencias basadas en datos reales |
 | `GET/POST /api/material-manager/*` | Phase 2.1: status/import/qa, listas (materials, BOM, cost history), export con headers MM exactos |
+| `GET /api/material-manager/materials/:id` | Detalle de material: info + BOM + drafts + productos que lo usan + historial de costos |
+| `GET /api/material-manager/variants/:variantId/bom` | BOM de una variante (importado MM + drafts locales con desglose de costo) |
+| `GET/POST/PATCH/DELETE /api/material-manager/bom-drafts` | Draft BOM overlay local (no afecta el round-trip MM CSV). Etiquetado como _draft local_ en UI. |
 
 ## Documentación
 

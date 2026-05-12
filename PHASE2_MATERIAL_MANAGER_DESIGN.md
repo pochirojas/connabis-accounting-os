@@ -4,6 +4,26 @@ Phase 2 no sincroniza ni escribe inventario en Shopify al inicio. El objetivo es
 
 Principio operativo: el cambio debe ser reversible. El OS debe poder importar y exportar exactamente los mismos formatos CSV que Material Manager para que, si algo falla, se pueda volver a Material Manager sin downtime ni pérdida de inventario.
 
+## Draft BOM overlay (Phase 2.1+)
+
+Para permitir edición de BOM dentro del OS sin contaminar el rollback bit-exact contra MM, los cambios locales viven en una tabla aparte llamada `material_manager_bom_drafts`:
+
+- La tabla MM `material_manager_bom_components` es siempre la fuente de verdad importada desde el CSV de MM. Nunca se muta desde la UI; sólo se reemplaza al ejecutar `Import / Rebuild Mirror`.
+- Cualquier edición de BOM en el OS (añadir material a una variante, ajustar cantidad, etc.) se guarda en `material_manager_bom_drafts` (UNIQUE por `variant_id + material_id`).
+- El export CSV (`/api/material-manager/export/bom.csv` y `materials.csv`) NO incluye drafts. Esto preserva el round-trip exact contra MM y garantiza el rollback de emergencia.
+- La UI etiqueta los drafts con un badge ámbar **Draft OS BOM · no sincronizado**.
+- Phase 2.2 añadirá: `Export drafts preview` (CSV separado), promoción de draft → MM mediante stage en tienda Shopify de pruebas, y vista combinada MM ∪ drafts para cálculo de COGS preview.
+
+### Endpoints draft
+
+- `GET /api/material-manager/materials/:id` — detalle de material (MM info + productos que lo usan + drafts + cost history).
+- `GET /api/material-manager/variants/:variantId/bom` — BOM por variante (filas MM + drafts + cost rollup `imported / draftDelta / combined`).
+- `GET /api/material-manager/bom-drafts` (con filtros `materialId`/`variantId`), `POST` para crear/upsert, `PATCH /:id`, `DELETE /:id`.
+
+## Consolidación de navegación
+
+A partir de Phase 2.1 el sidebar tiene **un solo módulo** `Inventario & Materiales` para no fragmentar la mental model. Las rutas `/inventario` y `/material-manager` apuntan al mismo componente, así que cualquier enlace antiguo (`/inventario`) sigue funcionando. La página usa tabs internos: Materiales, BOM/Productos, Órdenes de compra (legacy), Admin/QA/Costos. El detalle por material replica el layout vertical de la vista nativa de Material Manager (info principal + 4 cards a la derecha: Inventario, Procurement, Materials sold trend, Notificaciones).
+
 ## Fuentes actuales
 
 - `material-manager-export.csv`: catálogo actual de materiales, unidad de medida, proveedor, costo actual, flags de inventario Shopify y stock por ubicación.
