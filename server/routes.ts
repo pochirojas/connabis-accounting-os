@@ -35,6 +35,11 @@ import {
   getMmPurchaseOrdersStatus,
 } from './material-manager-purchase-orders';
 import {
+  CART_PACKAGING_OPTIONS,
+  CLEAR_BUBBLE_BAG_COST,
+  buildRecipesWithMmCosts,
+} from './cart-calculator';
+import {
   insertBomDraftSchema,
   updateBomDraftSchema,
   updateBomOverrideSchema,
@@ -2151,6 +2156,18 @@ export async function registerRoutes(
 
   app.delete('/api/material-manager/variants/:variantId/bom-overrides/:materialId', (req, res) => {
     res.json({ deleted: deleteMmBomOverride(sqlite, req.params.variantId, req.params.materialId) });
+  });
+
+  // Cart Calculator — recipes + packaging seeded from the accounting sheet
+  // `Calculadora Carts`. Per-ingredient cost is taken from the live MM mirror
+  // when an ingredient name matches; otherwise we fall back to the seed value
+  // and mark it `source: 'sheet'`.
+  app.get('/api/material-manager/cart-calculator', (_req, res) => {
+    res.json({
+      recipes: buildRecipesWithMmCosts(sqlite),
+      packaging: CART_PACKAGING_OPTIONS,
+      bagCost: CLEAR_BUBBLE_BAG_COST,
+    });
   });
 
   return httpServer;

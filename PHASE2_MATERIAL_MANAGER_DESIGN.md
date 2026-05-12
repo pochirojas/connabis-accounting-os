@@ -22,7 +22,40 @@ Para permitir edición de BOM dentro del OS sin contaminar el rollback bit-exact
 
 ## Consolidación de navegación
 
-A partir de Phase 2.1 el sidebar tiene **un solo módulo** `Inventario & Materiales` para no fragmentar la mental model. Las rutas `/inventario` y `/material-manager` apuntan al mismo componente, así que cualquier enlace antiguo (`/inventario`) sigue funcionando. La página usa tabs internos: Materiales, BOM/Productos, Órdenes de compra (legacy), Admin/QA/Costos. El detalle por material replica el layout vertical de la vista nativa de Material Manager (info principal + 4 cards a la derecha: Inventario, Procurement, Materials sold trend, Notificaciones).
+A partir de Phase 2.1 el sidebar tiene **un solo módulo** `Inventario & Materiales` para no fragmentar la mental model. Las rutas `/inventario` y `/material-manager` apuntan al mismo componente, así que cualquier enlace antiguo (`/inventario`) sigue funcionando. La página usa tabs internos: Materiales, BOM/Productos, Órdenes de compra (legacy), Calculadora de Carts, Admin/QA/Costos. El detalle por material replica el layout vertical de la vista nativa de Material Manager (info principal + 4 cards a la derecha: Inventario, Procurement, Materials sold trend, Notificaciones).
+
+## Calculadora de Carts (Phase 2.3)
+
+Tab `Calculadora de Carts` portada desde la hoja `Calculadora Carts` de `Contabilidad-Connabis-Pro-1.xlsx`. El objetivo: replicar el cálculo de costo por blend/cart que el equipo usa hoy en Excel, sin pedirle al usuario que mantenga la hoja en paralelo.
+
+### Datos seed (extraídos visibles de la hoja)
+
+- **13 recetas (% por ingrediente)** del bloque `PORCENTAJES RECETA` (cells N19:O… en adelante): Pineapple X / XX / XXX, CB DOBLE, HHC MAX / ULTRA, THCO MAX / ULTRA / REPLACE, D8 MAX / ULTRA, XTREME, CRD REPLACE.
+- **Costos por mL** (`PRECIOS INSUMOS / ML of each`, A19:B23 + D19:D25): THC-O, HHC, D8-THC, CBD, Terpenos, THC-P/H/HHC-P/H4CBD/CBG/THCO REPLACE/CRD REPLACE.
+- **Packaging**: Cart 1mL / 2.25mL / Desechable 4mL / 5mL con sus costos unitarios + Clear Bubble Bag (toggle on/off).
+
+### Fórmula
+
+```
+needed_ml(ing)   = ratio(ing) × number_of_carts × ml_per_cart
+ingredient_cost  = needed_ml × cost_per_ml(ing)
+blend_cost       = Σ ingredient_cost
+packaging_cost   = (cart_unit_cost + (bag_cost si toggle on)) × number_of_carts
+total_cost       = blend_cost + packaging_cost
+cost_per_cart    = total_cost / number_of_carts
+revenue / profit = sale_price × carts ; profit = revenue − total_cost
+margin           = profit / revenue
+```
+
+### Endpoint
+
+`GET /api/material-manager/cart-calculator` → `{ recipes, packaging, bagCost }`. Para cada ingrediente la respuesta incluye:
+
+- `seedCostPerMl` — valor congelado de la hoja contable.
+- `effectiveCostPerMl` — valor que la UI usa; viene del MM mirror cuando hay match case-insensitive por nombre con un material en `material_manager_materials`, o vuelve al seed si no.
+- `costSource: 'mm' | 'sheet'` y `mmMaterialId`/`mmMaterialName` para auditar la fuente fila a fila.
+
+Asunción importante: tratamos `cost` del MM mirror como costo-por-mL para los ingredientes que matchean (la hoja también mezcla unidades). Si en el futuro queremos diferenciar costos por gramo vs mL, se añade un campo de conversión por material en una migración separada. Por ahora la UI siempre etiqueta la fuente para que el usuario vea cuál ingrediente sigue en seed-sheet vs MM live. Quantities siempre float (`step="any"`, `formatQty`); no se redondea por carts ni por mL.
 
 ## Fuentes actuales
 

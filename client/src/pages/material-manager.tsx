@@ -21,6 +21,7 @@ import type {
 } from '@shared/schema';
 import { MaterialDetailView } from '@/components/material-detail';
 import { ProductBomEditor } from '@/components/product-bom-editor';
+import { CartCalculator } from '@/components/cart-calculator';
 
 type ImportResponse = MmMirrorStatus & { warnings?: string[] };
 
@@ -46,7 +47,7 @@ export default function MaterialManagerPage() {
   const [bomFilter, setBomFilter] = useState('');
   const [selectedMaterialId, setSelectedMaterialId] = useState<string | null>(null);
   const [bomEditorVariantId, setBomEditorVariantId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'materials' | 'bom' | 'purchase' | 'admin'>('materials');
+  const [activeTab, setActiveTab] = useState<'materials' | 'bom' | 'purchase' | 'calculator' | 'admin'>('materials');
 
   const status = useQuery<MmMirrorStatus>({ queryKey: ['/api/material-manager/status'] });
   const materials = useQuery<MmMaterialRow[]>({ queryKey: ['/api/material-manager/materials'] });
@@ -201,6 +202,7 @@ export default function MaterialManagerPage() {
           <TabsTrigger value="materials" data-testid="tab-materials">Materiales</TabsTrigger>
           <TabsTrigger value="bom" data-testid="tab-bom">BOM / Productos</TabsTrigger>
           <TabsTrigger value="purchase" data-testid="tab-purchase">Órdenes de compra</TabsTrigger>
+          <TabsTrigger value="calculator" data-testid="tab-calculator">Calculadora de Carts</TabsTrigger>
           <TabsTrigger value="admin" data-testid="tab-admin">Admin · QA · costos</TabsTrigger>
         </TabsList>
 
@@ -463,6 +465,10 @@ export default function MaterialManagerPage() {
               )}
             </Card>
           ) : null}
+        </TabsContent>
+
+        <TabsContent value="calculator" className="mt-4">
+          <CartCalculator />
         </TabsContent>
 
         <TabsContent value="admin" className="mt-4 space-y-4">
