@@ -27,6 +27,17 @@ Objetivo:
 
 Convertir Connabis Accounting OS en el sistema que maneja materiales, BOM, inventario, órdenes de compra, costos y producción.
 
+### Phase 2.1 — Mirror read-only (implementado)
+
+- Espejo interno de Material Manager: materiales, BOM, historial de costos del Excel.
+- Endpoints `/api/material-manager/*` para status, import, listas, export y QA round-trip.
+- Página `/material-manager` en el sidebar con status cards, botones de import/export/QA y tablas filtrables.
+- Export con headers MM exactos para rollback de emergencia.
+- **Sin escrituras a Shopify ni a inventario.** Material Manager sigue siendo la fuente oficial vigente.
+- App correrá eventualmente como Shopify embedded app; antes de cualquier escritura se probará en una tienda separada.
+
+### Phase 2.2 → 2.5 — pendientes
+
 Módulos:
 
 - Materiales.

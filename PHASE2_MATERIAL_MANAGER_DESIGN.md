@@ -413,3 +413,49 @@ Para precisión matemática y estabilidad:
 - COGS histórico por venta: costo vigente a la fecha de venta si existe historial suficiente; si no, promedio ponderado acumulado hasta esa fecha.
 
 Este enfoque evita saltos raros por una sola compra cara/barata y sigue siendo más preciso que usar siempre último costo para ventas antiguas.
+
+## Phase 2.1 — Implementación actual (read-only mirror, sin escrituras Shopify)
+
+La primera entrega de Phase 2 ya está en código. Es un espejo interno (shadow mode) del Material Manager, sin escrituras a Shopify y con rollback de emergencia garantizado.
+
+### Tablas SQLite (drizzle/better-sqlite3)
+
+- `material_manager_materials` — catálogo MM 1:1 con sus 14 columnas, más `is_insumo` e `is_noid` derivados.
+- `material_manager_bom_components` — BOM por `(material_id, variant_id)` con unicidad enforced.
+- `material_cost_history` — historial extraído del Excel (`Noids Costos`, `Supplement Costos`, `Materials Costos`, `Insumos Costos `).
+- `material_import_runs` — log de cada corrida del importador.
+- `material_round_trip_qa` — log de cada validación round-trip.
+
+### Pipeline de import
+
+1. `script/extract-material-cost-history.py` lee el workbook Excel y escribe `server/data/material-cost-history.json` (219 filas a la fecha). Se vuelve a correr cuando el Excel cambia.
+2. `server/material-manager-mirror.ts` parsea los dos CSV de MM exactos, valida headers, y carga las tres tablas en una transacción.
+3. Cualquier divergencia de headers, ID duplicado o par BOM repetido se cuenta como `conflict` y aparece en el log.
+
+### Endpoints HTTP
+
+- `GET  /api/material-manager/status` — KPIs del mirror.
+- `POST /api/material-manager/import` — reconstruye el mirror desde CSV + Excel JSON.
+- `GET  /api/material-manager/materials` — lista materiales con flags.
+- `GET  /api/material-manager/bom` — BOM filtrable por `materialId` / `variantId`.
+- `GET  /api/material-manager/cost-history` — historial filtrable por `materialKey` / `sourceSheet`.
+- `GET  /api/material-manager/export/materials.csv` — export con headers MM exactos.
+- `GET  /api/material-manager/export/bom.csv` — export con headers MM exactos.
+- `POST /api/material-manager/qa` — round-trip QA: headers, row counts, IDs, BOM quantities, stock.
+
+### UI
+
+Nueva página `MM Mirror (Phase 2)` en el sidebar (`/material-manager`). Muestra status cards, botones Import / Export Materials / Export BOM / Run QA, y tablas filtrables de materiales, BOM e historial de costos. La página deja explícito el modo sombra.
+
+### Política Phase 2.1
+
+- No hay escrituras a Shopify ni a inventario.
+- Material Manager sigue siendo la fuente oficial vigente.
+- El export debe coincidir byte a byte en headers y orden para permitir rollback emergente.
+- Insumos (tooling/equipo) no son inventariables: la columna `is_insumo` los aísla del cálculo de BOM/COGS.
+- Carts/desechables permanecen en categoría Noid (`is_noid`).
+- Sin proveedor histórico oficial: si no viene de MM o de una PO futura, `supplier` queda en blanco.
+
+### Futuro Shopify-app
+
+La aplicación correrá como Shopify embedded app. Antes de habilitar cualquier escritura, el OS se conectará primero a una tienda de prueba. La arquitectura actual ya separa lectura/escritura: el código de Phase 2.1 nunca llama al Shopify Admin API y el setup OAuth existente queda intacto para la futura instalación.

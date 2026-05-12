@@ -6,7 +6,7 @@
 - Routing: Wouter con hash routing para funcionar dentro del deploy iframe.
 - Data fetching: TanStack Query.
 - Backend: Express en `server/routes.ts`.
-- Storage local: `server/storage.ts` para gastos manuales/caja; SQLite/Drizzle disponible en el template.
+- Storage local: `server/storage.ts` para gastos manuales/caja; SQLite/Drizzle. Phase 2.1 agrega tablas `material_manager_materials`, `material_manager_bom_components`, `material_cost_history`, `material_import_runs` y `material_round_trip_qa` (módulo `server/material-manager-mirror.ts`).
 - Shared types: `shared/schema.ts`.
 
 ## Capas
@@ -21,6 +21,7 @@ Páginas principales en `client/src/pages`:
 - `productos.tsx`: productos activos, ventas por SKU, COGS MM y simulador de precio.
 - `performance.tsx`: performance por período y drilldown diario.
 - `inventario.tsx`: prototipo Phase 2.
+- `material-manager.tsx`: Phase 2.1, mirror solo lectura de Material Manager (status, import, export con headers MM exactos, QA round-trip).
 - `sugerencias.tsx`: sugerencias reales + restock marcado Phase 2.
 - `alertas.tsx`: alertas de calidad de datos y utilidad.
 - `glosario.tsx`: definiciones.

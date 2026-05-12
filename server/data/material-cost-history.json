@@ -1,0 +1,2202 @@
+{
+  "generated_at": "2026-05-12T17:16:08.794686Z",
+  "source": "Contabilidad-Connabis-Pro-1.xlsx",
+  "summary_by_sheet": {
+    "Noids Costos": 118,
+    "Supplement Costos": 14,
+    "Materials Costos": 71,
+    "Insumos Costos": 16
+  },
+  "entries": [
+    {
+      "date": "2024-08-22",
+      "material": "0 Empty Capsules",
+      "unit_cost_cop": 109.6261,
+      "qty": 1000.0,
+      "currency": "USD",
+      "fx_rate": 4021.5,
+      "source_sheet": "Materials Costos",
+      "description": "0 size Capsules # 112-1323234-3753829"
+    },
+    {
+      "date": "2024-06-07",
+      "material": "000 Empty Capsules",
+      "unit_cost_cop": 109.2186,
+      "qty": 1000.0,
+      "currency": "USD",
+      "fx_rate": 4230.0,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order #112-7991574-0901010"
+    },
+    {
+      "date": "2024-06-14",
+      "material": "1 mL Cart",
+      "unit_cost_cop": 12780.0,
+      "qty": 15.0,
+      "currency": "USD",
+      "fx_rate": 4260.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded 15/u Ceramic Carts Order #30322"
+    },
+    {
+      "date": "2024-07-05",
+      "material": "1 mL Cart",
+      "unit_cost_cop": 10675.0,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4270.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Restock 100x 1mL carts Order #31268"
+    },
+    {
+      "date": "2025-07-01",
+      "material": "1 mL Cart",
+      "unit_cost_cop": 12249.7067,
+      "qty": 20.0,
+      "currency": "USD",
+      "fx_rate": 4069.67,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order #48281"
+    },
+    {
+      "date": "2025-10-12",
+      "material": "1 mL Cart",
+      "unit_cost_cop": 4461.77,
+      "qty": 200.0,
+      "currency": "USD",
+      "fx_rate": 3879.8,
+      "source_sheet": "Noids Costos",
+      "description": "Dash Mile Order # S2255"
+    },
+    {
+      "date": "2025-05-15",
+      "material": "1 mL Desechable Cart",
+      "unit_cost_cop": 33915.1065,
+      "qty": 5.0,
+      "currency": "USD",
+      "fx_rate": 4223.55,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order #46757"
+    },
+    {
+      "date": "2025-08-04",
+      "material": "10ml Glass Vial",
+      "unit_cost_cop": 2680.1618,
+      "qty": 20.0,
+      "currency": "COP",
+      "fx_rate": 4126.5,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-7838804-9269832"
+    },
+    {
+      "date": "2026-02-27",
+      "material": "10ml Glass Vial",
+      "unit_cost_cop": 2447.277,
+      "qty": 20.0,
+      "currency": "USD",
+      "fx_rate": 3767.9399,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon order #113-4391277-4610607"
+    },
+    {
+      "date": "2025-09-10",
+      "material": "12 inchx100ft Bubble Wrap",
+      "unit_cost_cop": 40323.1483,
+      "qty": 2.0,
+      "currency": "USD",
+      "fx_rate": 4034.332,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon #111-0423212-7283411"
+    },
+    {
+      "date": "2025-05-15",
+      "material": "2 mL Desechable Cart",
+      "unit_cost_cop": 34464.168,
+      "qty": 5.0,
+      "currency": "USD",
+      "fx_rate": 4223.55,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order #46757"
+    },
+    {
+      "date": "2025-04-06",
+      "material": "2 Tablespoon Meltal Scoops",
+      "unit_cost_cop": 16154.9479,
+      "qty": 4.0,
+      "currency": "USD",
+      "fx_rate": 4310.86,
+      "source_sheet": "Insumos Costos",
+      "description": "Amazon Order # 113-3372303-2581064"
+    },
+    {
+      "date": "2024-05-29",
+      "material": "2.25 mL Cart",
+      "unit_cost_cop": 13552.5,
+      "qty": 24.0,
+      "currency": "USD",
+      "fx_rate": 4170.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded + Impuestos Carts // Order #29410"
+    },
+    {
+      "date": "2025-02-16",
+      "material": "2.25 mL Cart",
+      "unit_cost_cop": 14584.8,
+      "qty": 20.0,
+      "currency": "USD",
+      "fx_rate": 4120.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order 4mL & 2.25mL Order #43315"
+    },
+    {
+      "date": "2025-04-06",
+      "material": "2.25 mL Cart",
+      "unit_cost_cop": 15058.8414,
+      "qty": 5.0,
+      "currency": "USD",
+      "fx_rate": 4253.91,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded order # 45543"
+    },
+    {
+      "date": "2025-05-15",
+      "material": "2.25 mL Cart",
+      "unit_cost_cop": 14951.367,
+      "qty": 5.0,
+      "currency": "USD",
+      "fx_rate": 4223.55,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order #46757"
+    },
+    {
+      "date": "2025-07-01",
+      "material": "2.25 mL Cart",
+      "unit_cost_cop": 14406.6318,
+      "qty": 20.0,
+      "currency": "USD",
+      "fx_rate": 4069.67,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order #48281"
+    },
+    {
+      "date": "2025-10-12",
+      "material": "2.25 mL Cart",
+      "unit_cost_cop": 4849.75,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 3879.8,
+      "source_sheet": "Noids Costos",
+      "description": "Dash Mile Order # S2255"
+    },
+    {
+      "date": "2025-09-10",
+      "material": "2.25ML Glass Syringe Metal Plunger",
+      "unit_cost_cop": 10364.1989,
+      "qty": 10.0,
+      "currency": "USD",
+      "fx_rate": 4034.332,
+      "source_sheet": "Insumos Costos",
+      "description": "Amazon #111-0423212-7283411"
+    },
+    {
+      "date": "2024-06-14",
+      "material": "4 mL Desechable Cart",
+      "unit_cost_cop": 31950.0,
+      "qty": 10.0,
+      "currency": "USD",
+      "fx_rate": 4260.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded 15/u Ceramic Carts Order #30322"
+    },
+    {
+      "date": "2025-02-16",
+      "material": "4 mL Desechable Cart",
+      "unit_cost_cop": 37080.0,
+      "qty": 10.0,
+      "currency": "USD",
+      "fx_rate": 4120.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order 4mL & 2.25mL Order #43315"
+    },
+    {
+      "date": "2025-04-06",
+      "material": "4 mL Desechable Cart",
+      "unit_cost_cop": 42028.6308,
+      "qty": 3.0,
+      "currency": "USD",
+      "fx_rate": 4253.91,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded order # 45543"
+    },
+    {
+      "date": "2025-05-15",
+      "material": "4 mL Desechable Cart",
+      "unit_cost_cop": 39490.1925,
+      "qty": 5.0,
+      "currency": "USD",
+      "fx_rate": 4223.55,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order #46757"
+    },
+    {
+      "date": "2025-09-10",
+      "material": "4x6 Thermal Shipping Labels",
+      "unit_cost_cop": 177.3492,
+      "qty": 500.0,
+      "currency": "USD",
+      "fx_rate": 4034.332,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon #111-0423212-7283411"
+    },
+    {
+      "date": "2025-08-04",
+      "material": "4×8\" Bubble Mailers",
+      "unit_cost_cop": 701.0924,
+      "qty": 100.0,
+      "currency": "COP",
+      "fx_rate": 4126.5,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-7838804-9269832"
+    },
+    {
+      "date": "2025-01-07",
+      "material": "5 mL Disposable Cart",
+      "unit_cost_cop": 38925.0,
+      "qty": 10.0,
+      "currency": "USD",
+      "fx_rate": 4325.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Restock THC-O + 5mL Order #41083"
+    },
+    {
+      "date": "2025-08-04",
+      "material": "5ml Glass Vial",
+      "unit_cost_cop": 2061.1867,
+      "qty": 20.0,
+      "currency": "COP",
+      "fx_rate": 4126.5,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-7838804-9269832"
+    },
+    {
+      "date": "2026-02-27",
+      "material": "5ml Glass Vial",
+      "unit_cost_cop": 1882.086,
+      "qty": 20.0,
+      "currency": "USD",
+      "fx_rate": 3767.9399,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon order #113-4391277-4610607"
+    },
+    {
+      "date": "2025-08-04",
+      "material": "8.5x12\" Bubble Mailers",
+      "unit_cost_cop": 2227.2784,
+      "qty": 40.0,
+      "currency": "COP",
+      "fx_rate": 4126.5,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-7838804-9269832"
+    },
+    {
+      "date": "2024-04-26",
+      "material": "Aislado CBN",
+      "unit_cost_cop": 12180.0,
+      "qty": 10.0,
+      "currency": "USD",
+      "fx_rate": 4060.0,
+      "source_sheet": "Noids Costos",
+      "description": "First Formal Inventory Order #27655"
+    },
+    {
+      "date": "2024-05-10",
+      "material": "Amber Glass Jars 0.7oz/ 20ml",
+      "unit_cost_cop": 3293.94,
+      "qty": 20.0,
+      "currency": "USD",
+      "fx_rate": 4120.0,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Orders #112-9516846-0936250 & #112-1380496-3526601"
+    },
+    {
+      "date": "22/8/2024",
+      "material": "Ashawaganda",
+      "unit_cost_cop": 13.475,
+      "qty": 2.0,
+      "currency": "USD",
+      "fx_rate": 4021.5,
+      "source_sheet": "Supplement Costos",
+      "description": "Supplements Resupply Ed"
+    },
+    {
+      "date": "2025-09-10",
+      "material": "Blue Nitrile Gloves (Size M)",
+      "unit_cost_cop": 281.9998,
+      "qty": 200.0,
+      "currency": "USD",
+      "fx_rate": 4034.332,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon #111-0423212-7283411"
+    },
+    {
+      "date": "2026-02-27",
+      "material": "Blue Nitrile Gloves (Size M)",
+      "unit_cost_cop": 376.4172,
+      "qty": 200.0,
+      "currency": "USD",
+      "fx_rate": 3767.9399,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon order #113-4391277-4610607"
+    },
+    {
+      "date": "2024-11-25",
+      "material": "Bubble Mailers 6x10/9\"",
+      "unit_cost_cop": 1142.9461,
+      "qty": 100.0,
+      "currency": "COP",
+      "fx_rate": 4501.56,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 112-1008449-2492246"
+    },
+    {
+      "date": "2025-04-20",
+      "material": "Bubble Mailers 6x10/9\"",
+      "unit_cost_cop": 1152.8488,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4435.74,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-6051780-6109839"
+    },
+    {
+      "date": "2025-08-14",
+      "material": "Bubble Mailers 6x10/9\"",
+      "unit_cost_cop": 1004.1322,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4066.959,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 112-8548146-6375411"
+    },
+    {
+      "date": "2025-11-07",
+      "material": "Bubble Mailers 6x10/9\"",
+      "unit_cost_cop": 1406.5065,
+      "qty": 80.0,
+      "currency": "USD",
+      "fx_rate": 3909.6776,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 111-6009318-1347469"
+    },
+    {
+      "date": "2026-02-27",
+      "material": "Bubble Mailers 6x10/9\"",
+      "unit_cost_cop": 1035.7125,
+      "qty": 160.0,
+      "currency": "USD",
+      "fx_rate": 3767.9399,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon order #113-4391277-4610607"
+    },
+    {
+      "date": "2026-02-27",
+      "material": "Bubble Mailers 8.5x11 In",
+      "unit_cost_cop": 1976.2845,
+      "qty": 40.0,
+      "currency": "USD",
+      "fx_rate": 3767.9399,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon order #113-4391277-4610607"
+    },
+    {
+      "date": "2024-03-20",
+      "material": "Bubble Mailers 8.5x12 In - 25pack",
+      "unit_cost_cop": 2174.588,
+      "qty": 25.0,
+      "currency": "USD",
+      "fx_rate": 4030.0,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 112-1787866-6718606"
+    },
+    {
+      "date": "2025-04-03",
+      "material": "Bubble Mailers 8.5x12 In - 25pack",
+      "unit_cost_cop": 2481.7,
+      "qty": 25.0,
+      "currency": "USD",
+      "fx_rate": 4150.0,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order #113-2291049-7107442"
+    },
+    {
+      "date": "2025-08-08",
+      "material": "CDT Papaya Punch",
+      "unit_cost_cop": 7140.1189,
+      "qty": 5.0,
+      "currency": null,
+      "fx_rate": null,
+      "source_sheet": "Noids Costos",
+      "description": null
+    },
+    {
+      "date": "2024-05-10",
+      "material": "Clear Bubble Bags 3.14\" x 3.93\"+1.5\" Inch (8 x 10+4cm)",
+      "unit_cost_cop": 699.988,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4120.0,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Orders #112-9516846-0936250 & #112-1380496-3526601"
+    },
+    {
+      "date": "2025-04-03",
+      "material": "Clear Bubble Bags 3.15\" x 4\"",
+      "unit_cost_cop": 587.5708,
+      "qty": 120.0,
+      "currency": "USD",
+      "fx_rate": 4150.0,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order #113-2291049-7107442"
+    },
+    {
+      "date": "2025-06-01",
+      "material": "Clear Bubble Bags 4\" x 5.5\"",
+      "unit_cost_cop": 718.346,
+      "qty": 120.0,
+      "currency": "USD",
+      "fx_rate": 4106.790092,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-5541035-6263419"
+    },
+    {
+      "date": "2025-09-10",
+      "material": "Clear Bubble Bags 4x6\"",
+      "unit_cost_cop": 470.5376,
+      "qty": 300.0,
+      "currency": "USD",
+      "fx_rate": 4034.332,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon #111-0423212-7283411"
+    },
+    {
+      "date": "2026-02-27",
+      "material": "Clear Bubble Bags 4x6\"",
+      "unit_cost_cop": 439.4674,
+      "qty": 300.0,
+      "currency": "USD",
+      "fx_rate": 3767.9399,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon order #113-4391277-4610607"
+    },
+    {
+      "date": "2024-05-10",
+      "material": "Coffee Mug Warmer",
+      "unit_cost_cop": 98838.8,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4120.0,
+      "source_sheet": "Insumos Costos",
+      "description": "Amazon Orders #112-9516846-0936250 & #112-1380496-3526601"
+    },
+    {
+      "date": "2024-03-27",
+      "material": "Cola de Pavo",
+      "unit_cost_cop": 57.9,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4040.0,
+      "source_sheet": "Supplement Costos",
+      "description": "Mushrooms Order"
+    },
+    {
+      "date": "2025-04-06",
+      "material": "Cola de Pavo",
+      "unit_cost_cop": 59.98,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4310.86,
+      "source_sheet": "Supplement Costos",
+      "description": "Amazon Order # 113-2253931-9728247"
+    },
+    {
+      "date": "2025-04-20",
+      "material": "Cola de Pavo",
+      "unit_cost_cop": 59.98,
+      "qty": 2.0,
+      "currency": "USD",
+      "fx_rate": 4325.92,
+      "source_sheet": "Supplement Costos",
+      "description": "Amazon Order # 113-6227539-7229039"
+    },
+    {
+      "date": "22/8/2024",
+      "material": "Cola de Pavo",
+      "unit_cost_cop": 59.98,
+      "qty": 0.5,
+      "currency": "USD",
+      "fx_rate": 4021.5,
+      "source_sheet": "Supplement Costos",
+      "description": "Supplements Resupply Ed"
+    },
+    {
+      "date": "2025-04-20",
+      "material": "Cordyceps",
+      "unit_cost_cop": 59.98,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4325.92,
+      "source_sheet": "Supplement Costos",
+      "description": "Amazon Order # 113-6227539-7229039"
+    },
+    {
+      "date": "22/8/2024",
+      "material": "Cordyceps",
+      "unit_cost_cop": 53.9,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4021.5,
+      "source_sheet": "Supplement Costos",
+      "description": "Supplements Resupply Ed"
+    },
+    {
+      "date": "2024-05-29",
+      "material": "CR CBD",
+      "unit_cost_cop": 7506.0,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 4170.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded + Impuestos Carts // Order #29410"
+    },
+    {
+      "date": "2025-07-20",
+      "material": "CRD CBD",
+      "unit_cost_cop": 1313.1253,
+      "qty": 200.0,
+      "currency": "USD",
+      "fx_rate": 4103.5166,
+      "source_sheet": "Noids Costos",
+      "description": "[MC # SO-017472] [FP # 357846 & # 358009]"
+    },
+    {
+      "date": "2026-04-08",
+      "material": "CRD CBD",
+      "unit_cost_cop": 1137.7992,
+      "qty": 300.0,
+      "currency": "USD",
+      "fx_rate": 3792.664,
+      "source_sheet": "Noids Costos",
+      "description": "HAU Order # 12532"
+    },
+    {
+      "date": "2026-04-08",
+      "material": "Deestilado H4CBD",
+      "unit_cost_cop": 2465.2316,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 3792.664,
+      "source_sheet": "Noids Costos",
+      "description": "HAU Order # 12532"
+    },
+    {
+      "date": "2026-01-29",
+      "material": "Desechable Damy 4mL",
+      "unit_cost_cop": 12447.9182,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 3661.1524,
+      "source_sheet": "Noids Costos",
+      "description": "Dash Mile Order # S2255"
+    },
+    {
+      "date": "2025-02-16",
+      "material": "Destilado CBC",
+      "unit_cost_cop": 38110.0,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4120.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order 4mL & 2.25mL Order #43315"
+    },
+    {
+      "date": "2024-04-26",
+      "material": "Destilado CBD",
+      "unit_cost_cop": 2872.45,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4060.0,
+      "source_sheet": "Noids Costos",
+      "description": "First Formal Inventory Order #27655"
+    },
+    {
+      "date": "2025-05-15",
+      "material": "Destilado CBD",
+      "unit_cost_cop": 3590.0175,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4223.55,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order #46757"
+    },
+    {
+      "date": "2025-07-01",
+      "material": "Destilado CBD RED MESA",
+      "unit_cost_cop": 4340.9813,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 4069.67,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order #48281"
+    },
+    {
+      "date": "2025-12-11",
+      "material": "Destilado CBG",
+      "unit_cost_cop": 2123.737,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 3861.34,
+      "source_sheet": "Noids Costos",
+      "description": "HAU Processing Order # 001599"
+    },
+    {
+      "date": "2026-04-08",
+      "material": "Destilado CBG",
+      "unit_cost_cop": 2085.9652,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 3792.664,
+      "source_sheet": "Noids Costos",
+      "description": "HAU Order # 12532"
+    },
+    {
+      "date": "2024-10-14",
+      "material": "Destilado CBGo",
+      "unit_cost_cop": 15638.112,
+      "qty": 5.0,
+      "currency": "USD",
+      "fx_rate": 4343.92,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order #36202"
+    },
+    {
+      "date": "2024-04-26",
+      "material": "Destilado D8-THC",
+      "unit_cost_cop": 3652.6467,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 4060.0,
+      "source_sheet": "Noids Costos",
+      "description": "First Formal Inventory Order #27655"
+    },
+    {
+      "date": "2025-02-16",
+      "material": "Destilado D8-THC",
+      "unit_cost_cop": 4393.2933,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 4120.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order 4mL & 2.25mL Order #43315"
+    },
+    {
+      "date": "2025-05-15",
+      "material": "Destilado D8-THC",
+      "unit_cost_cop": 4785.2822,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 4223.55,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order #46757"
+    },
+    {
+      "date": "2025-07-23",
+      "material": "Destilado D8-THC",
+      "unit_cost_cop": 2462.11,
+      "qty": 130.0,
+      "currency": null,
+      "fx_rate": null,
+      "source_sheet": "Noids Costos",
+      "description": null
+    },
+    {
+      "date": "2025-12-11",
+      "material": "Destilado D8-THC",
+      "unit_cost_cop": 1119.7886,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 3861.34,
+      "source_sheet": "Noids Costos",
+      "description": "HAU Processing Order # 001599"
+    },
+    {
+      "date": "2026-04-08",
+      "material": "Destilado D8-THC",
+      "unit_cost_cop": 1099.8726,
+      "qty": 200.0,
+      "currency": "USD",
+      "fx_rate": 3792.664,
+      "source_sheet": "Noids Costos",
+      "description": "HAU Order # 12532"
+    },
+    {
+      "date": "2024-10-14",
+      "material": "Destilado D8-THC w/ Terpenos",
+      "unit_cost_cop": 7239.8667,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 4343.92,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order #36202"
+    },
+    {
+      "date": "2024-04-26",
+      "material": "Destilado HHC",
+      "unit_cost_cop": 5142.6667,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 4060.0,
+      "source_sheet": "Noids Costos",
+      "description": "First Formal Inventory Order #27655"
+    },
+    {
+      "date": "2025-01-07",
+      "material": "Destilado HHC",
+      "unit_cost_cop": 7205.45,
+      "qty": 15.0,
+      "currency": "USD",
+      "fx_rate": 4325.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Restock THC-O + 5mL Order #41083"
+    },
+    {
+      "date": "2025-02-16",
+      "material": "Destilado HHC",
+      "unit_cost_cop": 5150.0,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 4120.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order 4mL & 2.25mL Order #43315"
+    },
+    {
+      "date": "2025-05-15",
+      "material": "Destilado HHC",
+      "unit_cost_cop": 5911.5621,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 4223.55,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order #46757"
+    },
+    {
+      "date": "2025-08-08",
+      "material": "Destilado HHC",
+      "unit_cost_cop": 2256.9341,
+      "qty": 100.0,
+      "currency": null,
+      "fx_rate": null,
+      "source_sheet": "Noids Costos",
+      "description": null
+    },
+    {
+      "date": "2025-12-11",
+      "material": "Destilado HHC",
+      "unit_cost_cop": 1737.603,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 3861.34,
+      "source_sheet": "Noids Costos",
+      "description": "HAU Processing Order # 001599"
+    },
+    {
+      "date": "2026-04-08",
+      "material": "Destilado HHC",
+      "unit_cost_cop": 1706.6988,
+      "qty": 200.0,
+      "currency": "USD",
+      "fx_rate": 3792.664,
+      "source_sheet": "Noids Costos",
+      "description": "HAU Order # 12532"
+    },
+    {
+      "date": "2026-04-08",
+      "material": "Destilado HHCP",
+      "unit_cost_cop": 22755.984,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 3792.664,
+      "source_sheet": "Noids Costos",
+      "description": "HAU Order # 12532"
+    },
+    {
+      "date": "2026-04-08",
+      "material": "Destilado THCH",
+      "unit_cost_cop": 11377.992,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 3792.664,
+      "source_sheet": "Noids Costos",
+      "description": "HAU Order # 12532"
+    },
+    {
+      "date": "2024-04-26",
+      "material": "Destilado THCO",
+      "unit_cost_cop": 5413.3333,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 4060.0,
+      "source_sheet": "Noids Costos",
+      "description": "First Formal Inventory Order #27655"
+    },
+    {
+      "date": "2024-07-05",
+      "material": "Destilado THCO",
+      "unit_cost_cop": 5693.3333,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 4270.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Restock 100x 1mL carts Order #31268"
+    },
+    {
+      "date": "2024-10-14",
+      "material": "Destilado THCO",
+      "unit_cost_cop": 6514.432,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 4343.92,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order #36202"
+    },
+    {
+      "date": "2025-01-07",
+      "material": "Destilado THCO",
+      "unit_cost_cop": 5405.8175,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4325.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Restock THC-O + 5mL Order #41083"
+    },
+    {
+      "date": "2025-04-06",
+      "material": "Destilado THCO",
+      "unit_cost_cop": 5316.9621,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4253.91,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded order # 45543"
+    },
+    {
+      "date": "2025-05-15",
+      "material": "Destilado THCO",
+      "unit_cost_cop": 5279.0151,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4223.55,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order #46757"
+    },
+    {
+      "date": "2025-08-08",
+      "material": "Destilado THCO",
+      "unit_cost_cop": 2667.2858,
+      "qty": 300.0,
+      "currency": null,
+      "fx_rate": null,
+      "source_sheet": "Noids Costos",
+      "description": null
+    },
+    {
+      "date": "2025-12-11",
+      "material": "Destilado THCO",
+      "unit_cost_cop": 2509.871,
+      "qty": 1000.0,
+      "currency": "USD",
+      "fx_rate": 3861.34,
+      "source_sheet": "Noids Costos",
+      "description": "HAU Processing Order # 001599"
+    },
+    {
+      "date": "2026-04-08",
+      "material": "Destilado THCP",
+      "unit_cost_cop": 11377.992,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 3792.664,
+      "source_sheet": "Noids Costos",
+      "description": "HAU Order # 12532"
+    },
+    {
+      "date": "2024-05-10",
+      "material": "Digital Milligram Scale",
+      "unit_cost_cop": 49275.2,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4120.0,
+      "source_sheet": "Insumos Costos",
+      "description": "Amazon Orders #112-9516846-0936250 & #112-1380496-3526601"
+    },
+    {
+      "date": "2025-04-03",
+      "material": "Foam Lid Liner 65mm/2.56\"",
+      "unit_cost_cop": 559.835,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4150.0,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order #113-2291049-7107442"
+    },
+    {
+      "date": "2024-05-11",
+      "material": "Food Scale",
+      "unit_cost_cop": 41258.7,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4130.0,
+      "source_sheet": "Insumos Costos",
+      "description": "Amazon Order #112-6832595-2885827"
+    },
+    {
+      "date": "2025-04-03",
+      "material": "Food Warming Mat",
+      "unit_cost_cop": 141058.5,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4150.0,
+      "source_sheet": "Insumos Costos",
+      "description": "Amazon Order #113-2291049-7107442"
+    },
+    {
+      "date": "2024-03-27",
+      "material": "Ganoderma L.",
+      "unit_cost_cop": 29.95,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4040.0,
+      "source_sheet": "Supplement Costos",
+      "description": "Mushrooms Order"
+    },
+    {
+      "date": "2025-04-06",
+      "material": "Ganoderma L.",
+      "unit_cost_cop": 29.95,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4310.86,
+      "source_sheet": "Supplement Costos",
+      "description": "Amazon Order # 113-2253931-9728247"
+    },
+    {
+      "date": "2025-04-20",
+      "material": "Ganoderma L.",
+      "unit_cost_cop": 29.95,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4325.92,
+      "source_sheet": "Supplement Costos",
+      "description": "Amazon Order # 113-6227539-7229039"
+    },
+    {
+      "date": "2024-03-20",
+      "material": "Gel Silica 500x 0.5 Gram",
+      "unit_cost_cop": 130.4914,
+      "qty": 500.0,
+      "currency": "USD",
+      "fx_rate": 4030.0,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 112-1787866-6718606"
+    },
+    {
+      "date": "2024-03-20",
+      "material": "Glass Jars 1 Oz",
+      "unit_cost_cop": 2677.4313,
+      "qty": 48.0,
+      "currency": "USD",
+      "fx_rate": 4030.0,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 112-1787866-6718606"
+    },
+    {
+      "date": "2025-05-10",
+      "material": "Glass Jars 20mL/0.7 Oz",
+      "unit_cost_cop": 3489.6976,
+      "qty": 20.0,
+      "currency": "USD",
+      "fx_rate": 4364.85,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-2013624-155864"
+    },
+    {
+      "date": "2025-09-10",
+      "material": "Glass Jars 20mL/0.7 Oz",
+      "unit_cost_cop": 3219.3969,
+      "qty": 20.0,
+      "currency": "USD",
+      "fx_rate": 4034.332,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon #111-0423212-7283411"
+    },
+    {
+      "date": "2024-11-25",
+      "material": "Glass Jars 5ml/0.17 Oz",
+      "unit_cost_cop": 3148.8412,
+      "qty": 20.0,
+      "currency": "COP",
+      "fx_rate": 4501.56,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 112-1008449-2492246"
+    },
+    {
+      "date": "2025-09-10",
+      "material": "Glass Jars 5ml/0.17 Oz",
+      "unit_cost_cop": 3017.6803,
+      "qty": 20.0,
+      "currency": "USD",
+      "fx_rate": 4034.332,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon #111-0423212-7283411"
+    },
+    {
+      "date": "2025-11-07",
+      "material": "Glass Jars 5ml/0.17 Oz",
+      "unit_cost_cop": 2922.484,
+      "qty": 20.0,
+      "currency": "USD",
+      "fx_rate": 3909.6776,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 111-6009318-1347469"
+    },
+    {
+      "date": "2026-02-27",
+      "material": "Glass Jars 5ml/0.17 Oz",
+      "unit_cost_cop": 2816.5351,
+      "qty": 20.0,
+      "currency": "USD",
+      "fx_rate": 3767.9399,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon order #113-4391277-4610607"
+    },
+    {
+      "date": "2024-05-10",
+      "material": "Glass Syringes",
+      "unit_cost_cop": 3500.764,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4120.0,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Orders #112-9516846-0936250 & #112-1380496-3526601"
+    },
+    {
+      "date": "2025-02-04",
+      "material": "Glass Syringes",
+      "unit_cost_cop": 3229.9325,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4308.3,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 111-0291270-3342647"
+    },
+    {
+      "date": "2025-04-06",
+      "material": "Glass Syringes",
+      "unit_cost_cop": 3231.8517,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4310.86,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-3372303-2581064"
+    },
+    {
+      "date": "2025-06-01",
+      "material": "Glass Syringes",
+      "unit_cost_cop": 3284.2,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4106.790092,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-5541035-6263419"
+    },
+    {
+      "date": "2025-06-06",
+      "material": "Glass Syringes",
+      "unit_cost_cop": 3532.0457,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4107.5075,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-0745276-5852230"
+    },
+    {
+      "date": "2025-08-14",
+      "material": "Glass Syringes",
+      "unit_cost_cop": 3375.1693,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4066.959,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 112-8548146-6375411"
+    },
+    {
+      "date": "2025-11-07",
+      "material": "Glass Syringes",
+      "unit_cost_cop": 3126.5692,
+      "qty": 200.0,
+      "currency": "USD",
+      "fx_rate": 3909.6776,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 111-2866407-5038657"
+    },
+    {
+      "date": "2025-11-08",
+      "material": "Glass Syringes",
+      "unit_cost_cop": 3111.7124,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 3909.6776,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 114-1279740-1477807"
+    },
+    {
+      "date": "2026-02-27",
+      "material": "Glass Syringes",
+      "unit_cost_cop": 2824.8245,
+      "qty": 200.0,
+      "currency": "USD",
+      "fx_rate": 3767.9399,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon order #113-4391277-4610607"
+    },
+    {
+      "date": "2024-05-10",
+      "material": "Hamster Bath Sand",
+      "unit_cost_cop": 40705.6,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4120.0,
+      "source_sheet": "Insumos Costos",
+      "description": "Amazon Orders #112-9516846-0936250 & #112-1380496-3526601"
+    },
+    {
+      "date": "2025-04-06",
+      "material": "Luer-Lock Syringe Connectors",
+      "unit_cost_cop": 1076.9965,
+      "qty": 60.0,
+      "currency": "USD",
+      "fx_rate": 4310.86,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-3372303-2581064"
+    },
+    {
+      "date": "2025-06-16",
+      "material": "Luer-Lock Syringe Connectors",
+      "unit_cost_cop": 1001.2666,
+      "qty": 60.0,
+      "currency": "USD",
+      "fx_rate": 4294.21,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-2752945-2629866"
+    },
+    {
+      "date": "2025-08-14",
+      "material": "Luer-Lock Syringe Connectors",
+      "unit_cost_cop": 894.3243,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4066.959,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 112-8548146-6375411"
+    },
+    {
+      "date": "2025-06-16",
+      "material": "Luerlock Needle Blunt Tip Metal",
+      "unit_cost_cop": 6437.0208,
+      "qty": 10.0,
+      "currency": "USD",
+      "fx_rate": 4294.21,
+      "source_sheet": "Insumos Costos",
+      "description": "Amazon Order # 113-2752945-2629866"
+    },
+    {
+      "date": "2025-04-03",
+      "material": "Measuring Spoon 2.5 Gram PP5",
+      "unit_cost_cop": 2246.1875,
+      "qty": 24.0,
+      "currency": "USD",
+      "fx_rate": 4150.0,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order #113-2291049-7107442"
+    },
+    {
+      "date": "2025-06-01",
+      "material": "Measuring Spoon 2.5 Gram PP5",
+      "unit_cost_cop": 2222.8001,
+      "qty": 48.0,
+      "currency": "USD",
+      "fx_rate": 4106.790092,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-5541035-6263419"
+    },
+    {
+      "date": "22/8/2024",
+      "material": "Melena",
+      "unit_cost_cop": 38.95,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4021.5,
+      "source_sheet": "Supplement Costos",
+      "description": "Supplements Resupply Ed"
+    },
+    {
+      "date": "2024-03-27",
+      "material": "Melena de Leon",
+      "unit_cost_cop": 29.95,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4040.0,
+      "source_sheet": "Supplement Costos",
+      "description": "Mushrooms Order"
+    },
+    {
+      "date": "2025-04-06",
+      "material": "Melena de Leon",
+      "unit_cost_cop": 38.95,
+      "qty": 2.0,
+      "currency": "USD",
+      "fx_rate": 4310.86,
+      "source_sheet": "Supplement Costos",
+      "description": "Amazon Order # 113-2253931-9728247"
+    },
+    {
+      "date": "2025-04-20",
+      "material": "Melena de Leon",
+      "unit_cost_cop": 38.95,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4325.92,
+      "source_sheet": "Supplement Costos",
+      "description": "Amazon Order # 113-6227539-7229039"
+    },
+    {
+      "date": "2025-04-04",
+      "material": "Metal Plunger Glass Syringe 1ml",
+      "unit_cost_cop": 10227.744,
+      "qty": 10.0,
+      "currency": "USD",
+      "fx_rate": 4270.4567779961,
+      "source_sheet": "Insumos Costos",
+      "description": "Bitomic Metal Syringes 1 & 2.25 mL"
+    },
+    {
+      "date": "2025-04-04",
+      "material": "Metal Plunger Glass Syringe 2.25ml",
+      "unit_cost_cop": 11508.881,
+      "qty": 10.0,
+      "currency": "USD",
+      "fx_rate": 4270.4567779961,
+      "source_sheet": "Insumos Costos",
+      "description": "Bitomic Metal Syringes 1 & 2.25 mL"
+    },
+    {
+      "date": "2024-08-23",
+      "material": "Micro Spoon 10 mg-15 mg",
+      "unit_cost_cop": 737.9452,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4021.5,
+      "source_sheet": "Materials Costos",
+      "description": "Red Mini Spoons # 112-3679194-6638631"
+    },
+    {
+      "date": "2024-11-25",
+      "material": "Mug Warmer",
+      "unit_cost_cop": 89986.1844,
+      "qty": 1.0,
+      "currency": "COP",
+      "fx_rate": 4501.56,
+      "source_sheet": "Insumos Costos",
+      "description": "Amazon Order # 112-1008449-2492246"
+    },
+    {
+      "date": "2025-06-16",
+      "material": "Plastic 1ml Luer Lock Syringe",
+      "unit_cost_cop": 1715.5369,
+      "qty": 20.0,
+      "currency": "USD",
+      "fx_rate": 4294.21,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-2752945-2629866"
+    },
+    {
+      "date": "2025-08-14",
+      "material": "Plastic 1ml Luer Lock Syringe",
+      "unit_cost_cop": 690.9763,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4066.959,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 112-8548146-6375411"
+    },
+    {
+      "date": "2024-06-07",
+      "material": "Plastic Jars 4 Oz",
+      "unit_cost_cop": 3161.925,
+      "qty": 16.0,
+      "currency": "USD",
+      "fx_rate": 4230.0,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order #112-7991574-0901010"
+    },
+    {
+      "date": "2025-05-10",
+      "material": "Plastic Jars 4 Oz",
+      "unit_cost_cop": 3999.2938,
+      "qty": 24.0,
+      "currency": "USD",
+      "fx_rate": 4364.85,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-2013624-155864"
+    },
+    {
+      "date": "2025-06-16",
+      "material": "Plastic Jars 4 Oz",
+      "unit_cost_cop": 2769.7654,
+      "qty": 40.0,
+      "currency": "USD",
+      "fx_rate": 4294.21,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-2752945-2629866"
+    },
+    {
+      "date": "2024-05-10",
+      "material": "Plastic Jars 8 Oz",
+      "unit_cost_cop": 4624.7,
+      "qty": 16.0,
+      "currency": "USD",
+      "fx_rate": 4120.0,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Orders #112-9516846-0936250 & #112-1380496-3526601"
+    },
+    {
+      "date": "2024-06-07",
+      "material": "Plastic Jars 8 Oz",
+      "unit_cost_cop": 4748.175,
+      "qty": 16.0,
+      "currency": "USD",
+      "fx_rate": 4230.0,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order #112-7991574-0901010"
+    },
+    {
+      "date": "2025-02-04",
+      "material": "Plastic Jars 8 Oz",
+      "unit_cost_cop": 6099.8348,
+      "qty": 12.0,
+      "currency": "USD",
+      "fx_rate": 4308.3,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 111-0291270-3342647"
+    },
+    {
+      "date": "2025-04-20",
+      "material": "Plastic Jars 8 Oz",
+      "unit_cost_cop": 3658.3766,
+      "qty": 40.0,
+      "currency": "USD",
+      "fx_rate": 4435.74,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-6051780-6109839"
+    },
+    {
+      "date": "2024-05-10",
+      "material": "Plastic Test Tubes",
+      "unit_cost_cop": 2333.2933,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 4120.0,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Orders #112-9516846-0936250 & #112-1380496-3526601"
+    },
+    {
+      "date": "2024-11-25",
+      "material": "Plastic Test Tubes",
+      "unit_cost_cop": 2849.4875,
+      "qty": 30.0,
+      "currency": "COP",
+      "fx_rate": 4501.56,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 112-1008449-2492246"
+    },
+    {
+      "date": "2025-02-04",
+      "material": "Plastic Test Tubes",
+      "unit_cost_cop": 3228.5323,
+      "qty": 16.0,
+      "currency": "USD",
+      "fx_rate": 4308.3,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 111-0291270-3342647"
+    },
+    {
+      "date": "2025-04-03",
+      "material": "Plastic Test Tubes",
+      "unit_cost_cop": 2626.95,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 4150.0,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order #113-2291049-7107442"
+    },
+    {
+      "date": "2025-09-10",
+      "material": "Price Tag Gun Kit",
+      "unit_cost_cop": 72416.2594,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4034.332,
+      "source_sheet": "Insumos Costos",
+      "description": "Amazon #111-0423212-7283411"
+    },
+    {
+      "date": "2024-05-10",
+      "material": "Sample Glass Jars",
+      "unit_cost_cop": 535.188,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4120.0,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Orders #112-9516846-0936250 & #112-1380496-3526601"
+    },
+    {
+      "date": "2025-05-10",
+      "material": "Sample Transparent Jars",
+      "unit_cost_cop": 432.1201,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4364.85,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-2013624-155864"
+    },
+    {
+      "date": "2024-05-10",
+      "material": "Scale Pans",
+      "unit_cost_cop": 53189.2,
+      "qty": 2.0,
+      "currency": "USD",
+      "fx_rate": 4120.0,
+      "source_sheet": "Insumos Costos",
+      "description": "Amazon Orders #112-9516846-0936250 & #112-1380496-3526601"
+    },
+    {
+      "date": "2025-04-15",
+      "material": "Security Hologram Stickers .39 x .39 Inch",
+      "unit_cost_cop": 220.6934,
+      "qty": 1000.0,
+      "currency": "USD",
+      "fx_rate": 4414.75,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-7089624-4486603"
+    },
+    {
+      "date": "2024-05-11",
+      "material": "Shipping Labels 4x6",
+      "unit_cost_cop": 82558.7,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4130.0,
+      "source_sheet": "Insumos Costos",
+      "description": "Amazon Order #112-6832595-2885827"
+    },
+    {
+      "date": "2024-05-10",
+      "material": "Stainless Steel Spatulas",
+      "unit_cost_cop": 7399.52,
+      "qty": 10.0,
+      "currency": "USD",
+      "fx_rate": 4120.0,
+      "source_sheet": "Insumos Costos",
+      "description": "Amazon Orders #112-9516846-0936250 & #112-1380496-3526601"
+    },
+    {
+      "date": "2025-06-06",
+      "material": "Syringe Tips",
+      "unit_cost_cop": 369.2649,
+      "qty": 200.0,
+      "currency": "USD",
+      "fx_rate": 4107.5075,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-0745276-5852230"
+    },
+    {
+      "date": "2025-08-14",
+      "material": "Syringe Tips",
+      "unit_cost_cop": 365.6196,
+      "qty": 100.0,
+      "currency": "USD",
+      "fx_rate": 4066.959,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 112-8548146-6375411"
+    },
+    {
+      "date": "2025-11-07",
+      "material": "Syringe Tips",
+      "unit_cost_cop": 237.5129,
+      "qty": 240.0,
+      "currency": "USD",
+      "fx_rate": 3909.6776,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 111-6009318-1347469"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos ACDC",
+      "unit_cost_cop": 2887.2264,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2025-08-08",
+      "material": "Terpenos AMP CDT Pineapple OG ($75)",
+      "unit_cost_cop": 7140.1189,
+      "qty": 30.0,
+      "currency": null,
+      "fx_rate": null,
+      "source_sheet": "Noids Costos",
+      "description": null
+    },
+    {
+      "date": "2025-08-08",
+      "material": "Terpenos AMP Gelato",
+      "unit_cost_cop": 7140.1189,
+      "qty": 5.0,
+      "currency": null,
+      "fx_rate": null,
+      "source_sheet": "Noids Costos",
+      "description": null
+    },
+    {
+      "date": "2025-08-08",
+      "material": "Terpenos AMP Pineapple OG",
+      "unit_cost_cop": 7140.1189,
+      "qty": 5.0,
+      "currency": null,
+      "fx_rate": null,
+      "source_sheet": "Noids Costos",
+      "description": null
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Apple Fritter Amp",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Banana Mimosa",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Berry Bellini Amp",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Cookies N' Cream",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Forbbiden Fruit Amp",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2025-08-08",
+      "material": "Terpenos Gelato",
+      "unit_cost_cop": 7140.1189,
+      "qty": 5.0,
+      "currency": null,
+      "fx_rate": null,
+      "source_sheet": "Noids Costos",
+      "description": null
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Gelato",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Gelato Amp",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos God's Gift",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Granddaddy Purple",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Jack Herrer",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Key Lime Pie",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2025-08-08",
+      "material": "Terpenos King Louis XIII",
+      "unit_cost_cop": 7140.1189,
+      "qty": 5.0,
+      "currency": null,
+      "fx_rate": null,
+      "source_sheet": "Noids Costos",
+      "description": null
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos King Louis XIII",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Mango Tango",
+      "unit_cost_cop": 2887.5151,
+      "qty": 60.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Northern Lights",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos OG Kush",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Pina Colada Amp",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2025-08-08",
+      "material": "Terpenos Pineapple OG",
+      "unit_cost_cop": 7140.1189,
+      "qty": 5.0,
+      "currency": null,
+      "fx_rate": null,
+      "source_sheet": "Noids Costos",
+      "description": null
+    },
+    {
+      "date": "2025-08-08",
+      "material": "Terpenos Pineapple OG ($99)",
+      "unit_cost_cop": 7140.1189,
+      "qty": 30.0,
+      "currency": null,
+      "fx_rate": null,
+      "source_sheet": "Noids Costos",
+      "description": null
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Pineapple OG Amp",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Pink Champagne Amp",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Purple Punch Amp",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Razz Berry Amp",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2025-04-06",
+      "material": "Terpenos SB - Ice Cream Cake",
+      "unit_cost_cop": 42539.1,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4253.91,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded order # 45543"
+    },
+    {
+      "date": "2025-01-07",
+      "material": "Terpenos SB - Pineapple Mimosa",
+      "unit_cost_cop": 43250.0,
+      "qty": 5.0,
+      "currency": "USD",
+      "fx_rate": 4325.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Restock THC-O + 5mL Order #41083"
+    },
+    {
+      "date": "2025-02-16",
+      "material": "Terpenos SB - Pineapple Mimosa",
+      "unit_cost_cop": 37080.0,
+      "qty": 10.0,
+      "currency": "USD",
+      "fx_rate": 4120.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order 4mL & 2.25mL Order #43315"
+    },
+    {
+      "date": "2025-04-06",
+      "material": "Terpenos SB - Pineapple Mimosa",
+      "unit_cost_cop": 42539.1,
+      "qty": 2.0,
+      "currency": "USD",
+      "fx_rate": 4253.91,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded order # 45543"
+    },
+    {
+      "date": "2025-04-06",
+      "material": "Terpenos SB - Tropicana",
+      "unit_cost_cop": 42539.1,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4253.91,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded order # 45543"
+    },
+    {
+      "date": "2025-05-15",
+      "material": "Terpenos SB - Tropicana",
+      "unit_cost_cop": 38011.95,
+      "qty": 10.0,
+      "currency": "USD",
+      "fx_rate": 4223.55,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order #46757"
+    },
+    {
+      "date": "2025-07-01",
+      "material": "Terpenos SB - Tropicana",
+      "unit_cost_cop": 34592.195,
+      "qty": 28.0,
+      "currency": "USD",
+      "fx_rate": 4069.67,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order #48281"
+    },
+    {
+      "date": "2025-04-06",
+      "material": "Terpenos SB - White Widow",
+      "unit_cost_cop": 42539.1,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4253.91,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded order # 45543"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Skywalker OG",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Sour Diesel",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Strawberry Lemonade",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Strawberry Mimosa Amp",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Super Lemon Haze",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Tigers Blood Amp",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Trainwreck",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Tropical Punch Amp",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2024-05-29",
+      "material": "Terpenos UR - Pineapple Kush",
+      "unit_cost_cop": 34402.5,
+      "qty": 2.0,
+      "currency": "USD",
+      "fx_rate": 4170.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded + Impuestos Carts // Order #29410"
+    },
+    {
+      "date": "2024-06-14",
+      "material": "Terpenos UR - Pineapple Kush",
+      "unit_cost_cop": 35145.0,
+      "qty": 3.0,
+      "currency": "USD",
+      "fx_rate": 4260.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded 15/u Ceramic Carts Order #30322"
+    },
+    {
+      "date": "2025-06-05",
+      "material": "Terpenos UR - Pineapple Kush",
+      "unit_cost_cop": 28754.95,
+      "qty": 10.0,
+      "currency": "USD",
+      "fx_rate": 4107.85,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order #47614"
+    },
+    {
+      "date": "2024-06-14",
+      "material": "Terpenos UR - Tropical Tempest",
+      "unit_cost_cop": 35145.0,
+      "qty": 2.0,
+      "currency": "USD",
+      "fx_rate": 4260.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded 15/u Ceramic Carts Order #30322"
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Watermelon Bubblegum Amp",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2025-08-08",
+      "material": "Terpenos Wedding Cake",
+      "unit_cost_cop": 7140.1189,
+      "qty": 5.0,
+      "currency": null,
+      "fx_rate": null,
+      "source_sheet": "Noids Costos",
+      "description": null
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos Wedding Cake",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2025-08-08",
+      "material": "Terpenos White Widow",
+      "unit_cost_cop": 7140.1189,
+      "qty": 5.0,
+      "currency": null,
+      "fx_rate": null,
+      "source_sheet": "Noids Costos",
+      "description": null
+    },
+    {
+      "date": "2026-04-22",
+      "material": "Terpenos White Widow",
+      "unit_cost_cop": 2887.5151,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 3573.299999,
+      "source_sheet": "Noids Costos",
+      "description": "Floraplex Order # 364247"
+    },
+    {
+      "date": "2024-05-11",
+      "material": "Thermal Printer",
+      "unit_cost_cop": 247758.7,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4130.0,
+      "source_sheet": "Insumos Costos",
+      "description": "Amazon Order #112-6832595-2885827"
+    },
+    {
+      "date": "2025-06-01",
+      "material": "Tincture Bottles 5mL Amber Glass",
+      "unit_cost_cop": 2735.1222,
+      "qty": 15.0,
+      "currency": "USD",
+      "fx_rate": 4106.790092,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon Order # 113-5541035-6263419"
+    },
+    {
+      "date": "2025-09-10",
+      "material": "UFOhs!: Mysteries in the Sky",
+      "unit_cost_cop": 67454.031,
+      "qty": 1.0,
+      "currency": "USD",
+      "fx_rate": 4034.332,
+      "source_sheet": "Materials Costos",
+      "description": "Amazon #111-0423212-7283411"
+    },
+    {
+      "date": "2024-03-04",
+      "material": "WS CBD",
+      "unit_cost_cop": 7619.0,
+      "qty": 5.0,
+      "currency": "USD",
+      "fx_rate": 4010.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order Test #24614"
+    },
+    {
+      "date": "2024-05-29",
+      "material": "WS CBD",
+      "unit_cost_cop": 7923.0,
+      "qty": 5.0,
+      "currency": "USD",
+      "fx_rate": 4170.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded + Impuestos Carts // Order #29410"
+    },
+    {
+      "date": "2024-07-05",
+      "material": "WS CBD",
+      "unit_cost_cop": 5408.6667,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 4270.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Restock 100x 1mL carts Order #31268"
+    },
+    {
+      "date": "2024-03-04",
+      "material": "WS D8-THC",
+      "unit_cost_cop": 8020.0,
+      "qty": 5.0,
+      "currency": "USD",
+      "fx_rate": 4010.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order Test #24614"
+    },
+    {
+      "date": "2024-04-26",
+      "material": "WS D8-THC",
+      "unit_cost_cop": 6496.0,
+      "qty": 15.0,
+      "currency": "USD",
+      "fx_rate": 4060.0,
+      "source_sheet": "Noids Costos",
+      "description": "First Formal Inventory Order #27655"
+    },
+    {
+      "date": "2024-03-04",
+      "material": "WS HHC",
+      "unit_cost_cop": 13032.5,
+      "qty": 2.0,
+      "currency": "USD",
+      "fx_rate": 4010.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order Test #24614"
+    },
+    {
+      "date": "2024-07-05",
+      "material": "WS HHC",
+      "unit_cost_cop": 10390.3333,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 4270.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Restock 100x 1mL carts Order #31268"
+    },
+    {
+      "date": "2024-03-04",
+      "material": "WS THCO",
+      "unit_cost_cop": 12030.0,
+      "qty": 5.0,
+      "currency": "USD",
+      "fx_rate": 4010.0,
+      "source_sheet": "Noids Costos",
+      "description": "Gilded Order Test #24614"
+    },
+    {
+      "date": "2024-04-26",
+      "material": "WS THCO",
+      "unit_cost_cop": 8390.6667,
+      "qty": 30.0,
+      "currency": "USD",
+      "fx_rate": 4060.0,
+      "source_sheet": "Noids Costos",
+      "description": "First Formal Inventory Order #27655"
+    }
+  ]
+}

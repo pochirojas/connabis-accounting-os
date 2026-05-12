@@ -33,6 +33,7 @@ Regla:
 
 - No inventar costos cuando MM no tiene BOM/match.
 - Phase 2 será reemplazar Material Manager dentro del OS.
+- Phase 2.1 ya está en código: mirror solo lectura del MM CSV + historial de costos del Excel, expuesto en `/api/material-manager/*` y la página `MM Mirror`. Sin escrituras a Shopify; export con headers MM exactos para rollback. Eventualmente la app correrá como Shopify embedded app; antes se probará en una tienda separada.
 
 ## Sheet contable / gastos manuales
 

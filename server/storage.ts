@@ -3,9 +3,11 @@ import type { CashAccount, CloseChecklistItem, Expense, InsertExpense, UpdateExp
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
+import { ensureMaterialManagerMirrorSchema } from './material-manager-mirror';
 
-const sqlite = new Database("data.db");
+export const sqlite = new Database("data.db");
 sqlite.pragma("journal_mode = WAL");
+ensureMaterialManagerMirrorSchema(sqlite);
 sqlite.exec(`
 CREATE TABLE IF NOT EXISTS manual_expenses (
   id TEXT PRIMARY KEY,

@@ -5,7 +5,17 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { insertExpenseSchema, updateCashAccountSchema, updateCloseChecklistSchema, updateExpenseSchema } from '@shared/schema';
 import type { Alert, DailyPerformance, Expense, Product } from '@shared/schema';
-import { storage } from './storage';
+import { sqlite, storage } from './storage';
+import {
+  exportMmBomCsv,
+  exportMmMaterialsCsv,
+  getMirrorStatus,
+  importMaterialManagerMirror,
+  listMmBomComponents,
+  listMmCostHistory,
+  listMmMaterials,
+  runRoundTripQa,
+} from './material-manager-mirror';
 import {
   channels, years, months, kpis, products,
   materials, purchaseOrders, alerts, integrationPhases,
@@ -1894,6 +1904,72 @@ export async function registerRoutes(
         <p>Ya puedes volver a Perplexity para validar productos, órdenes e inventario en modo solo lectura.</p>
       </main>
     `);
+  });
+
+  // ---------- Phase 2.1: Material Manager read-only mirror ----------
+  // Shadow mode. No Shopify or inventory writes happen here.
+  app.get('/api/material-manager/status', (_req, res) => {
+    res.json(getMirrorStatus(sqlite));
+  });
+
+  app.post('/api/material-manager/import', (_req, res) => {
+    try {
+      const result = importMaterialManagerMirror(sqlite);
+      // Invalidate the legacy CSV cache so Phase 1 lookups pick up fresh data too.
+      materialManagerCache = null;
+      res.json({
+        ...getMirrorStatus(sqlite),
+        warnings: result.warnings,
+      });
+    } catch (error) {
+      console.error('[mm-mirror] import failed', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'import_failed' });
+    }
+  });
+
+  app.get('/api/material-manager/materials', (req, res) => {
+    const materials = listMmMaterials(sqlite);
+    const filter = String(req.query.category ?? '').toLowerCase();
+    const filtered = filter ? materials.filter(m => m.category.toLowerCase().includes(filter)) : materials;
+    res.json(filtered);
+  });
+
+  app.get('/api/material-manager/bom', (req, res) => {
+    res.json(listMmBomComponents(sqlite, {
+      materialId: req.query.materialId ? String(req.query.materialId) : undefined,
+      variantId: req.query.variantId ? String(req.query.variantId) : undefined,
+    }));
+  });
+
+  app.get('/api/material-manager/cost-history', (req, res) => {
+    res.json(listMmCostHistory(sqlite, {
+      materialKey: req.query.materialKey ? String(req.query.materialKey) : undefined,
+      sourceSheet: req.query.sourceSheet ? String(req.query.sourceSheet) : undefined,
+      limit: req.query.limit ? Number(req.query.limit) : undefined,
+    }));
+  });
+
+  app.get('/api/material-manager/export/materials.csv', (_req, res) => {
+    const csv = exportMmMaterialsCsv(sqlite);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="material-manager-export.csv"');
+    res.send(csv);
+  });
+
+  app.get('/api/material-manager/export/bom.csv', (_req, res) => {
+    const csv = exportMmBomCsv(sqlite);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="material-manager-export-material-product.csv"');
+    res.send(csv);
+  });
+
+  app.post('/api/material-manager/qa', (_req, res) => {
+    try {
+      res.json(runRoundTripQa(sqlite));
+    } catch (error) {
+      console.error('[mm-mirror] qa failed', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'qa_failed' });
+    }
   });
 
   return httpServer;

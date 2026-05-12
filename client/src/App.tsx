@@ -13,6 +13,7 @@ import Gastos from "@/pages/gastos";
 import Productos from "@/pages/productos";
 import Performance from "@/pages/performance";
 import Inventario from "@/pages/inventario";
+import MaterialManager from "@/pages/material-manager";
 import Alertas from "@/pages/alertas";
 import Sugerencias from "@/pages/sugerencias";
 import Integracion from "@/pages/integracion";
@@ -28,6 +29,7 @@ function AppRouter() {
       <Route path="/productos" component={Productos} />
       <Route path="/performance" component={Performance} />
       <Route path="/inventario" component={Inventario} />
+      <Route path="/material-manager" component={MaterialManager} />
       <Route path="/alertas" component={Alertas} />
       <Route path="/sugerencias" component={Sugerencias} />
       <Route path="/integracion" component={Integracion} />

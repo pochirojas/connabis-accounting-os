@@ -373,3 +373,111 @@ export const updateCloseChecklistSchema = z.object({
 });
 
 export type UpdateCloseChecklist = z.infer<typeof updateCloseChecklistSchema>;
+
+// ---------- Phase 2: Material Manager read-only mirror ----------
+// CSV 1 headers (exact order). Must round-trip for emergency MM rollback.
+export const MM_MATERIALS_CSV_HEADERS = [
+  'ID',
+  'Name',
+  'Description',
+  'Measurement',
+  'SKU',
+  'Barcode',
+  'Category',
+  'Supplier',
+  'Cost',
+  'Currency Code',
+  'Update Shopify Inventory',
+  'Limit Shopify Inventory',
+  'Materials used in all orders',
+  'Calle 36 #22a-108 (4bf83698-ff9e-4857-9da3-e4f44bc3b447)',
+] as const;
+export type MmMaterialsCsvHeader = typeof MM_MATERIALS_CSV_HEADERS[number];
+
+// CSV 2 headers (exact order).
+export const MM_BOM_CSV_HEADERS = [
+  'Material ID',
+  'Variant ID',
+  'Quantity of material used',
+  'Material name',
+  'Product name',
+  'Variant name',
+] as const;
+export type MmBomCsvHeader = typeof MM_BOM_CSV_HEADERS[number];
+
+export type MmMaterialRow = {
+  id: string;
+  name: string;
+  description: string;
+  measurement: string;
+  sku: string;
+  barcode: string;
+  category: string;
+  supplier: string;
+  cost: number;
+  currencyCode: string;
+  updateShopifyInventory: boolean;
+  limitShopifyInventory: boolean;
+  materialsUsedInAllOrders: string;
+  stock: number;
+  // Derived flags
+  isInsumo: boolean;     // tools/equipment — not inventory-trackable BOM/COGS
+  isNoid: boolean;       // carts/disposables for cannabinoids stay in Noids
+};
+
+export type MmBomRow = {
+  materialId: string;
+  variantId: string;
+  quantity: number;
+  materialName: string;
+  productName: string;
+  variantName: string;
+};
+
+export type MmCostHistoryRow = {
+  id: number;
+  date: string;          // ISO date
+  materialKey: string;   // normalized name used for matching
+  material: string;      // raw label from Excel
+  unitCostCop: number;
+  qty: number | null;
+  currency: string | null;
+  fxRate: number | null;
+  sourceSheet: string;
+  description: string | null;
+};
+
+export type MmImportRun = {
+  id: number;
+  startedAt: string;
+  finishedAt: string | null;
+  status: 'success' | 'partial' | 'error';
+  materialsImported: number;
+  bomImported: number;
+  costHistoryImported: number;
+  conflicts: number;
+  notes: string | null;
+};
+
+export type MmRoundTripQa = {
+  headersMatch: boolean;
+  materialsRowCount: { imported: number; exported: number };
+  bomRowCount: { imported: number; exported: number };
+  materialIdsMatch: boolean;
+  variantIdsMatch: boolean;
+  bomQuantitiesMatch: boolean;
+  stockMatch: boolean;
+  mismatches: string[];
+  status: 'pass' | 'fail';
+  ranAt: string;
+};
+
+export type MmMirrorStatus = {
+  materialsImported: number;
+  bomImported: number;
+  variantsWithBom: number;
+  costHistoryRows: number;
+  conflicts: number;
+  lastRun: MmImportRun | null;
+  lastQa: MmRoundTripQa | null;
+};

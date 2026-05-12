@@ -8,7 +8,8 @@ Dashboard interno de contabilidad, margen y operación para Connabis Colombia.
 - Material Manager: fuente oficial actual de BOM y COGS.
 - Sheet/manual: fuente real para gastos históricos y nuevos.
 - No mezclar seed con real sin marcarlo en UI.
-- Phase 2: reemplazar Material Manager dentro del OS.
+- Phase 2: reemplazar Material Manager dentro del OS. Arranca en Phase 2.1 con un mirror solo lectura (shadow mode) que importa y exporta los CSV de MM con headers exactos para rollback de emergencia, sin escribir en Shopify.
+- La app correrá eventualmente como Shopify embedded app; antes de habilitar escrituras se probará en una tienda de pruebas separada.
 - Phase 3: Dataico/fiscal futuro, no implementado.
 
 ## Stack
@@ -39,6 +40,7 @@ npm start
 | `/productos` | `client/src/pages/productos.tsx` | Productos activos, ventas por SKU, COGS MM, simulador |
 | `/performance` | `client/src/pages/performance.tsx` | Filtros por fecha y drilldown diario |
 | `/inventario` | `client/src/pages/inventario.tsx` | Prototipo Phase 2 |
+| `/material-manager` | `client/src/pages/material-manager.tsx` | **Phase 2.1**: mirror MM solo lectura, sin escrituras Shopify |
 | `/sugerencias` | `client/src/pages/sugerencias.tsx` | Sugerencias reales + restock Phase 2 model |
 | `/alertas` | `client/src/pages/alertas.tsx` | Alertas específicas |
 | `/glosario` | `client/src/pages/glosario.tsx` | Diccionario contable |
@@ -58,6 +60,7 @@ npm start
 | `GET /api/export/income.csv` | Export ingresos |
 | `GET /api/alerts` | Alertas dinámicas |
 | `GET /api/accounting-suggestions` | Sugerencias basadas en datos reales |
+| `GET/POST /api/material-manager/*` | Phase 2.1: status/import/qa, listas (materials, BOM, cost history), export con headers MM exactos |
 
 ## Documentación
 
