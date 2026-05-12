@@ -151,6 +151,13 @@ function normalizeProductMatchKey(value: string) {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
+    .replace(/\bthc[\s-]?o\b/g, 'thco')
+    .replace(/\bcbd\s+doble\b/g, 'cbdoble')
+    .replace(/\bcart\b/g, 'cartucho')
+    .replace(/\bcarts\b/g, 'cartuchos')
+    .replace(/^blend\s+/g, 'recarga ')
+    .replace(/\bpxxx\b/g, 'pineapple xxx')
+    .replace(/[^a-z0-9.]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -224,6 +231,87 @@ async function shopifyGraphql<T>(query: string, variables?: Record<string, unkno
   }
 
   return payload.data as T;
+}
+
+type ShopifySalesSummary = {
+  grossSales: number;
+  discounts: number;
+  returns: number;
+  netSales: number;
+  shippingCharges: number;
+  totalSales: number;
+  orders: number;
+};
+
+type ShopifySalesRow = ShopifySalesSummary & { period: string };
+
+function toNumber(value: unknown) {
+  return Number(value ?? 0) || 0;
+}
+
+function getPeriodDateBounds(params: PeriodParams = {}) {
+  if (params.start && params.end && /^\d{4}-\d{2}-\d{2}$/.test(params.start) && /^\d{4}-\d{2}-\d{2}$/.test(params.end)) {
+    return { start: params.start, end: params.end };
+  }
+  if (params.month && /^\d{4}-\d{2}$/.test(params.month)) {
+    return { start: `${params.month}-01`, end: lastDayOfMonth(params.month) };
+  }
+  if (params.year && /^\d{4}$/.test(params.year)) {
+    return { start: `${params.year}-01-01`, end: `${params.year}-12-31` };
+  }
+  return { start: '2024-01-01', end: todayInReportTimeZone() };
+}
+
+function parseShopifySalesRow(row: Record<string, unknown>): ShopifySalesSummary {
+  return {
+    grossSales: toNumber(row.gross_sales),
+    discounts: toNumber(row.discounts),
+    returns: toNumber(row.returns),
+    netSales: toNumber(row.net_sales),
+    shippingCharges: toNumber(row.shipping_charges),
+    totalSales: toNumber(row.total_sales),
+    orders: toNumber(row.orders),
+  };
+}
+
+async function shopifyqlRows(query: string): Promise<Array<Record<string, unknown>>> {
+  const data = await shopifyGraphql<{
+    shopifyqlQuery: {
+      parseErrors: string[];
+      tableData: { rows: Array<Record<string, unknown>> } | null;
+    };
+  }>(`
+    query Shopifyql($query: String!) {
+      shopifyqlQuery(query: $query) {
+        parseErrors
+        tableData { rows }
+      }
+    }
+  `, { query });
+
+  if (data.shopifyqlQuery.parseErrors.length) {
+    throw new Error(data.shopifyqlQuery.parseErrors.join('; '));
+  }
+  return data.shopifyqlQuery.tableData?.rows ?? [];
+}
+
+async function loadShopifySalesSummary(params: PeriodParams = {}): Promise<ShopifySalesSummary> {
+  const { start, end } = getPeriodDateBounds(params);
+  const rows = await shopifyqlRows(
+    `FROM sales SHOW gross_sales, discounts, returns, net_sales, shipping_charges, total_sales, orders SINCE ${start} UNTIL ${end}`
+  );
+  return parseShopifySalesRow(rows[0] ?? {});
+}
+
+async function loadShopifySalesRows(groupBy: 'day' | 'month' | 'year', params: PeriodParams = {}): Promise<ShopifySalesRow[]> {
+  const { start, end } = getPeriodDateBounds(params);
+  const rows = await shopifyqlRows(
+    `FROM sales SHOW gross_sales, discounts, returns, net_sales, shipping_charges, total_sales, orders GROUP BY ${groupBy} SINCE ${start} UNTIL ${end}`
+  );
+  return rows.map(row => ({
+    period: String(row[groupBy] ?? '').slice(0, 10),
+    ...parseShopifySalesRow(row),
+  }));
 }
 
 function inferProductFamily(title: string) {
@@ -306,6 +394,32 @@ function buildGroupedBomBreakdown(variantLegacyIds: string[]) {
 
 function moneyAmount(value?: { shopMoney?: { amount?: string } } | null) {
   return Number(value?.shopMoney?.amount ?? 0) || 0;
+}
+
+const REPORT_TIME_ZONE = 'America/Bogota';
+
+function reportDateFromIso(iso: string) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: REPORT_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(iso));
+}
+
+function todayInReportTimeZone() {
+  return reportDateFromIso(new Date().toISOString());
+}
+
+function addDays(date: string, days: number) {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+function lastDayOfMonth(month: string) {
+  const [year, monthNumber] = month.split('-').map(Number);
+  return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
 }
 
 function sumOrderOriginalLineRevenue(order: LiveIncomeOrder) {
@@ -455,19 +569,15 @@ type PeriodParams = { month?: string; year?: string; start?: string; end?: strin
 
 function getPeriodQuery(params: PeriodParams) {
   if (params.start && params.end && /^\d{4}-\d{2}-\d{2}$/.test(params.start) && /^\d{4}-\d{2}-\d{2}$/.test(params.end)) {
-    const end = new Date(`${params.end}T00:00:00`);
-    end.setUTCDate(end.getUTCDate() + 1);
-    return `created_at:>=${params.start} created_at:<${end.toISOString().slice(0, 10)}`;
+    return `created_at:>=${addDays(params.start, -1)} created_at:<${addDays(params.end, 2)}`;
   }
   if (params.month && /^\d{4}-\d{2}$/.test(params.month)) {
     const start = `${params.month}-01`;
-    const end = new Date(`${start}T00:00:00`);
-    end.setUTCMonth(end.getUTCMonth() + 1);
-    return `created_at:>=${start} created_at:<${end.toISOString().slice(0, 10)}`;
+    return `created_at:>=${addDays(start, -1)} created_at:<${addDays(lastDayOfMonth(params.month), 2)}`;
   }
   if (params.year && /^\d{4}$/.test(params.year)) {
     const year = Number(params.year);
-    return `created_at:>=${year}-01-01 created_at:<${year + 1}-01-01`;
+    return `created_at:>=${year - 1}-12-31 created_at:<${year + 1}-01-02`;
   }
   return 'created_at:>=2024-01-01';
 }
@@ -494,7 +604,8 @@ function expenseInPeriod(expense: Record<string, unknown>, params: PeriodParams)
 function orderInPeriod(order: LiveIncomeOrder, params: PeriodParams) {
   const paymentStatus = normalizePaymentStatus(order.displayFinancialStatus);
   if (paymentStatus === 'pending' || paymentStatus === 'refunded') return false;
-  const date = order.createdAt.slice(0, 10);
+  if (order.cancelledAt || order.test) return false;
+  const date = reportDateFromIso(order.createdAt);
   const month = date.slice(0, 7);
   if (params.month) return month === params.month;
   if (params.year) return month.startsWith(`${params.year}-`);
@@ -514,6 +625,8 @@ type LiveIncomeOrder = {
   displayFinancialStatus: string;
   displayFulfillmentStatus: string;
   sourceName: string | null;
+  cancelledAt: string | null;
+  test: boolean;
   totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
   currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
   subtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
@@ -573,6 +686,8 @@ async function loadLiveShopifyIncomeOrders(params: PeriodParams = {}) {
             displayFinancialStatus
             displayFulfillmentStatus
             sourceName
+            cancelledAt
+            test
             totalPriceSet { shopMoney { amount currencyCode } }
             currentTotalPriceSet { shopMoney { amount currencyCode } }
             subtotalPriceSet { shopMoney { amount currencyCode } }
@@ -616,7 +731,7 @@ async function loadLiveShopifyIncomeOrders(params: PeriodParams = {}) {
 
 function mapOrdersToAccountingLines(orders: LiveIncomeOrder[]): AccountingLine[] {
   return orders.flatMap(order => {
-    const date = order.createdAt.slice(0, 10);
+    const date = reportDateFromIso(order.createdAt);
     const month = date.slice(0, 7);
     const { shipping, refunds, totalSales } = getOrderAccountingRevenue(order);
     const lineCount = Math.max(order.lineItems.edges.length, 1);
@@ -686,7 +801,10 @@ function listDatesInMonth(month: string) {
 }
 
 async function buildDailyPerformanceRows(): Promise<DailyPerformance[]> {
-  const incomeRows = mapOrdersToAccountingLines(await loadLiveShopifyIncomeOrders());
+  const [incomeRows, salesRows] = await Promise.all([
+    loadLiveShopifyIncomeOrders().then(mapOrdersToAccountingLines),
+    loadShopifySalesRows('day'),
+  ]);
   const expenseRows = (await loadAllExpenses()).map(withExpenseClassification) as Array<{
     date: string;
     month: string;
@@ -697,6 +815,8 @@ async function buildDailyPerformanceRows(): Promise<DailyPerformance[]> {
   const monthsWithData = new Set<string>();
   incomeRows.forEach(row => monthsWithData.add(row.month));
   expenseRows.forEach(row => monthsWithData.add(row.month));
+  salesRows.forEach(row => monthsWithData.add(row.period.slice(0, 7)));
+  const salesByDay = new Map(salesRows.map(row => [row.period, row]));
 
   const byDate = new Map<string, {
     orders: Set<string>;
@@ -744,10 +864,11 @@ async function buildDailyPerformanceRows(): Promise<DailyPerformance[]> {
       const day = byDate.get(date);
       const productEntries = day ? Array.from(day.products.entries()) : [];
       const topProduct = productEntries.sort((a, b) => b[1].revenue - a[1].revenue)[0];
-      const revenue = day?.revenue ?? 0;
+      const sales = salesByDay.get(date);
+      const revenue = sales?.totalSales ?? day?.revenue ?? 0;
       const cogs = day?.cogs ?? 0;
       const expenses = day?.expenses ?? 0;
-      const orders = day?.orders.size ?? 0;
+      const orders = sales?.orders ?? day?.orders.size ?? 0;
       const grossProfit = revenue - cogs;
       const profit = grossProfit - expenses;
       return {
@@ -769,7 +890,7 @@ async function buildDailyPerformanceRows(): Promise<DailyPerformance[]> {
     });
 }
 
-function summarizeYears(orders: LiveIncomeOrder[]) {
+function summarizeYears(orders: LiveIncomeOrder[], salesRows: ShopifySalesRow[] = []) {
   const lines = mapOrdersToAccountingLines(orders);
   const grouped = new Map<number, { orders: Set<string>; revenue: number }>();
   for (const line of lines) {
@@ -779,17 +900,23 @@ function summarizeYears(orders: LiveIncomeOrder[]) {
     current.revenue += line.netRevenue;
     grouped.set(year, current);
   }
-  return Array.from(grouped.entries()).map(([year, row]) => ({
+  const salesByYear = new Map(salesRows.map(row => [Number(row.period.slice(0, 4)), row]));
+  return Array.from(grouped.entries()).map(([year, row]) => {
+    const sales = salesByYear.get(year);
+    const revenue = sales?.totalSales ?? row.revenue;
+    const ordersCount = sales?.orders ?? row.orders.size;
+    return {
     year,
-    orders: row.orders.size,
-    revenue: row.revenue,
-    aov: row.orders.size ? row.revenue / row.orders.size : 0,
-    projected: year === 2026 ? Math.round((row.revenue / Math.max(new Date().getMonth() + 1, 1)) * 12) : undefined,
-    note: 'Shopify live: productos descontados + shipping cobrado - refunds',
-  })).sort((a, b) => a.year - b.year);
+    orders: ordersCount,
+    revenue,
+    aov: ordersCount ? revenue / ordersCount : 0,
+    projected: year === 2026 ? Math.round((revenue / Math.max(new Date().getMonth() + 1, 1)) * 12) : undefined,
+    note: 'ShopifyQL total_sales: ventas totales Analytics',
+    };
+  }).sort((a, b) => a.year - b.year);
 }
 
-function summarizeMonths(orders: LiveIncomeOrder[], expenses: Array<Record<string, unknown>>) {
+function summarizeMonths(orders: LiveIncomeOrder[], expenses: Array<Record<string, unknown>>, salesRows: ShopifySalesRow[] = []) {
   const lines = mapOrdersToAccountingLines(orders);
   const grouped = new Map<string, {
     orders: Set<string>;
@@ -832,20 +959,30 @@ function summarizeMonths(orders: LiveIncomeOrder[], expenses: Array<Record<strin
       current.operatingExpenses += amount;
     }
   }
-  return Array.from(grouped.entries()).map(([month, row]) => ({
+  for (const row of salesRows) {
+    const month = row.period.slice(0, 7);
+    if (month) ensureMonth(month);
+  }
+  const salesByMonth = new Map(salesRows.map(row => [row.period.slice(0, 7), row]));
+  return Array.from(grouped.entries()).map(([month, row]) => {
+    const sales = salesByMonth.get(month);
+    const income = sales?.totalSales ?? row.income;
+    const orderCount = sales?.orders ?? row.orders.size;
+    return {
     month,
     label: monthLabel(month),
-    income: row.income,
+    income,
     cogs: row.cogs,
-    grossProfit: row.income - row.cogs,
-    grossMargin: row.income ? (row.income - row.cogs) / row.income : 0,
+    grossProfit: income - row.cogs,
+    grossMargin: income ? (income - row.cogs) / income : 0,
     expenses: row.operatingExpenses,
-    profit: row.income - row.cogs - row.operatingExpenses,
-    netMargin: row.income ? (row.income - row.cogs - row.operatingExpenses) / row.income : 0,
+    profit: income - row.cogs - row.operatingExpenses,
+    netMargin: income ? (income - row.cogs - row.operatingExpenses) / income : 0,
     inventoryPurchasesExcluded: row.inventoryPurchasesExcluded,
     partial: month === new Date().toISOString().slice(0, 7),
-    note: `${row.orders.size} órdenes Shopify live; COGS vendido por BOM MM; gastos operativos reales. Compras de inventario/capex excluidas: ${Math.round(row.inventoryPurchasesExcluded).toLocaleString('es-CO')} COP.`,
-  })).sort((a, b) => a.month.localeCompare(b.month));
+    note: `${orderCount} órdenes ShopifyQL; ingreso = total_sales Analytics; COGS vendido por BOM MM; gastos operativos reales. Compras de inventario/capex excluidas: ${Math.round(row.inventoryPurchasesExcluded).toLocaleString('es-CO')} COP.`,
+    };
+  }).sort((a, b) => a.month.localeCompare(b.month));
 }
 
 function summarizeChannels(orders: LiveIncomeOrder[]) {
@@ -961,10 +1098,10 @@ function addSalesToProducts(productRows: Product[], lines: AccountingLine[]): Pr
   });
 }
 
-function buildDashboardKpis(orders: LiveIncomeOrder[], expenses: Array<Record<string, unknown>>) {
+function buildDashboardKpis(orders: LiveIncomeOrder[], expenses: Array<Record<string, unknown>>, salesSummary?: ShopifySalesSummary) {
   const lines = mapOrdersToAccountingLines(orders);
   const orderIds = new Set(lines.map(line => line.orderId));
-  const ingresos = lines.reduce((sum, line) => sum + line.netRevenue, 0);
+  const ingresos = salesSummary?.totalSales ?? lines.reduce((sum, line) => sum + line.netRevenue, 0);
   const cogsVendido = lines.reduce((sum, line) => sum + line.cogsSold, 0);
   const { operatingExpenses, inventoryPurchases, capex, uncategorized } = splitOperatingAndInventoryExpenses(expenses);
   const utilidadBruta = ingresos - cogsVendido;
@@ -989,14 +1126,14 @@ function buildDashboardKpis(orders: LiveIncomeOrder[], expenses: Array<Record<st
     comprasInventarioExcluidas: inventoryPurchases + capex,
     utilidadNeta,
     margenEstimado: ingresos ? utilidadNeta / ingresos : 0,
-    aov: orderIds.size ? ingresos / orderIds.size : 0,
-    ordenes: orderIds.size,
+    aov: (salesSummary?.orders ?? orderIds.size) ? ingresos / (salesSummary?.orders ?? orderIds.size) : 0,
+    ordenes: salesSummary?.orders ?? orderIds.size,
     clientesRecurrentes: recurrentOrderIds.size,
     clientesRecurrentesPct: orderIds.size ? recurrentOrderIds.size / orderIds.size : 0,
     topProductFamily,
     alertasActivas: buildRealAlerts(lines, expenses).length,
     asOf: new Date().toISOString().slice(0, 10),
-    dataQualityNote: `${qualityPrefix}: Shopify ingresos/productos + MM BOM/COGS + gastos sheet/manual. Cobertura BOM en líneas vendidas: ${coverageText}; líneas sin BOM quedan en COGS 0 hasta corregir MM/matching. Compras inventario/capex excluidas de gastos operativos: ${Math.round(inventoryPurchases + capex).toLocaleString('es-CO')} COP. Gastos sin categoría incluidos como operativos y alertados: ${Math.round(uncategorized).toLocaleString('es-CO')} COP.`,
+    dataQualityNote: `${qualityPrefix}: ingresos = ShopifyQL total_sales Analytics (${REPORT_TIME_ZONE}); productos/unidades desde órdenes Shopify; MM BOM/COGS + gastos sheet/manual. Cobertura BOM en líneas vendidas: ${coverageText}; líneas sin BOM quedan en COGS 0 hasta corregir MM/matching. Compras inventario/capex excluidas de gastos operativos: ${Math.round(inventoryPurchases + capex).toLocaleString('es-CO')} COP. Gastos sin categoría incluidos como operativos y alertados: ${Math.round(uncategorized).toLocaleString('es-CO')} COP.`,
   };
 }
 
@@ -1303,10 +1440,12 @@ export async function registerRoutes(
   app.get('/api/kpis', async (req, res) => {
     try {
       const period = getPeriodParams(req.query);
-      const orders = await loadLiveShopifyIncomeOrders(period);
-      const allExpenses = (await loadAllExpenses())
-        .filter(expense => expenseInPeriod(expense, period));
-      res.json(buildDashboardKpis(orders, allExpenses));
+      const [orders, salesSummary, allExpenses] = await Promise.all([
+        loadLiveShopifyIncomeOrders(period),
+        loadShopifySalesSummary(period),
+        loadAllExpenses().then(expenses => expenses.filter(expense => expenseInPeriod(expense, period))),
+      ]);
+      res.json(buildDashboardKpis(orders, allExpenses, salesSummary));
     } catch (error) {
       console.error('[kpis] failed to calculate real dashboard metrics', error);
       res.json({
@@ -1326,7 +1465,11 @@ export async function registerRoutes(
   });
   app.get('/api/years', async (_req, res) => {
     try {
-      res.json(summarizeYears(await loadLiveShopifyIncomeOrders()));
+      const [orders, salesRows] = await Promise.all([
+        loadLiveShopifyIncomeOrders(),
+        loadShopifySalesRows('year'),
+      ]);
+      res.json(summarizeYears(orders, salesRows));
     } catch {
       res.json([]);
     }
@@ -1334,10 +1477,12 @@ export async function registerRoutes(
   app.get('/api/months', async (req, res) => {
     try {
       const period = getPeriodParams(req.query);
-      const orders = await loadLiveShopifyIncomeOrders(period);
-      const allExpenses = (await loadAllExpenses())
-        .filter(expense => expenseInPeriod(expense, period));
-      res.json(summarizeMonths(orders, allExpenses));
+      const [orders, salesRows, allExpenses] = await Promise.all([
+        loadLiveShopifyIncomeOrders(period),
+        loadShopifySalesRows('month', period),
+        loadAllExpenses().then(expenses => expenses.filter(expense => expenseInPeriod(expense, period))),
+      ]);
+      res.json(summarizeMonths(orders, allExpenses, salesRows));
     } catch {
       res.json([]);
     }

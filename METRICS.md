@@ -13,21 +13,23 @@
 
 ### Base oficial: ventas totales Shopify
 
-Connabis usa siempre `ventas totales` de Shopify como base de ingresos. En el backend esto se lee desde `currentTotalPriceSet` cuando Shopify lo entrega; si no existe, usa `totalPriceSet`.
+Connabis usa siempre `ventas totales` de Shopify como base de ingresos. En KPIs, P&L mensual/anual y performance diaria, el backend consulta ShopifyQL `FROM sales SHOW ... total_sales`, que es el mismo motor de Analytics de Shopify.
 
 Regla práctica:
 
-`ingreso base período = suma(currentTotalPriceSet / totalPriceSet de órdenes Shopify incluidas en el período)`
+`ingreso base período = ShopifyQL total_sales del período`
 
-Esto incluye lo que pagó el usuario según Shopify, incluyendo productos, descuentos aplicados, shipping cobrado y ajustes que Shopify ya refleje dentro de ventas totales.
+Esto incluye lo que Shopify Analytics considera ventas totales del período: ventas brutas, descuentos, returns/refunds registrados por Analytics, net sales y shipping cobrado. El timezone operativo del OS para cortes diarios es `America/Bogota`.
 
 ### Asignación por línea/SKU
 
-Para poder calcular margen por producto sin duplicar shipping o ajustes de orden, la venta total de la orden se asigna a sus líneas proporcionalmente al valor descontado de cada línea:
+Para poder calcular margen por producto/SKU, COGS y drilldowns de órdenes, el OS sigue leyendo órdenes y líneas del Admin API. En esos detalles, la venta total de cada orden se asigna a sus líneas proporcionalmente al valor descontado de cada línea:
 
-`ingreso línea = totalPriceSet orden × (discountedTotalSet línea / suma(discountedTotalSet líneas de la orden))`
+`ingreso línea = currentTotalPriceSet orden × (discountedTotalSet línea / suma(discountedTotalSet líneas de la orden))`
 
 Si una orden no tiene base de líneas usable, se reparte en partes iguales entre líneas.
+
+Importante: el P&L usa ShopifyQL `total_sales` como total oficial del período. Los drilldowns por producto/línea son explicativos y pueden no sumar exactamente al total oficial cuando Shopify Analytics registra returns/refunds en una fecha distinta a la fecha de creación de la orden.
 
 ### Campos informativos
 
@@ -42,16 +44,16 @@ Estos campos ayudan a explicar diferencias, pero el KPI principal de ingresos us
 
 Incluidas:
 
-- Órdenes Shopify con `createdAt` dentro del período seleccionado.
+- Órdenes Shopify con fecha operacional Colombia (`createdAt` convertido a `America/Bogota`) dentro del período seleccionado.
 - Líneas de orden con cantidad vendida.
 - Órdenes con estado financiero reconocido como venta pagada o parcialmente ajustada.
 
 Exclusiones/pendientes:
 
-- Órdenes `pending` o `refunded` se excluyen para acercar la app al comportamiento de Shopify Analytics en ventas totales.
-- Si Shopify expone órdenes de prueba, canceladas o completamente anuladas, deben excluirse explícitamente en una siguiente validación contra el reporte oficial.
-- La app todavía debe validarse contra el timezone operacional de Colombia para cortes diarios.
-- Refunds se tratan según cómo Shopify los refleje en `totalPriceSet`; si una auditoría muestra diferencia contra Shopify Analytics, el ajuste debe hacerse una sola vez en el helper de ingresos.
+- Órdenes `pending` o `refunded` se excluyen del detalle por líneas.
+- Órdenes `test` y órdenes canceladas se excluyen del detalle por líneas.
+- Para totales oficiales de ingreso, prevalece ShopifyQL `total_sales`, no la suma manual de órdenes.
+- Refunds/returns se tratan según Shopify Analytics. Esto corrige casos donde un refund de una orden anterior cae dentro del período actual.
 
 ## COGS vendido
 
