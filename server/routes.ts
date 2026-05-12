@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { insertExpenseSchema, updateCashAccountSchema, updateCloseChecklistSchema } from '@shared/schema';
+import { insertExpenseSchema, updateCashAccountSchema, updateCloseChecklistSchema, updateExpenseSchema } from '@shared/schema';
 import type { Alert, DailyPerformance, Expense, Product } from '@shared/schema';
 import { storage } from './storage';
 import {
@@ -25,6 +25,15 @@ function loadHistoricalExpenses() {
     expenses?: Array<Record<string, unknown>>;
   };
   return payload.expenses ?? [];
+}
+
+async function loadAllExpenses() {
+  const manualExpenses = await storage.listManualExpenses();
+  const overrides = await storage.listExpenseOverrides();
+  return [...loadHistoricalExpenses(), ...manualExpenses].map(expense => ({
+    ...expense,
+    ...(overrides[String(expense.id)] ?? {}),
+  }));
 }
 
 function parseCsvLine(line: string) {
@@ -341,9 +350,32 @@ function getExpenseText(expense: Record<string, unknown>) {
 
 type ExpenseClassification = NonNullable<Expense['classification']>;
 
+const INVENTORY_CAPEX_SUPPLIERS = [
+  'hau',
+  'floraplex',
+  'mc',
+  'gilded extracts',
+  'amazon',
+  'imprenta',
+];
+
+function normalizeSearchText(value: unknown) {
+  return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
+function isInventoryCapexSupplier(expense: Record<string, unknown>) {
+  const paidTo = normalizeSearchText(expense.paidTo ?? expense.paid_to);
+  const text = normalizeSearchText(getExpenseText(expense));
+  return INVENTORY_CAPEX_SUPPLIERS.some(supplier => {
+    if (supplier === 'mc') return paidTo === 'mc' || /\bmc\b/.test(text);
+    return paidTo.includes(supplier) || text.includes(supplier);
+  });
+}
+
 function classifyExpense(expense: Record<string, unknown>): ExpenseClassification {
   const text = getExpenseText(expense);
   const category = String(expense.category ?? '').trim().toLowerCase();
+  if (isInventoryCapexSupplier(expense)) return category.includes('capex') ? 'capex' : 'inventory';
   if (!category || category === '.' || category === '-' || category.includes('sin categor') || category === 'otros' || category === 'other') {
     return 'uncategorized';
   }
@@ -655,7 +687,7 @@ function listDatesInMonth(month: string) {
 
 async function buildDailyPerformanceRows(): Promise<DailyPerformance[]> {
   const incomeRows = mapOrdersToAccountingLines(await loadLiveShopifyIncomeOrders());
-  const expenseRows = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())].map(withExpenseClassification) as Array<{
+  const expenseRows = (await loadAllExpenses()).map(withExpenseClassification) as Array<{
     date: string;
     month: string;
     amount: number;
@@ -1272,7 +1304,7 @@ export async function registerRoutes(
     try {
       const period = getPeriodParams(req.query);
       const orders = await loadLiveShopifyIncomeOrders(period);
-      const allExpenses = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())]
+      const allExpenses = (await loadAllExpenses())
         .filter(expense => expenseInPeriod(expense, period));
       res.json(buildDashboardKpis(orders, allExpenses));
     } catch (error) {
@@ -1303,7 +1335,7 @@ export async function registerRoutes(
     try {
       const period = getPeriodParams(req.query);
       const orders = await loadLiveShopifyIncomeOrders(period);
-      const allExpenses = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())]
+      const allExpenses = (await loadAllExpenses())
         .filter(expense => expenseInPeriod(expense, period));
       res.json(summarizeMonths(orders, allExpenses));
     } catch {
@@ -1343,8 +1375,7 @@ export async function registerRoutes(
     }
   });
   app.get('/api/expenses', async (_req, res) => {
-    const manualExpenses = await storage.listManualExpenses();
-    res.json([...loadHistoricalExpenses(), ...manualExpenses].map(withExpenseClassification));
+    res.json((await loadAllExpenses()).map(withExpenseClassification));
   });
   app.get('/api/export/income.csv', async (req, res) => {
     try {
@@ -1378,7 +1409,7 @@ export async function registerRoutes(
   app.get('/api/export/expenses.csv', async (req, res) => {
     const month = typeof req.query.month === 'string' ? req.query.month : undefined;
     const year = typeof req.query.year === 'string' ? req.query.year : undefined;
-      const rows = ([...loadHistoricalExpenses(), ...(await storage.listManualExpenses())].map(withExpenseClassification) as Array<{
+      const rows = ((await loadAllExpenses()).map(withExpenseClassification) as Array<{
       date: string;
       month: string;
       category: string;
@@ -1431,6 +1462,23 @@ export async function registerRoutes(
       res.status(400).json({ error: error instanceof Error ? error.message : 'expense_create_failed' });
     }
   });
+  app.put('/api/expenses/:id', async (req, res) => {
+    const parsed = updateExpenseSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid expense update', details: parsed.error.flatten() });
+    }
+    try {
+      const existing = (await loadAllExpenses()).find(expense => String(expense.id) === req.params.id);
+      if (!existing) return res.status(404).json({ error: 'expense_not_found' });
+      const updated = req.params.id.startsWith('manual-')
+        ? await storage.updateManualExpense(req.params.id, parsed.data)
+        : await storage.upsertExpenseOverride(req.params.id, parsed.data, existing.source);
+      if (!updated) return res.status(404).json({ error: 'expense_not_found' });
+      res.json(withExpenseClassification(updated));
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'expense_update_failed' });
+    }
+  });
   app.delete('/api/expenses/:id', async (req, res) => {
     if (!req.params.id.startsWith('manual-')) {
       return res.status(400).json({ error: 'Solo se pueden eliminar gastos manuales antes de conectar contabilidad.' });
@@ -1451,7 +1499,7 @@ export async function registerRoutes(
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date inválida' });
       const orders = await loadLiveShopifyIncomeOrders({ start: date, end: date });
       const income = mapOrdersToAccountingLines(orders).filter(line => line.date === date);
-      const expenses = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())]
+      const expenses = (await loadAllExpenses())
         .map(withExpenseClassification)
         .filter(expense => String(expense.date) === date && expense.classification !== 'inventory' && expense.classification !== 'capex');
       res.json({ date, income, expenses });
@@ -1470,7 +1518,7 @@ export async function registerRoutes(
   app.get('/api/alerts', async (_req, res) => {
     try {
       const orders = await loadLiveShopifyIncomeOrders();
-      const allExpenses = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())];
+      const allExpenses = await loadAllExpenses();
       res.json(buildRealAlerts(mapOrdersToAccountingLines(orders), allExpenses));
     } catch {
       res.json(alerts.map(alert => ({ ...alert, source: 'seed' })));
@@ -1481,7 +1529,7 @@ export async function registerRoutes(
   app.get('/api/accounting-suggestions', async (_req, res) => {
     try {
       const orders = await loadLiveShopifyIncomeOrders();
-      const allExpenses = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())];
+      const allExpenses = await loadAllExpenses();
       res.json(buildRealSuggestions(mapOrdersToAccountingLines(orders), allExpenses));
     } catch {
       res.json(accountingSuggestions);

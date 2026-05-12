@@ -97,6 +97,24 @@ Regla:
 
 `compras inventario/capex excluidas = inventory + capex`
 
+Proveedores que se tratan como inventario/capex para evitar doble conteo con COGS vendido:
+
+- HAU
+- Floraplex
+- MC
+- Gilded Extracts
+- Amazon
+- Imprenta
+
+Si un gasto de esos proveedores corresponde claramente a equipo/activo, se clasifica como `capex`; de lo contrario se clasifica como `inventory`.
+
+Regla anti doble conteo:
+
+- Las compras de materiales/insumos se mantienen visibles en `Compras de inventario / Capex`.
+- Esas compras no entran en `gastos operativos`.
+- El costo de venta del P&L viene solo de `COGS vendido` calculado desde BOM/MM por línea vendida.
+- Esto evita contar el mismo material dos veces: primero como compra del mes y luego como COGS cuando se vende el producto.
+
 ## Utilidad y márgenes
 
 ### Utilidad bruta

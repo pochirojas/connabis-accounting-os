@@ -208,6 +208,7 @@ export const insertExpenseSchema = z.object({
   currency: z.enum(['COP', 'USD']).default('COP'),
   originalAmount: z.number().positive().optional(),
   fxRate: z.number().positive().optional(),
+  notes: z.string().optional(),
 }).superRefine((value, ctx) => {
   if (value.currency === 'USD' && (!value.fxRate || !value.originalAmount)) {
     ctx.addIssue({
@@ -219,6 +220,8 @@ export const insertExpenseSchema = z.object({
 });
 
 export type InsertExpense = z.infer<typeof insertExpenseSchema>;
+export const updateExpenseSchema = insertExpenseSchema;
+export type UpdateExpense = z.infer<typeof updateExpenseSchema>;
 
 export type DailyPerformance = {
   date: string;

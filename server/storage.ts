@@ -1,5 +1,5 @@
 import { users } from '@shared/schema';
-import type { CashAccount, CloseChecklistItem, Expense, InsertExpense, User, InsertUser } from '@shared/schema';
+import type { CashAccount, CloseChecklistItem, Expense, InsertExpense, UpdateExpense, User, InsertUser } from '@shared/schema';
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
@@ -19,7 +19,25 @@ CREATE TABLE IF NOT EXISTS manual_expenses (
   currency TEXT NOT NULL DEFAULT 'COP',
   original_amount REAL,
   fx_rate REAL,
+  notes TEXT,
   created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS expense_overrides (
+  id TEXT PRIMARY KEY,
+  date TEXT NOT NULL,
+  month TEXT NOT NULL,
+  category TEXT NOT NULL,
+  description TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  paid_to TEXT,
+  paid_with TEXT,
+  currency TEXT NOT NULL DEFAULT 'COP',
+  original_amount REAL,
+  fx_rate REAL,
+  notes TEXT,
+  source TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS close_checklist_status (
@@ -35,6 +53,11 @@ CREATE TABLE IF NOT EXISTS cash_accounts (
 );
 `);
 
+const manualExpenseColumns = sqlite.prepare(`PRAGMA table_info(manual_expenses)`).all() as Array<{ name: string }>;
+if (!manualExpenseColumns.some(column => column.name === 'notes')) {
+  sqlite.exec(`ALTER TABLE manual_expenses ADD COLUMN notes TEXT`);
+}
+
 export const db = drizzle(sqlite);
 
 export interface IStorage {
@@ -43,7 +66,10 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   listManualExpenses(): Promise<Expense[]>;
   createManualExpense(expense: InsertExpense): Promise<Expense>;
+  updateManualExpense(id: string, expense: UpdateExpense): Promise<Expense | undefined>;
   deleteManualExpense(id: string): Promise<boolean>;
+  listExpenseOverrides(): Promise<Record<string, Expense>>;
+  upsertExpenseOverride(id: string, expense: UpdateExpense, source: Expense['source']): Promise<Expense>;
   mergeCloseChecklist(seedItems: CloseChecklistItem[]): Promise<CloseChecklistItem[]>;
   updateCloseChecklistStatus(id: string, status: CloseChecklistItem['status']): Promise<void>;
   listCashAccounts(): Promise<CashAccount[]>;
@@ -91,7 +117,7 @@ export class DatabaseStorage implements IStorage {
 
   async listManualExpenses(): Promise<Expense[]> {
     const rows = sqlite.prepare(`
-      SELECT id, date, month, category, description, amount, paid_to, paid_with, currency, original_amount, fx_rate
+      SELECT id, date, month, category, description, amount, paid_to, paid_with, currency, original_amount, fx_rate, notes
       FROM manual_expenses
       ORDER BY date DESC, created_at DESC
     `).all() as Array<Record<string, unknown>>;
@@ -108,12 +134,12 @@ export class DatabaseStorage implements IStorage {
       currency: row.currency === 'USD' ? 'USD' : 'COP',
       originalAmount: row.original_amount === null || row.original_amount === undefined ? undefined : Number(row.original_amount),
       fxRate: row.fx_rate === null || row.fx_rate === undefined ? undefined : Number(row.fx_rate),
+      notes: row.notes ? String(row.notes) : undefined,
       source: 'manual',
     }));
   }
 
-  async createManualExpense(expense: InsertExpense): Promise<Expense> {
-    const id = `manual-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  private normalizeExpenseInput(expense: UpdateExpense) {
     const month = expense.date.slice(0, 7);
     const currency = expense.currency ?? 'COP';
     const originalAmount = currency === 'USD' ? Number(expense.originalAmount ?? expense.amount) : Number(expense.amount);
@@ -125,41 +151,182 @@ export class DatabaseStorage implements IStorage {
     if (!Number.isFinite(amountCop) || amountCop <= 0 || amountCop > 500_000_000) {
       throw new Error('Monto de gasto inválido.');
     }
-    const roundedAmount = Math.round(amountCop);
+    return {
+      month,
+      currency,
+      originalAmount,
+      fxRate,
+      roundedAmount: Math.round(amountCop),
+      notes: expense.notes?.trim() || undefined,
+    };
+  }
+
+  async createManualExpense(expense: InsertExpense): Promise<Expense> {
+    const id = `manual-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    const normalized = this.normalizeExpenseInput(expense);
     sqlite.prepare(`
       INSERT INTO manual_expenses
-        (id, date, month, category, description, amount, paid_to, paid_with, currency, original_amount, fx_rate, created_at)
+        (id, date, month, category, description, amount, paid_to, paid_with, currency, original_amount, fx_rate, notes, created_at)
       VALUES
-        (@id, @date, @month, @category, @description, @amount, @paidTo, @paidWith, @currency, @originalAmount, @fxRate, @createdAt)
+        (@id, @date, @month, @category, @description, @amount, @paidTo, @paidWith, @currency, @originalAmount, @fxRate, @notes, @createdAt)
     `).run({
       id,
       date: expense.date,
-      month,
+      month: normalized.month,
       category: expense.category,
       description: expense.description,
-      amount: roundedAmount,
+      amount: normalized.roundedAmount,
       paidTo: expense.paidTo ?? null,
       paidWith: expense.paidWith ?? null,
-      currency,
-      originalAmount: currency === 'USD' ? originalAmount : null,
-      fxRate: fxRate ?? null,
+      currency: normalized.currency,
+      originalAmount: normalized.currency === 'USD' ? normalized.originalAmount : null,
+      fxRate: normalized.fxRate ?? null,
+      notes: normalized.notes ?? null,
       createdAt: new Date().toISOString(),
     });
-    this.applyExpenseToCash(expense.paidWith, roundedAmount, 'expense');
+    this.applyExpenseToCash(expense.paidWith, normalized.roundedAmount, 'expense');
 
     return {
       id,
       date: expense.date,
-      month,
+      month: normalized.month,
       category: expense.category,
       description: expense.description,
-      amount: roundedAmount,
+      amount: normalized.roundedAmount,
       paidTo: expense.paidTo,
       paidWith: expense.paidWith,
-      currency,
-      originalAmount: currency === 'USD' ? originalAmount : undefined,
-      fxRate,
+      currency: normalized.currency,
+      originalAmount: normalized.currency === 'USD' ? normalized.originalAmount : undefined,
+      fxRate: normalized.fxRate,
+      notes: normalized.notes,
       source: 'manual',
+    };
+  }
+
+  async updateManualExpense(id: string, expense: UpdateExpense): Promise<Expense | undefined> {
+    const previous = sqlite.prepare('SELECT paid_with, amount FROM manual_expenses WHERE id = ?').get(id) as { paid_with?: string; amount?: number } | undefined;
+    if (!previous) return undefined;
+    const normalized = this.normalizeExpenseInput(expense);
+    sqlite.prepare(`
+      UPDATE manual_expenses
+      SET date = @date,
+          month = @month,
+          category = @category,
+          description = @description,
+          amount = @amount,
+          paid_to = @paidTo,
+          paid_with = @paidWith,
+          currency = @currency,
+          original_amount = @originalAmount,
+          fx_rate = @fxRate,
+          notes = @notes
+      WHERE id = @id
+    `).run({
+      id,
+      date: expense.date,
+      month: normalized.month,
+      category: expense.category,
+      description: expense.description,
+      amount: normalized.roundedAmount,
+      paidTo: expense.paidTo ?? null,
+      paidWith: expense.paidWith ?? null,
+      currency: normalized.currency,
+      originalAmount: normalized.currency === 'USD' ? normalized.originalAmount : null,
+      fxRate: normalized.fxRate ?? null,
+      notes: normalized.notes ?? null,
+    });
+    this.applyExpenseToCash(previous.paid_with, Number(previous.amount || 0), 'reversal');
+    this.applyExpenseToCash(expense.paidWith, normalized.roundedAmount, 'expense');
+    return {
+      id,
+      date: expense.date,
+      month: normalized.month,
+      category: expense.category,
+      description: expense.description,
+      amount: normalized.roundedAmount,
+      paidTo: expense.paidTo,
+      paidWith: expense.paidWith,
+      currency: normalized.currency,
+      originalAmount: normalized.currency === 'USD' ? normalized.originalAmount : undefined,
+      fxRate: normalized.fxRate,
+      notes: normalized.notes,
+      source: 'manual',
+    };
+  }
+
+  async listExpenseOverrides(): Promise<Record<string, Expense>> {
+    const rows = sqlite.prepare(`
+      SELECT id, date, month, category, description, amount, paid_to, paid_with, currency, original_amount, fx_rate, notes, source
+      FROM expense_overrides
+    `).all() as Array<Record<string, unknown>>;
+    return Object.fromEntries(rows.map(row => [String(row.id), {
+      id: String(row.id),
+      date: String(row.date),
+      month: String(row.month),
+      category: String(row.category),
+      description: String(row.description),
+      amount: Number(row.amount),
+      paidTo: row.paid_to ? String(row.paid_to) : undefined,
+      paidWith: row.paid_with ? String(row.paid_with) : undefined,
+      currency: row.currency === 'USD' ? 'USD' : 'COP',
+      originalAmount: row.original_amount === null || row.original_amount === undefined ? undefined : Number(row.original_amount),
+      fxRate: row.fx_rate === null || row.fx_rate === undefined ? undefined : Number(row.fx_rate),
+      notes: row.notes ? String(row.notes) : undefined,
+      source: row.source === 'shopify' || row.source === 'manual' ? row.source : 'sheet',
+    } as Expense]));
+  }
+
+  async upsertExpenseOverride(id: string, expense: UpdateExpense, source: Expense['source']): Promise<Expense> {
+    const normalized = this.normalizeExpenseInput(expense);
+    sqlite.prepare(`
+      INSERT INTO expense_overrides
+        (id, date, month, category, description, amount, paid_to, paid_with, currency, original_amount, fx_rate, notes, source, updated_at)
+      VALUES
+        (@id, @date, @month, @category, @description, @amount, @paidTo, @paidWith, @currency, @originalAmount, @fxRate, @notes, @source, @updatedAt)
+      ON CONFLICT(id) DO UPDATE SET
+        date = excluded.date,
+        month = excluded.month,
+        category = excluded.category,
+        description = excluded.description,
+        amount = excluded.amount,
+        paid_to = excluded.paid_to,
+        paid_with = excluded.paid_with,
+        currency = excluded.currency,
+        original_amount = excluded.original_amount,
+        fx_rate = excluded.fx_rate,
+        notes = excluded.notes,
+        source = excluded.source,
+        updated_at = excluded.updated_at
+    `).run({
+      id,
+      date: expense.date,
+      month: normalized.month,
+      category: expense.category,
+      description: expense.description,
+      amount: normalized.roundedAmount,
+      paidTo: expense.paidTo ?? null,
+      paidWith: expense.paidWith ?? null,
+      currency: normalized.currency,
+      originalAmount: normalized.currency === 'USD' ? normalized.originalAmount : null,
+      fxRate: normalized.fxRate ?? null,
+      notes: normalized.notes ?? null,
+      source,
+      updatedAt: new Date().toISOString(),
+    });
+    return {
+      id,
+      date: expense.date,
+      month: normalized.month,
+      category: expense.category,
+      description: expense.description,
+      amount: normalized.roundedAmount,
+      paidTo: expense.paidTo,
+      paidWith: expense.paidWith,
+      currency: normalized.currency,
+      originalAmount: normalized.currency === 'USD' ? normalized.originalAmount : undefined,
+      fxRate: normalized.fxRate,
+      notes: normalized.notes,
+      source,
     };
   }
 

@@ -13,7 +13,7 @@ import {
 import type { MonthlyRow, Expense } from '@shared/schema';
 import { formatCOP, formatCOPCompact, formatDate } from '@/lib/format';
 import { KpiCard } from '@/components/kpi-card';
-import { Receipt, TrendingDown, TrendingUp, AlertTriangle, Plus, Trash2 } from 'lucide-react';
+import { Receipt, TrendingDown, TrendingUp, AlertTriangle, Plus, Trash2, Pencil, Save, X } from 'lucide-react';
 import { useMemo, useState, type FormEvent } from 'react';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { sortByDate, sortByMonth, type ChartSortOrder } from '@/lib/chart-sort';
@@ -22,9 +22,12 @@ const RECURRENT_SELLERS = [
   'Shopify',
   'Perplexity',
   'Discord',
-  'Hau',
+  'HAU',
   'Floraplex',
+  'MC',
+  'Gilded Extracts',
   'Amazon',
+  'Imprenta',
   'Material Manager',
   'Mercado Pago',
   'Envía',
@@ -41,10 +44,27 @@ function formatAmountInput(value: string) {
   return parsed ? parsed.toLocaleString('en-US') : '';
 }
 
+type ExpenseDraft = {
+  date: string;
+  category: string;
+  description: string;
+  paidTo: string;
+  paidToOther: string;
+  paidWith: string;
+  currency: 'COP' | 'USD';
+  amount: string;
+  originalAmount: string;
+  fxRate: string;
+  notes: string;
+};
+
+const CATEGORY_OPTIONS = ['Operación', 'Inventario', 'Capex', 'Marketing', 'Logística', 'Comisiones', 'Impuestos', 'Muestras', 'Reposiciones', 'Software', 'Nómina', 'Servicios profesionales', 'Otros'];
+const PAID_WITH_OPTIONS = ['Nequi', 'Nu crédito', 'Nu débito', 'Mercado Pago liberado', 'Mercado Pago no liberado', 'Efectivo', 'Otro'];
+
 export default function Gastos() {
   const months = useQuery<MonthlyRow[]>({ queryKey: ['/api/months'] });
   const expenses = useQuery<Expense[]>({ queryKey: ['/api/expenses'] });
-  const [draft, setDraft] = useState({
+  const [draft, setDraft] = useState<ExpenseDraft>({
     date: new Date().toISOString().slice(0, 10),
     category: 'Operación',
     description: '',
@@ -55,7 +75,10 @@ export default function Gastos() {
     amount: '',
     originalAmount: '',
     fxRate: '',
+    notes: '',
   });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<ExpenseDraft | null>(null);
   const [exportMonth, setExportMonth] = useState('all');
   const [exportYear, setExportYear] = useState('all');
   const [monthlySort, setMonthlySort] = useState<ChartSortOrder>('oldest');
@@ -87,7 +110,8 @@ export default function Gastos() {
   }, [manualExpenses, months.data]);
   const totalIncome = monthsWithManual.reduce((sum, month) => sum + month.income, 0);
   const totalExpenses = monthsWithManual.reduce((sum, month) => sum + month.expenses, 0);
-  const totalProfit = totalIncome - totalExpenses;
+  const totalInventoryCapex = monthsWithManual.reduce((sum, month) => sum + (month.inventoryPurchasesExcluded ?? 0), 0);
+  const totalProfit = monthsWithManual.reduce((sum, month) => sum + month.profit, 0);
   const lossMonths = monthsWithManual.filter(month => month.profit < 0).length;
   const monthOptions = monthsWithManual.map(month => month.month).sort().reverse();
   const yearOptions = Array.from(new Set(monthOptions.map(month => month.slice(0, 4)))).sort().reverse();
@@ -116,9 +140,38 @@ export default function Gastos() {
     }) => (await apiRequest('POST', '/api/expenses', payload)).json() as Promise<Expense>,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/months'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/kpis'] });
       queryClient.invalidateQueries({ queryKey: ['/api/cash-accounts'] });
       queryClient.invalidateQueries({ queryKey: ['/api/cash-flow'] });
-      setDraft(prev => ({ ...prev, description: '', paidToOther: '', amount: '', originalAmount: '', fxRate: '' }));
+      setDraft(prev => ({ ...prev, description: '', paidToOther: '', amount: '', originalAmount: '', fxRate: '', notes: '' }));
+    },
+  });
+
+  const updateExpense = useMutation({
+    mutationFn: async ({ id, payload }: {
+      id: string;
+      payload: {
+        date: string;
+        category: string;
+        description: string;
+        amount: number;
+        paidTo?: string;
+        paidWith?: string;
+        currency: 'COP' | 'USD';
+        originalAmount?: number;
+        fxRate?: number;
+        notes?: string;
+      };
+    }) => (await apiRequest('PUT', `/api/expenses/${id}`, payload)).json() as Promise<Expense>,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/months'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/kpis'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/cash-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/cash-flow'] });
+      setEditingId(null);
+      setEditDraft(null);
     },
   });
 
@@ -126,6 +179,8 @@ export default function Gastos() {
     mutationFn: async (id: string) => (await apiRequest('DELETE', `/api/expenses/${id}`)).json(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/months'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/kpis'] });
       queryClient.invalidateQueries({ queryKey: ['/api/cash-accounts'] });
       queryClient.invalidateQueries({ queryKey: ['/api/cash-flow'] });
     },
@@ -133,24 +188,57 @@ export default function Gastos() {
 
   function addExpense(e: FormEvent) {
     e.preventDefault();
-    const copAmount = parseAmountInput(draft.amount);
-    const originalAmount = draft.currency === 'USD' ? parseAmountInput(draft.originalAmount || draft.amount) : copAmount;
-    const fxRate = draft.currency === 'USD' ? parseAmountInput(draft.fxRate || '0') : undefined;
-    const amount = draft.currency === 'USD' ? originalAmount * (fxRate ?? 0) : copAmount;
-    if (!draft.date || !draft.category || !draft.description.trim() || !Number.isFinite(amount) || amount <= 0) return;
-    if (draft.currency === 'USD' && (!fxRate || fxRate <= 0 || !originalAmount)) return;
-    const paidTo = draft.paidTo === 'Otro' ? draft.paidToOther.trim() : draft.paidTo;
-    createExpense.mutate({
-      date: draft.date,
-      category: draft.category,
-      description: draft.description.trim(),
+    const payload = buildExpensePayload(draft);
+    if (!payload) return;
+    createExpense.mutate(payload);
+  }
+
+  function buildExpensePayload(source: ExpenseDraft) {
+    const copAmount = parseAmountInput(source.amount);
+    const originalAmount = source.currency === 'USD' ? parseAmountInput(source.originalAmount || source.amount) : copAmount;
+    const fxRate = source.currency === 'USD' ? parseAmountInput(source.fxRate || '0') : undefined;
+    const amount = source.currency === 'USD' ? originalAmount * (fxRate ?? 0) : copAmount;
+    if (!source.date || !source.category || !source.description.trim() || !Number.isFinite(amount) || amount <= 0) return null;
+    if (source.currency === 'USD' && (!fxRate || fxRate <= 0 || !originalAmount)) return null;
+    const paidTo = source.paidTo === 'Otro' ? source.paidToOther.trim() : source.paidTo;
+    return {
+      date: source.date,
+      category: source.category,
+      description: source.description.trim(),
       amount,
       paidTo: paidTo || 'Sin proveedor',
-      paidWith: draft.paidWith,
-      currency: draft.currency,
+      paidWith: source.paidWith,
+      currency: source.currency,
       originalAmount,
       fxRate,
+      notes: source.notes.trim() || undefined,
+    };
+  }
+
+  function startEdit(expense: Expense) {
+    const sellerExists = sellerOptions.includes(expense.paidTo ?? '');
+    setEditingId(expense.id);
+    setEditDraft({
+      date: expense.date,
+      category: expense.category || 'Operación',
+      description: expense.description,
+      paidTo: sellerExists ? expense.paidTo ?? 'Otro' : 'Otro',
+      paidToOther: sellerExists ? '' : expense.paidTo ?? '',
+      paidWith: expense.paidWith ?? 'Nequi',
+      currency: expense.currency ?? 'COP',
+      amount: formatAmountInput(String(expense.amount)),
+      originalAmount: formatAmountInput(String(expense.originalAmount ?? expense.amount)),
+      fxRate: expense.fxRate ? formatAmountInput(String(expense.fxRate)) : '',
+      notes: expense.notes ?? '',
     });
+  }
+
+  function saveEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!editingId || !editDraft) return;
+    const payload = buildExpensePayload(editDraft);
+    if (!payload) return;
+    updateExpense.mutate({ id: editingId, payload });
   }
 
   async function downloadExpensesCsv(scope: 'month' | 'year' | 'all') {
@@ -171,10 +259,11 @@ export default function Gastos() {
 
   return (
     <Layout title="Gastos & Contabilidad" subtitle="Ingresos desde Shopify live · gastos históricos desde Expenses sheet + gastos manuales nuevos">
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <section className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <KpiCard label="Ingresos totales" value={formatCOP(totalIncome)} icon={TrendingUp} emphasis="emerald" testId="kpi-gastos-ingresos" />
-        <KpiCard label="Gastos reales" value={formatCOP(totalExpenses)} icon={Receipt} testId="kpi-gastos-totales" hint="Expenses + manual" />
-        <KpiCard label="Utilidad" value={formatCOP(totalProfit)} icon={totalProfit >= 0 ? TrendingUp : TrendingDown} emphasis="gold" testId="kpi-gastos-utilidad" />
+        <KpiCard label="Gastos operativos" value={formatCOP(totalExpenses)} icon={Receipt} testId="kpi-gastos-totales" hint="Operating + sin categoría" />
+        <KpiCard label="Inventario / Capex" value={formatCOP(totalInventoryCapex)} icon={Receipt} testId="kpi-gastos-inventory-capex" hint="Visible, excluido del P&L operativo" />
+        <KpiCard label="Utilidad neta" value={formatCOP(totalProfit)} icon={totalProfit >= 0 ? TrendingUp : TrendingDown} emphasis="gold" testId="kpi-gastos-utilidad" />
         <KpiCard label="Meses con pérdida" value={`${lossMonths} / ${monthsWithManual.length || 5}`} icon={AlertTriangle} testId="kpi-meses-perdida" hint="Incluye manuales guardados" />
       </section>
 
@@ -207,7 +296,7 @@ export default function Gastos() {
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 data-testid="select-expense-category"
               >
-                {['Operación', 'Inventario', 'Capex', 'Marketing', 'Logística', 'Comisiones', 'Impuestos', 'Muestras', 'Reposiciones', 'Software', 'Nómina', 'Servicios profesionales', 'Otros'].map(c => (
+                {CATEGORY_OPTIONS.map(c => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
@@ -251,7 +340,7 @@ export default function Gastos() {
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 data-testid="select-expense-paid-with"
               >
-                {['Nequi', 'Nu crédito', 'Nu débito', 'Mercado Pago liberado', 'Mercado Pago no liberado', 'Efectivo', 'Otro'].map(c => (
+                {PAID_WITH_OPTIONS.map(c => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
@@ -312,6 +401,15 @@ export default function Gastos() {
               {createExpense.isPending ? 'Guardando' : 'Agregar'}
             </Button>
           </form>
+          <label className="mt-3 block space-y-1.5">
+            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Notas</span>
+            <Input
+              value={draft.notes}
+              onChange={e => setDraft(prev => ({ ...prev, notes: e.target.value }))}
+              placeholder="Notas contables opcionales"
+              data-testid="input-expense-notes"
+            />
+          </label>
           {manualExpenses.length > 0 && (
             <p className="text-xs text-emerald-300 mt-3" data-testid="text-manual-expense-count">
               {manualExpenses.length} gasto(s) manual(es) guardados: {formatCOP(manualTotal)}
@@ -354,7 +452,8 @@ export default function Gastos() {
                 />
                 <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
                 <Bar dataKey="income" name="Ingresos" fill="hsl(var(--chart-1))" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="expenses" name="Gastos" fill="hsl(var(--chart-2))" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="expenses" name="Gastos operativos" fill="hsl(var(--chart-2))" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="inventoryPurchasesExcluded" name="Inventario/Capex excluido" fill="hsl(var(--chart-4))" radius={[3, 3, 0, 0]} />
                 <Line type="monotone" dataKey="profit" name="Utilidad" stroke="hsl(var(--chart-3))" strokeWidth={2.5} dot={{ r: 3 }} />
               </ComposedChart>
             </ResponsiveContainer>
@@ -397,7 +496,8 @@ export default function Gastos() {
               <TableRow>
                 <TableHead>Mes</TableHead>
                 <TableHead className="text-right">Ingresos</TableHead>
-                <TableHead className="text-right">Gastos</TableHead>
+                <TableHead className="text-right">Gastos operativos</TableHead>
+                <TableHead className="text-right">Inventario/Capex</TableHead>
                 <TableHead className="text-right">Utilidad</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead>Notas</TableHead>
@@ -409,6 +509,7 @@ export default function Gastos() {
                   <TableCell className="font-medium">{m.label}</TableCell>
                   <TableCell className="text-right tabular" data-testid={`text-month-income-${m.month}`}>{formatCOP(m.income)}</TableCell>
                   <TableCell className="text-right tabular">{formatCOP(m.expenses)}</TableCell>
+                  <TableCell className="text-right tabular text-sky-300">{formatCOP(m.inventoryPurchasesExcluded ?? 0)}</TableCell>
                   <TableCell className={`text-right tabular font-medium ${m.profit < 0 ? 'text-rose-400' : 'text-emerald-400'}`} data-testid={`text-month-profit-${m.month}`}>
                     {formatCOP(m.profit)}
                   </TableCell>
@@ -426,6 +527,7 @@ export default function Gastos() {
                 <TableCell className="font-semibold">Total</TableCell>
                 <TableCell className="text-right font-semibold tabular" data-testid="text-total-income">{formatCOP(totalIncome)}</TableCell>
                 <TableCell className="text-right font-semibold tabular" data-testid="text-total-expenses">{formatCOP(totalExpenses)}</TableCell>
+                <TableCell className="text-right font-semibold tabular text-sky-300" data-testid="text-total-inventory-capex">{formatCOP(totalInventoryCapex)}</TableCell>
                 <TableCell className="text-right font-semibold tabular text-emerald-400" data-testid="text-total-profit">{formatCOP(totalProfit)}</TableCell>
                 <TableCell colSpan={2} />
               </TableRow>
@@ -451,6 +553,95 @@ export default function Gastos() {
               <option value="oldest">Viejo → nuevo</option>
             </select>
           </div>
+          {editDraft && (
+            <form onSubmit={saveEdit} className="mb-5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4" data-testid="form-edit-expense">
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-emerald-200">Editando gasto existente</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">Se guarda sobre el mismo ID, sin duplicar. Si es manual, ajusta caja revirtiendo el valor anterior.</p>
+                </div>
+                <Button type="button" variant="ghost" size="sm" onClick={() => { setEditingId(null); setEditDraft(null); }} data-testid="button-cancel-edit-expense">
+                  <X className="h-4 w-4 mr-1" />
+                  Cancelar
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                <label className="space-y-1.5">
+                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Fecha</span>
+                  <Input type="date" value={editDraft.date} onChange={e => setEditDraft(prev => prev ? { ...prev, date: e.target.value } : prev)} data-testid="input-edit-expense-date" />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Categoría</span>
+                  <select value={editDraft.category} onChange={e => setEditDraft(prev => prev ? { ...prev, category: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-category">
+                    {CATEGORY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Pagado a</span>
+                  <select value={editDraft.paidTo} onChange={e => setEditDraft(prev => prev ? { ...prev, paidTo: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-paid-to">
+                    {sellerOptions.map(seller => <option key={seller} value={seller}>{seller}</option>)}
+                  </select>
+                </label>
+                {editDraft.paidTo === 'Otro' && (
+                  <label className="space-y-1.5">
+                    <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Nuevo seller</span>
+                    <Input value={editDraft.paidToOther} onChange={e => setEditDraft(prev => prev ? { ...prev, paidToOther: e.target.value } : prev)} data-testid="input-edit-expense-paid-to-other" />
+                  </label>
+                )}
+                <label className="space-y-1.5">
+                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Descripción</span>
+                  <Input value={editDraft.description} onChange={e => setEditDraft(prev => prev ? { ...prev, description: e.target.value } : prev)} data-testid="input-edit-expense-description" />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Pagado con</span>
+                  <select value={editDraft.paidWith} onChange={e => setEditDraft(prev => prev ? { ...prev, paidWith: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-paid-with">
+                    {PAID_WITH_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Moneda</span>
+                  <select value={editDraft.currency} onChange={e => setEditDraft(prev => prev ? { ...prev, currency: e.target.value as 'COP' | 'USD' } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-currency">
+                    <option value="COP">COP</option>
+                    <option value="USD">USD</option>
+                  </select>
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{editDraft.currency === 'USD' ? 'Monto COP calculado' : 'Monto COP'}</span>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    value={editDraft.currency === 'USD' && editDraft.originalAmount && editDraft.fxRate ? formatAmountInput(String(parseAmountInput(editDraft.originalAmount) * parseAmountInput(editDraft.fxRate))) : editDraft.amount}
+                    onChange={e => setEditDraft(prev => prev ? { ...prev, amount: formatAmountInput(e.target.value) } : prev)}
+                    className="text-right tabular pr-4"
+                    disabled={editDraft.currency === 'USD'}
+                    data-testid="input-edit-expense-amount"
+                  />
+                </label>
+                {editDraft.currency === 'USD' && (
+                  <>
+                    <label className="space-y-1.5">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Monto USD</span>
+                      <Input type="text" inputMode="numeric" value={editDraft.originalAmount} onChange={e => setEditDraft(prev => prev ? { ...prev, originalAmount: formatAmountInput(e.target.value) } : prev)} className="text-right tabular pr-4" data-testid="input-edit-expense-original-amount" />
+                    </label>
+                    <label className="space-y-1.5">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">TRM</span>
+                      <Input type="text" inputMode="numeric" value={editDraft.fxRate} onChange={e => setEditDraft(prev => prev ? { ...prev, fxRate: formatAmountInput(e.target.value) } : prev)} className="text-right tabular pr-4" data-testid="input-edit-expense-fx-rate" />
+                    </label>
+                  </>
+                )}
+                <label className="space-y-1.5 md:col-span-2">
+                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Notas</span>
+                  <Input value={editDraft.notes} onChange={e => setEditDraft(prev => prev ? { ...prev, notes: e.target.value } : prev)} data-testid="input-edit-expense-notes" />
+                </label>
+              </div>
+              <div className="mt-4 flex justify-end">
+                <Button type="submit" className="gap-2" disabled={updateExpense.isPending} data-testid="button-save-edit-expense">
+                  <Save className="h-4 w-4" />
+                  {updateExpense.isPending ? 'Guardando' : 'Guardar cambios'}
+                </Button>
+              </div>
+            </form>
+          )}
           <Table>
             <TableHeader>
               <TableRow>
@@ -461,6 +652,7 @@ export default function Gastos() {
                 <TableHead>Pagado con</TableHead>
                 <TableHead>Pagado por</TableHead>
                 <TableHead>Origen</TableHead>
+                <TableHead>Tipo P&L</TableHead>
                 <TableHead>Moneda</TableHead>
                 <TableHead className="text-right">Monto</TableHead>
                 <TableHead className="text-right">Acción</TableHead>
@@ -482,12 +674,36 @@ export default function Gastos() {
                       {e.source}
                     </Badge>
                   </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] uppercase tracking-wide ${
+                        e.classification === 'inventory' || e.classification === 'capex'
+                          ? 'border-sky-500/40 text-sky-300'
+                          : e.classification === 'uncategorized'
+                          ? 'border-amber-500/40 text-amber-300'
+                          : 'border-emerald-500/40 text-emerald-300'
+                      }`}
+                    >
+                      {e.classification ?? 'operating'}
+                    </Badge>
+                  </TableCell>
                   <TableCell className="text-xs tabular">
                     {e.currency ?? 'COP'}
                     {e.currency === 'USD' && e.fxRate ? <span className="text-muted-foreground"> · TRM {e.fxRate}</span> : null}
                   </TableCell>
                   <TableCell className="text-right tabular">{formatCOP(e.amount)}</TableCell>
                   <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => startEdit(e)}
+                        aria-label={`Editar ${e.description}`}
+                        data-testid={`button-edit-expense-${e.id}`}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
                     {e.source === 'manual' ? (
                       <Button
                         variant="ghost"
@@ -500,8 +716,9 @@ export default function Gastos() {
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
+                      null
                     )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
