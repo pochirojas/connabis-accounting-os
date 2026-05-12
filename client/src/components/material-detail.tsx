@@ -1,16 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
 import { formatCOP, formatDate, formatNumber } from '@/lib/format';
 import {
-  ArrowLeft, Bell, Boxes as BoxesIcon, ChevronRight, Edit2, Mail, Save, Trash2, TrendingUp, Truck,
+  ArrowLeft, Bell, Boxes as BoxesIcon, ChevronRight, Edit2, Mail, RotateCcw, Save, Trash2, TrendingUp, Truck,
 } from 'lucide-react';
 import type { MaterialDetail } from '@shared/schema';
 
@@ -31,15 +32,99 @@ function postJson(url: string, body: unknown, method: 'POST' | 'PATCH' | 'DELETE
   });
 }
 
+type MaterialEditState = {
+  name: string;
+  description: string;
+  measurement: string;
+  sku: string;
+  barcode: string;
+  category: string;
+  supplier: string;
+  cost: string;
+  currencyCode: string;
+  stock: string;
+  materialsUsedInAllOrders: string;
+  updateShopifyInventory: boolean;
+  limitShopifyInventory: boolean;
+};
+
+function toEditState(m: MaterialDetail['material'] | undefined | null): MaterialEditState {
+  return {
+    name: m?.name ?? '',
+    description: m?.description ?? '',
+    measurement: m?.measurement ?? '',
+    sku: m?.sku ?? '',
+    barcode: m?.barcode ?? '',
+    category: m?.category ?? '',
+    supplier: m?.supplier ?? '',
+    cost: m?.cost != null ? String(m.cost) : '',
+    currencyCode: m?.currencyCode ?? 'COP',
+    stock: m?.stock != null ? String(m.stock) : '0',
+    materialsUsedInAllOrders: m?.materialsUsedInAllOrders ?? '',
+    updateShopifyInventory: Boolean(m?.updateShopifyInventory),
+    limitShopifyInventory: Boolean(m?.limitShopifyInventory),
+  };
+}
+
 export function MaterialDetailView({ materialId, onBack, onOpenVariant }: Props) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const detail = useQuery<MaterialDetail>({ queryKey: [`/api/material-manager/materials/${materialId}`] });
   const [draftEdits, setDraftEdits] = useState<Record<number, { quantity?: number; note?: string }>>({});
+  const [edit, setEdit] = useState<MaterialEditState>(() => toEditState(detail.data?.material));
+  const [dirty, setDirty] = useState(false);
+
+  // Reset the local edit buffer whenever the loaded material changes (e.g.
+  // after navigating between materials or after a successful save refetch).
+  useEffect(() => {
+    if (detail.data?.material) {
+      setEdit(toEditState(detail.data.material));
+      setDirty(false);
+    }
+  }, [detail.data?.material]);
 
   const refetch = () => {
     queryClient.invalidateQueries({ queryKey: [`/api/material-manager/materials/${materialId}`] });
     queryClient.invalidateQueries({ queryKey: ['/api/material-manager/status'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/material-manager/materials'] });
+  };
+
+  const saveOverride = useMutation({
+    mutationFn: (payload: Partial<MaterialEditState>) =>
+      postJson(`/api/material-manager/materials/${materialId}/override`, {
+        name: payload.name,
+        description: payload.description,
+        measurement: payload.measurement,
+        sku: payload.sku,
+        barcode: payload.barcode,
+        category: payload.category,
+        supplier: payload.supplier,
+        cost: payload.cost === '' ? null : Number(payload.cost),
+        currencyCode: payload.currencyCode,
+        stock: payload.stock === '' ? null : Number(payload.stock),
+        materialsUsedInAllOrders: payload.materialsUsedInAllOrders,
+        updateShopifyInventory: payload.updateShopifyInventory,
+        limitShopifyInventory: payload.limitShopifyInventory,
+      }, 'PATCH'),
+    onSuccess: () => {
+      toast({ title: 'Material guardado (edición local)', description: 'No se envía a Shopify ni a Material Manager. El export de rollback sigue mostrando los valores originales.' });
+      refetch();
+    },
+    onError: (error) => toast({ title: 'No se pudo guardar', description: String(error), variant: 'destructive' }),
+  });
+
+  const clearOverride = useMutation({
+    mutationFn: () => postJson(`/api/material-manager/materials/${materialId}/override`, null, 'DELETE'),
+    onSuccess: () => {
+      toast({ title: 'Edición local descartada', description: 'El material vuelve a los valores originales de Material Manager.' });
+      refetch();
+    },
+    onError: (error) => toast({ title: 'No se pudo restablecer', description: String(error), variant: 'destructive' }),
+  });
+
+  const onFieldChange = <K extends keyof MaterialEditState>(key: K, value: MaterialEditState[K]) => {
+    setEdit(prev => ({ ...prev, [key]: value }));
+    setDirty(true);
   };
 
   const updateDraft = useMutation({
@@ -116,31 +201,167 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant }: Props)
         <div className="space-y-4">
           <Card className="p-5" data-testid="card-material-info">
             <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold tracking-tight">{m.name}</h2>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {m.category || 'Sin categoría'} · SKU <span className="font-mono">{m.sku || '—'}</span>
-                  {m.barcode ? <> · Barcode <span className="font-mono">{m.barcode}</span></> : null}
+              <div className="flex-1">
+                <Input
+                  value={edit.name}
+                  onChange={(e) => onFieldChange('name', e.target.value)}
+                  className="text-base font-semibold tracking-tight h-9"
+                  placeholder="Nombre del material"
+                  data-testid="input-material-name"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1.5 flex flex-wrap items-center gap-1.5">
+                  ID MM <span className="font-mono">{m.id}</span>
+                  {m.hasLocalEdit ? (
+                    <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-300" data-testid="badge-local-edit">
+                      Edición local · no sincronizada
+                    </Badge>
+                  ) : null}
                 </p>
               </div>
-              <Badge variant="outline" className="text-[11px] tabular">{m.currencyCode}</Badge>
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-4">
-              <Field label="Costo unitario" value={formatCOP(m.cost)} testId="field-mat-cost" />
-              <Field label="Medida" value={m.measurement || '—'} testId="field-mat-measurement" />
-              <Field label="Stock" value={formatNumber(m.stock)} testId="field-mat-stock" />
-              <Field label="Proveedor" value={m.supplier || '—'} testId="field-mat-supplier" />
-              <Field label="Used in all orders" value={m.materialsUsedInAllOrders || '—'} testId="field-mat-used-in-orders" />
-              <Field label="ID Material Manager" value={m.id} mono testId="field-mat-id" />
-            </div>
-
-            {m.description ? (
-              <div className="mt-4 rounded-md border border-border bg-muted/25 p-3 text-xs leading-relaxed" data-testid="field-mat-description">
-                <div className="text-[10.5px] uppercase tracking-wider text-muted-foreground mb-1">Descripción</div>
-                {m.description}
+              <div className="flex flex-col items-end gap-1.5">
+                <Badge variant="outline" className="text-[11px] tabular">{edit.currencyCode || m.currencyCode}</Badge>
+                {dirty ? <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-300">Sin guardar</Badge> : null}
               </div>
-            ) : null}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+              <EditField label="Costo unitario" testId="field-mat-cost">
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={edit.cost}
+                  onChange={(e) => onFieldChange('cost', e.target.value)}
+                  className="h-8"
+                  data-testid="input-material-cost"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">Original MM: {formatCOP(m.baseMaterial?.cost ?? m.cost)}</p>
+              </EditField>
+              <EditField label="Moneda" testId="field-mat-currency">
+                <Input
+                  value={edit.currencyCode}
+                  onChange={(e) => onFieldChange('currencyCode', e.target.value.toUpperCase().slice(0, 8))}
+                  className="h-8"
+                  data-testid="input-material-currency"
+                />
+              </EditField>
+              <EditField label="Medida / Unidad" testId="field-mat-measurement">
+                <Input
+                  value={edit.measurement}
+                  onChange={(e) => onFieldChange('measurement', e.target.value)}
+                  className="h-8"
+                  data-testid="input-material-measurement"
+                />
+              </EditField>
+              <EditField label="Stock" testId="field-mat-stock">
+                <Input
+                  type="number"
+                  value={edit.stock}
+                  onChange={(e) => onFieldChange('stock', e.target.value)}
+                  className="h-8"
+                  data-testid="input-material-stock"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">Original MM: {formatNumber(m.baseMaterial?.stock ?? m.stock)}</p>
+              </EditField>
+              <EditField label="SKU" testId="field-mat-sku">
+                <Input
+                  value={edit.sku}
+                  onChange={(e) => onFieldChange('sku', e.target.value)}
+                  className="h-8 font-mono text-[12.5px]"
+                  data-testid="input-material-sku"
+                />
+              </EditField>
+              <EditField label="Barcode" testId="field-mat-barcode">
+                <Input
+                  value={edit.barcode}
+                  onChange={(e) => onFieldChange('barcode', e.target.value)}
+                  className="h-8 font-mono text-[12.5px]"
+                  data-testid="input-material-barcode"
+                />
+              </EditField>
+              <EditField label="Categoría" testId="field-mat-category">
+                <Input
+                  value={edit.category}
+                  onChange={(e) => onFieldChange('category', e.target.value)}
+                  className="h-8"
+                  data-testid="input-material-category"
+                />
+              </EditField>
+              <EditField label="Proveedor" testId="field-mat-supplier">
+                <Input
+                  value={edit.supplier}
+                  onChange={(e) => onFieldChange('supplier', e.target.value)}
+                  className="h-8"
+                  data-testid="input-material-supplier"
+                />
+              </EditField>
+              <EditField label="Used in all orders (qty)" testId="field-mat-used-in-orders">
+                <Input
+                  value={edit.materialsUsedInAllOrders}
+                  onChange={(e) => onFieldChange('materialsUsedInAllOrders', e.target.value)}
+                  className="h-8"
+                  placeholder="ej. 1"
+                  data-testid="input-material-used-in-orders"
+                />
+              </EditField>
+              <EditField label="Sync flags Shopify" testId="field-mat-flags">
+                <div className="flex flex-col gap-1.5">
+                  <label className="flex items-center justify-between gap-2 text-[12px]">
+                    <span>Update Shopify inventory</span>
+                    <Switch
+                      checked={edit.updateShopifyInventory}
+                      onCheckedChange={(v) => onFieldChange('updateShopifyInventory', Boolean(v))}
+                      data-testid="switch-update-shopify"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between gap-2 text-[12px]">
+                    <span>Limit Shopify inventory</span>
+                    <Switch
+                      checked={edit.limitShopifyInventory}
+                      onCheckedChange={(v) => onFieldChange('limitShopifyInventory', Boolean(v))}
+                      data-testid="switch-limit-shopify"
+                    />
+                  </label>
+                </div>
+              </EditField>
+            </div>
+
+            <div className="mt-4 rounded-md border border-border bg-muted/25 p-3 text-xs leading-relaxed" data-testid="field-mat-description">
+              <div className="text-[10.5px] uppercase tracking-wider text-muted-foreground mb-1">Descripción</div>
+              <textarea
+                value={edit.description}
+                onChange={(e) => onFieldChange('description', e.target.value)}
+                className="w-full min-h-[60px] resize-y bg-transparent text-[12.5px] leading-relaxed focus:outline-none"
+                placeholder="Notas y descripción del material…"
+                data-testid="textarea-material-description"
+              />
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                onClick={() => saveOverride.mutate(edit)}
+                disabled={!dirty || saveOverride.isPending}
+                data-testid="button-save-material"
+              >
+                <Save className="h-3.5 w-3.5 mr-1.5" />
+                {saveOverride.isPending ? 'Guardando…' : 'Guardar edición local'}
+              </Button>
+              {m.hasLocalEdit ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => clearOverride.mutate()}
+                  disabled={clearOverride.isPending}
+                  data-testid="button-clear-material-override"
+                >
+                  <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                  Restablecer al MM original
+                </Button>
+              ) : null}
+              <p className="text-[10.5px] text-muted-foreground flex-1 min-w-[200px]">
+                Los cambios se guardan localmente como override. El export round-trip a Material Manager sigue usando los valores originales.
+              </p>
+            </div>
           </Card>
 
           <Card className="p-5" data-testid="card-products-using-material">
@@ -323,16 +544,42 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant }: Props)
           <Card className="p-4" data-testid="card-material-actions">
             <div className="flex items-center gap-2"><Edit2 className="h-4 w-4 text-accent" /><h3 className="text-sm font-semibold">Acciones</h3></div>
             <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
-              Editar material local + bottones Guardar/Eliminar llegarán cuando habilitemos escritura. Phase 2.1 es solo lectura.
+              Editar campos directamente arriba y pulsar <strong>Guardar edición local</strong>. Los cambios viven en una capa override; el round-trip MM exporta los valores originales.
             </p>
-            <div className="mt-3 flex gap-2">
-              <Button variant="outline" size="sm" disabled>Editar (próximo)</Button>
-              <Button variant="outline" size="sm" disabled>Eliminar (próximo)</Button>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                onClick={() => saveOverride.mutate(edit)}
+                disabled={!dirty || saveOverride.isPending}
+                data-testid="button-save-material-bottom"
+              >
+                <Save className="h-3.5 w-3.5 mr-1.5" /> Guardar edición local
+              </Button>
+              {m.hasLocalEdit ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => clearOverride.mutate()}
+                  disabled={clearOverride.isPending}
+                  data-testid="button-clear-material-override-bottom"
+                >
+                  <RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Restablecer MM
+                </Button>
+              ) : null}
               <Button variant="outline" size="sm" onClick={onBack}>Volver</Button>
             </div>
           </Card>
         </div>
       </div>
+    </div>
+  );
+}
+
+function EditField({ label, children, testId }: { label: string; children: ReactNode; testId?: string }) {
+  return (
+    <div className="rounded-md border border-border bg-muted/25 p-2.5" data-testid={testId}>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">{label}</div>
+      {children}
     </div>
   );
 }

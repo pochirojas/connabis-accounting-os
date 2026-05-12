@@ -12,8 +12,10 @@ import {
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { formatCOP, formatNumber } from '@/lib/format';
-import { Plus, Trash2 } from 'lucide-react';
-import type { MmBomRow, MmBomDraftRow, MmMaterialRow, ProductBomDetail } from '@shared/schema';
+import { Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
+import type { MmBomDraftRow, MmMaterialRow, ProductBomDetail } from '@shared/schema';
+
+type ImportedRow = ProductBomDetail['imported'][number];
 
 type Variant = { id: string; name?: string };
 
@@ -32,8 +34,11 @@ function postJson(url: string, body: unknown, method: 'POST' | 'PATCH' | 'DELETE
     body: method === 'DELETE' ? undefined : JSON.stringify(body),
   }).then(async response => {
     if (!response.ok) {
-      const errPayload = await response.json().catch(() => ({}));
-      throw new Error(errPayload.error || `${url} → ${response.status}`);
+      const text = await response.text().catch(() => '');
+      let parsed: any;
+      try { parsed = text ? JSON.parse(text) : {}; } catch { parsed = { raw: text }; }
+      const detail = parsed.error || parsed.raw || `${response.status} ${response.statusText}`;
+      throw new Error(`${method} ${url} → ${detail}`);
     }
     return response.json();
   });
@@ -94,6 +99,21 @@ export function ProductBomEditor({ open, onClose, productName, variants, initial
     onSuccess: () => { toast({ title: 'Draft eliminado' }); refetchDetail(); },
   });
 
+  // ---------- Imported-row overrides (modify / remove a MM BOM row locally) ----------
+  const upsertImportedOverride = useMutation({
+    mutationFn: ({ materialId, payload }: { materialId: string; payload: { quantity?: number | null; unit?: string | null; removed?: boolean; note?: string | null } }) =>
+      postJson(`/api/material-manager/variants/${variantId}/bom-overrides/${materialId}`, payload, 'PATCH'),
+    onSuccess: () => { toast({ title: 'Override guardado (local)', description: 'MM rollback sigue usando los valores originales.' }); refetchDetail(); },
+    onError: (error) => toast({ title: 'No se pudo guardar override', description: String(error), variant: 'destructive' }),
+  });
+
+  const clearImportedOverride = useMutation({
+    mutationFn: (materialId: string) =>
+      postJson(`/api/material-manager/variants/${variantId}/bom-overrides/${materialId}`, null, 'DELETE'),
+    onSuccess: () => { toast({ title: 'Override restablecido', description: 'La fila vuelve al valor MM original.' }); refetchDetail(); },
+    onError: (error) => toast({ title: 'No se pudo restablecer', description: String(error), variant: 'destructive' }),
+  });
+
   const filteredMaterials = useMemo(() => {
     const term = search.trim().toLowerCase();
     const list = materials.data ?? [];
@@ -115,7 +135,7 @@ export function ProductBomEditor({ open, onClose, productName, variants, initial
           <DialogTitle>Raw materials · {productName ?? 'Producto'}</DialogTitle>
           <DialogDescription className="text-[12px]">
             <span className="inline-block rounded bg-amber-500/15 text-amber-200 px-2 py-0.5 text-[10.5px] uppercase tracking-wider mr-1">Draft OS BOM</span>
-            <span>Editor local. Las filas <em>MM imported</em> son la fuente de verdad de Material Manager (solo lectura). Los <em>drafts locales</em> se guardan aparte y no se sincronizan con Shopify/MM hasta que decidamos promocionarlos.</span>
+            <span>BOM efectivo = MM imported + overrides locales + drafts añadidos − removidos. El round-trip a Material Manager sigue exportando los valores originales (rollback intacto).</span>
           </DialogDescription>
         </DialogHeader>
 
@@ -151,10 +171,20 @@ export function ProductBomEditor({ open, onClose, productName, variants, initial
 
           <Card className="p-3" data-testid="card-bom-imported">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold tracking-tight">BOM Material Manager (solo lectura)</h3>
+              <div>
+                <h3 className="text-sm font-semibold tracking-tight">BOM Material Manager (editable local)</h3>
+                <p className="text-[10.5px] text-muted-foreground">
+                  Imported = filas originales de MM. Modificar/eliminar localmente NO afecta el round-trip export.
+                </p>
+              </div>
               <Badge variant="outline" className="text-[10px]">{imported.length} filas</Badge>
             </div>
-            <BomRowsTable rows={imported} kind="mm" />
+            <ImportedBomTable
+              rows={imported}
+              onSaveOverride={(materialId, quantity, unit) => upsertImportedOverride.mutate({ materialId, payload: { quantity, unit: unit ?? null } })}
+              onRemove={(materialId) => upsertImportedOverride.mutate({ materialId, payload: { removed: true } })}
+              onRestore={(materialId) => clearImportedOverride.mutate(materialId)}
+            />
           </Card>
 
           <Card className="p-3 border-amber-500/30 bg-amber-500/8" data-testid="card-bom-drafts">
@@ -250,9 +280,20 @@ export function ProductBomEditor({ open, onClose, productName, variants, initial
   );
 }
 
-function BomRowsTable({ rows, kind }: { rows: MmBomRow[]; kind: 'mm' }) {
+function ImportedBomTable({
+  rows,
+  onSaveOverride,
+  onRemove,
+  onRestore,
+}: {
+  rows: ImportedRow[];
+  onSaveOverride: (materialId: string, quantity: number, unit?: string | null) => void;
+  onRemove: (materialId: string) => void;
+  onRestore: (materialId: string) => void;
+}) {
+  const [edits, setEdits] = useState<Record<string, string>>({});
   if (rows.length === 0) {
-    return <p className="text-[12px] text-muted-foreground">Esta variante no tiene materiales en {kind === 'mm' ? 'Material Manager' : 'drafts'}.</p>;
+    return <p className="text-[12px] text-muted-foreground">Esta variante no tiene materiales en Material Manager.</p>;
   }
   return (
     <Table>
@@ -260,15 +301,102 @@ function BomRowsTable({ rows, kind }: { rows: MmBomRow[]; kind: 'mm' }) {
         <TableRow>
           <TableHead>Material</TableHead>
           <TableHead className="text-right">Cantidad</TableHead>
+          <TableHead>Estado</TableHead>
+          <TableHead className="text-right">Acciones</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map(r => (
-          <TableRow key={`${r.materialId}-${r.variantId}`} data-testid={`row-mm-row-${r.materialId}`}>
-            <TableCell className="text-[12.5px]">{r.materialName}</TableCell>
-            <TableCell className="text-right tabular">{formatNumber(r.quantity)}</TableCell>
-          </TableRow>
-        ))}
+        {rows.map(r => {
+          const editing = edits[r.materialId] ?? '';
+          const currentQty = editing !== '' ? editing : String(r.quantity);
+          const editedDiffers = Number(currentQty) !== r.quantity;
+          return (
+            <TableRow
+              key={`${r.materialId}-${r.variantId}`}
+              data-testid={`row-mm-row-${r.materialId}`}
+              className={r.isRemovedLocal ? 'opacity-50 line-through' : ''}
+            >
+              <TableCell className="text-[12.5px]">
+                <div>{r.materialName}</div>
+                {r.isModifiedLocal && !r.isRemovedLocal ? (
+                  <div className="text-[10px] text-amber-300">Original MM: {formatNumber(r.originalQuantity)}</div>
+                ) : null}
+              </TableCell>
+              <TableCell className="text-right">
+                <Input
+                  type="number"
+                  className="h-8 w-[100px] text-right tabular ml-auto"
+                  value={currentQty}
+                  onChange={(e) => setEdits(prev => ({ ...prev, [r.materialId]: e.target.value }))}
+                  disabled={r.isRemovedLocal}
+                  data-testid={`input-mm-qty-${r.materialId}`}
+                />
+              </TableCell>
+              <TableCell>
+                {r.isRemovedLocal ? (
+                  <Badge variant="outline" className="text-[10px] border-rose-500/40 text-rose-300" data-testid={`badge-removed-${r.materialId}`}>Removed local</Badge>
+                ) : r.isModifiedLocal ? (
+                  <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-300" data-testid={`badge-modified-${r.materialId}`}>Modified local</Badge>
+                ) : (
+                  <Badge variant="outline" className="text-[10px]" data-testid={`badge-imported-${r.materialId}`}>Imported MM</Badge>
+                )}
+              </TableCell>
+              <TableCell className="text-right">
+                <div className="inline-flex gap-1">
+                  {r.isRemovedLocal ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onRestore(r.materialId)}
+                      data-testid={`button-restore-${r.materialId}`}
+                      title="Restaurar la fila MM original"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                    </Button>
+                  ) : (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          const next = Number(currentQty);
+                          if (!Number.isFinite(next) || next < 0) return;
+                          onSaveOverride(r.materialId, next, r.overrideUnit ?? null);
+                          setEdits(prev => { const { [r.materialId]: _drop, ...rest } = prev; return rest; });
+                        }}
+                        disabled={!editedDiffers}
+                        data-testid={`button-save-override-${r.materialId}`}
+                        title="Guardar override local de cantidad"
+                      >
+                        <Save className="h-3.5 w-3.5" />
+                      </Button>
+                      {r.isModifiedLocal ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onRestore(r.materialId)}
+                          data-testid={`button-restore-${r.materialId}`}
+                          title="Restablecer al valor MM original"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                        </Button>
+                      ) : null}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onRemove(r.materialId)}
+                        data-testid={`button-remove-override-${r.materialId}`}
+                        title="Ocultar esta fila localmente (rollback sigue intacto)"
+                      >
+                        <Trash2 className="h-3.5 w-3.5 text-rose-300" />
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </TableCell>
+            </TableRow>
+          );
+        })}
       </TableBody>
     </Table>
   );

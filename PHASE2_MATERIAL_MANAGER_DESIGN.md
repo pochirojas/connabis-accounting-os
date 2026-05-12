@@ -479,3 +479,46 @@ Nueva página `MM Mirror (Phase 2)` en el sidebar (`/material-manager`). Muestra
 ### Futuro Shopify-app
 
 La aplicación correrá como Shopify embedded app. Antes de habilitar cualquier escritura, el OS se conectará primero a una tienda de prueba. La arquitectura actual ya separa lectura/escritura: el código de Phase 2.1 nunca llama al Shopify Admin API y el setup OAuth existente queda intacto para la futura instalación.
+
+## Phase 2.1.1 — Capa de ediciones locales (override) sobre el mirror
+
+El espejo MM sigue siendo *bit-exact* para rollback. Para que el OS pueda editar materiales y BOM sin contaminar la fuente de verdad de Material Manager, se agregan dos tablas override que viven **al lado** del mirror, y un layer de drafts locales para BOM:
+
+| Tabla                                         | Propósito                                                                                       |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `material_manager_material_overrides`         | Override por `material_id` de cualquier campo del material (cost, stock, sku, flags, etc.).     |
+| `material_manager_bom_overrides`              | Override por `(variant_id, material_id)` de una fila BOM importada — cambia qty/unit o la marca como `removed=1`. |
+| `material_manager_bom_drafts`                 | Filas BOM nuevas añadidas localmente (no existían en MM).                                       |
+
+**Reglas obligatorias** para mantener rollback intacto:
+
+- El importador (`importMaterialManagerMirror`) y los exporters (`exportMmMaterialsCsv`, `exportMmBomCsv`) **leen únicamente** de las tablas mirror pristine (`material_manager_materials`, `material_manager_bom_components`).
+- Las APIs de lectura para UI (`/api/material-manager/materials`, `/materials/:id`, `/variants/:id/bom`) **sí** aplican el merge mirror + overrides y devuelven flags `hasLocalEdit`, `isModifiedLocal`, `isRemovedLocal`, `originalQuantity` para que la UI muestre badges claros.
+- `POST /api/material-manager/qa` debe pasar igual sea que existan overrides o no: corre contra el mirror pristine. Verificado: con un override activo (Alcohol cost=999, stock=12345) el export sigue mostrando 160.00 / 785 y el QA cuenta 125/125 materiales y 5876/5876 BOM rows con quantities y stock exactos.
+
+### Endpoints añadidos
+
+- `PATCH  /api/material-manager/materials/:id/override` — upsert del override (campos nullable: `null` deja caer al valor MM).
+- `DELETE /api/material-manager/materials/:id/override` — borra el override y vuelve al MM original.
+- `GET    /api/material-manager/bom-overrides` — lista (filtrable por `variantId` / `materialId`).
+- `PATCH  /api/material-manager/variants/:variantId/bom-overrides/:materialId` — override de cantidad/unidad **o** `removed:true` para ocultar una fila MM localmente.
+- `DELETE /api/material-manager/variants/:variantId/bom-overrides/:materialId` — restaurar la fila MM original.
+- `POST   /api/material-manager/bom-drafts` y `PATCH/DELETE /:id` — drafts para añadir filas que no existen en MM (preexistentes).
+
+### UI
+
+- **Material detail dashboard** (`MaterialDetailView`): inputs editables para nombre, descripción, costo, moneda, medida, stock, SKU, barcode, categoría, proveedor, `materials used in all orders`, switches `Update/Limit Shopify inventory`. Botón **Guardar edición local** (PATCH override) y **Restablecer MM original** (DELETE override). Badge `Edición local · no sincronizada` cuando hay override activo.
+- **Product BOM editor** (`ProductBomEditor`): la tabla de filas MM importadas ahora es **editable**. Cada fila muestra badge `Imported MM` / `Modified local` / `Removed local`. Acciones:
+  - Editar `quantity` y `Save` → crea/actualiza `material_manager_bom_overrides`.
+  - Botón papelera → `removed=true` (oculta localmente pero conserva la fila MM para rollback).
+  - Botón restaurar → DELETE override → vuelve al valor MM.
+  - Sigue existiendo la sección **Draft local** para añadir filas nuevas (sin equivalente MM).
+
+### Limitaciones actuales / próximo paso de promoción
+
+- Las ediciones locales **no** se envían a Material Manager ni a Shopify. La UI lo deja explícito en cada toast y en los badges.
+- Cuando queramos promover ediciones locales a MM (sustituir el rollback como fuente de verdad), el paso siguiente será:
+  1. Endpoint `POST /api/material-manager/promote-local` que produzca dos CSVs con headers MM exactos pero con valores efectivos (mirror + override + drafts − removed).
+  2. QA por separado: el CSV de promoción **no** debe coincidir con el rollback (es el cambio); el round-trip clásico contra los CSV originales debe seguir pasando.
+  3. Subir esos dos CSVs manualmente a MM, re-importar al OS, y limpiar las tres tablas override.
+- Mientras no exista ese flujo: el export por defecto sigue siendo *rollback*, no *promoción*.

@@ -521,7 +521,13 @@ export const updateBomDraftSchema = z.object({
 export type UpdateBomDraft = z.infer<typeof updateBomDraftSchema>;
 
 export type MaterialDetail = {
-  material: MmMaterialRow;
+  // Effective (override-merged) view of the material. `baseMaterial` keeps the
+  // pristine MM row alongside so the UI can render diff hints if needed.
+  material: MmMaterialRow & {
+    hasLocalEdit: boolean;
+    override: MmMaterialOverrideRow | null;
+    baseMaterial: MmMaterialRow;
+  };
   bom: MmBomRow[];                       // MM imported BOM rows for this material
   bomDrafts: MmBomDraftRow[];            // local draft additions for this material
   costHistory: MmCostHistoryRow[];
@@ -543,11 +549,94 @@ export type ProductBomDetail = {
   variantId: string;
   productName: string;
   variantName: string;
-  imported: MmBomRow[];
+  // imported rows already merged with local quantity/unit overrides AND with
+  // removed flags applied. `originalQuantity` is the pristine MM value (for
+  // bulletproof rollback). `isModifiedLocal` / `isRemovedLocal` drive the UI
+  // badges. The unaltered MM mirror table is still the source of truth for
+  // the round-trip export.
+  imported: Array<MmBomRow & {
+    isModifiedLocal: boolean;
+    isRemovedLocal: boolean;
+    originalQuantity: number;
+    originalUnit?: string | null;
+    overrideUnit?: string | null;
+  }>;
   drafts: MmBomDraftRow[];
   totalCost: {
     imported: number;
     draftDelta: number;          // sum of drafts only (not synced to MM/Shopify)
     combined: number;
   };
+};
+
+// Local override of MM-imported material fields. Never touched by the MM CSV
+// importer; never written into the pristine `material_manager_materials`
+// mirror table. Round-trip export always reads from the pristine table.
+export type MmMaterialOverrideRow = {
+  materialId: string;
+  name?: string | null;
+  description?: string | null;
+  measurement?: string | null;
+  sku?: string | null;
+  barcode?: string | null;
+  category?: string | null;
+  supplier?: string | null;
+  cost?: number | null;
+  currencyCode?: string | null;
+  updateShopifyInventory?: boolean | null;
+  limitShopifyInventory?: boolean | null;
+  materialsUsedInAllOrders?: string | null;
+  stock?: number | null;
+  note?: string | null;
+  updatedAt: string;
+};
+
+// Local override of an MM-imported BOM row. Keyed by (variant_id, material_id)
+// — the same primary key MM uses. Same pristine-table rule applies.
+export type MmBomOverrideRow = {
+  id: number;
+  variantId: string;
+  materialId: string;
+  quantity?: number | null;
+  unit?: string | null;
+  // When true, the (variant, material) imported BOM row is *locally* removed.
+  // The pristine MM row is preserved for rollback.
+  removed: boolean;
+  note?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export const updateMaterialOverrideSchema = z.object({
+  name: z.string().max(200).optional().nullable(),
+  description: z.string().max(2000).optional().nullable(),
+  measurement: z.string().max(40).optional().nullable(),
+  sku: z.string().max(120).optional().nullable(),
+  barcode: z.string().max(120).optional().nullable(),
+  category: z.string().max(120).optional().nullable(),
+  supplier: z.string().max(200).optional().nullable(),
+  cost: z.number().min(0).max(1_000_000_000).optional().nullable(),
+  currencyCode: z.string().max(8).optional().nullable(),
+  updateShopifyInventory: z.boolean().optional().nullable(),
+  limitShopifyInventory: z.boolean().optional().nullable(),
+  materialsUsedInAllOrders: z.string().max(200).optional().nullable(),
+  stock: z.number().min(0).max(1_000_000_000).optional().nullable(),
+  note: z.string().max(500).optional().nullable(),
+});
+export type UpdateMaterialOverride = z.infer<typeof updateMaterialOverrideSchema>;
+
+export const updateBomOverrideSchema = z.object({
+  quantity: z.number().min(0).max(10_000).optional().nullable(),
+  unit: z.string().max(40).optional().nullable(),
+  removed: z.boolean().optional(),
+  note: z.string().max(500).optional().nullable(),
+});
+export type UpdateBomOverride = z.infer<typeof updateBomOverrideSchema>;
+
+// Effective material row = pristine MM row merged with the local override (if
+// any). `hasLocalEdit` drives the "Edit local · not synced" badge in the UI.
+export type MmMaterialEffective = MmMaterialRow & {
+  hasLocalEdit: boolean;
+  override: MmMaterialOverrideRow | null;
+  baseMaterial: MmMaterialRow;   // pristine MM row (for rollback display)
 };

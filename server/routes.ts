@@ -9,20 +9,31 @@ import { sqlite, storage } from './storage';
 import {
   createBomDraft,
   deleteBomDraft,
+  deleteMaterialOverride,
+  deleteMmBomOverride,
   exportMmBomCsv,
   exportMmMaterialsCsv,
   getMaterialDetail,
   getMirrorStatus,
+  getMmMaterialEffective,
   getProductBomDetail,
   importMaterialManagerMirror,
   listMmBomComponents,
   listMmBomDrafts,
+  listMmBomOverrides,
   listMmCostHistory,
-  listMmMaterials,
+  listMmMaterialsEffective,
   runRoundTripQa,
   updateBomDraft,
+  upsertMaterialOverride,
+  upsertMmBomOverride,
 } from './material-manager-mirror';
-import { insertBomDraftSchema, updateBomDraftSchema } from '@shared/schema';
+import {
+  insertBomDraftSchema,
+  updateBomDraftSchema,
+  updateBomOverrideSchema,
+  updateMaterialOverrideSchema,
+} from '@shared/schema';
 import {
   channels, years, months, kpis, products,
   materials, purchaseOrders, alerts, integrationPhases,
@@ -1936,7 +1947,9 @@ export async function registerRoutes(
   });
 
   app.get('/api/material-manager/materials', (req, res) => {
-    const materials = listMmMaterials(sqlite);
+    // Effective view = MM mirror + local overrides. Pristine mirror is only
+    // read by the round-trip export/QA endpoints.
+    const materials = listMmMaterialsEffective(sqlite);
     const filter = String(req.query.category ?? '').toLowerCase();
     const filtered = filter ? materials.filter(m => m.category.toLowerCase().includes(filter)) : materials;
     res.json(filtered);
@@ -2026,6 +2039,51 @@ export async function registerRoutes(
 
   app.delete('/api/material-manager/bom-drafts/:id', (req, res) => {
     res.json({ deleted: deleteBomDraft(sqlite, Number(req.params.id)) });
+  });
+
+  // ---------- Material overrides (local-only edits) ----------
+  // The MM mirror table is never mutated. PATCH writes/updates an override row
+  // keyed by materialId; DELETE clears the override so the pristine MM value
+  // shows again.
+  app.patch('/api/material-manager/materials/:id/override', (req, res) => {
+    const parsed = updateMaterialOverrideSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_override', details: parsed.error.flatten() });
+    }
+    const override = upsertMaterialOverride(sqlite, req.params.id, parsed.data);
+    if (!override) return res.status(404).json({ error: 'material_not_found' });
+    const effective = getMmMaterialEffective(sqlite, req.params.id);
+    res.json({ override, effective });
+  });
+
+  app.delete('/api/material-manager/materials/:id/override', (req, res) => {
+    const deleted = deleteMaterialOverride(sqlite, req.params.id);
+    const effective = getMmMaterialEffective(sqlite, req.params.id);
+    res.json({ deleted, effective });
+  });
+
+  // ---------- BOM imported-row overrides ----------
+  // Upsert (PATCH): override quantity/unit, or set `removed=true` to hide a MM
+  // BOM row locally. Pristine MM rows are preserved for the round-trip export.
+  app.get('/api/material-manager/bom-overrides', (req, res) => {
+    res.json(listMmBomOverrides(sqlite, {
+      variantId: req.query.variantId ? String(req.query.variantId) : undefined,
+      materialId: req.query.materialId ? String(req.query.materialId) : undefined,
+    }));
+  });
+
+  app.patch('/api/material-manager/variants/:variantId/bom-overrides/:materialId', (req, res) => {
+    const parsed = updateBomOverrideSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_override', details: parsed.error.flatten() });
+    }
+    const updated = upsertMmBomOverride(sqlite, req.params.variantId, req.params.materialId, parsed.data);
+    if (!updated) return res.status(404).json({ error: 'mm_bom_row_not_found' });
+    res.json(updated);
+  });
+
+  app.delete('/api/material-manager/variants/:variantId/bom-overrides/:materialId', (req, res) => {
+    res.json({ deleted: deleteMmBomOverride(sqlite, req.params.variantId, req.params.materialId) });
   });
 
   return httpServer;

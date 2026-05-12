@@ -11,14 +11,19 @@ import {
   type InsertBomDraft,
   type MaterialDetail,
   type MmBomDraftRow,
+  type MmBomOverrideRow,
   type MmBomRow,
   type MmCostHistoryRow,
   type MmImportRun,
+  type MmMaterialEffective,
+  type MmMaterialOverrideRow,
   type MmMaterialRow,
   type MmMirrorStatus,
   type MmRoundTripQa,
   type ProductBomDetail,
   type UpdateBomDraft,
+  type UpdateBomOverride,
+  type UpdateMaterialOverride,
 } from '@shared/schema';
 
 const MM_MATERIALS_CSV = '/home/user/workspace/material-manager-export.csv';
@@ -121,6 +126,47 @@ export function ensureMaterialManagerMirrorSchema(sqlite: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_bom_drafts_variant ON material_manager_bom_drafts(variant_id);
     CREATE INDEX IF NOT EXISTS idx_bom_drafts_material ON material_manager_bom_drafts(material_id);
+
+    -- Local override of MM-imported material fields. The pristine MM mirror is
+    -- never mutated; round-trip export reads from the mirror table directly.
+    -- All fields are nullable: NULL means "fall back to MM mirror value".
+    CREATE TABLE IF NOT EXISTS material_manager_material_overrides (
+      material_id TEXT PRIMARY KEY,
+      name TEXT,
+      description TEXT,
+      measurement TEXT,
+      sku TEXT,
+      barcode TEXT,
+      category TEXT,
+      supplier TEXT,
+      cost REAL,
+      currency_code TEXT,
+      update_shopify_inventory INTEGER,
+      limit_shopify_inventory INTEGER,
+      materials_used_in_all_orders TEXT,
+      stock INTEGER,
+      note TEXT,
+      updated_at TEXT NOT NULL
+    );
+
+    -- Local override of an MM-imported BOM row. Keyed by (variant_id,
+    -- material_id) -- same primary key MM uses in its BOM CSV. The pristine
+    -- MM mirror table is never mutated. removed=1 means "hide this MM row in
+    -- the effective BOM, but keep it for rollback export".
+    CREATE TABLE IF NOT EXISTS material_manager_bom_overrides (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      variant_id TEXT NOT NULL,
+      material_id TEXT NOT NULL,
+      quantity REAL,
+      unit TEXT,
+      removed INTEGER NOT NULL DEFAULT 0,
+      note TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(variant_id, material_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_bom_overrides_variant ON material_manager_bom_overrides(variant_id);
+    CREATE INDEX IF NOT EXISTS idx_bom_overrides_material ON material_manager_bom_overrides(material_id);
   `);
 }
 
@@ -830,11 +876,13 @@ export function deleteBomDraft(sqlite: Database.Database, id: number): boolean {
 
 export function getMaterialDetail(sqlite: Database.Database, materialId: string): MaterialDetail | null {
   ensureMaterialManagerMirrorSchema(sqlite);
-  const material = getMmMaterial(sqlite, materialId);
-  if (!material) return null;
+  const base = getMmMaterial(sqlite, materialId);
+  if (!base) return null;
+  const override = getMaterialOverride(sqlite, materialId);
+  const effective = mergeMaterialWithOverride(base, override);
   const bom = listMmBomComponents(sqlite, { materialId });
   const bomDrafts = listMmBomDrafts(sqlite, { materialId });
-  const costHistory = listMmCostHistory(sqlite, { materialKey: material.name ? normalizeMaterialKey(material.name) : undefined, limit: 60 });
+  const costHistory = listMmCostHistory(sqlite, { materialKey: base.name ? normalizeMaterialKey(base.name) : undefined, limit: 60 });
   const productsUsing = [
     ...bom.map(b => ({
       variantId: b.variantId,
@@ -852,7 +900,12 @@ export function getMaterialDetail(sqlite: Database.Database, materialId: string)
     })),
   ];
   return {
-    material,
+    material: {
+      ...effective,
+      hasLocalEdit: override !== null,
+      override,
+      baseMaterial: base,
+    },
     bom,
     bomDrafts,
     costHistory,
@@ -867,15 +920,42 @@ export function getMaterialDetail(sqlite: Database.Database, materialId: string)
 
 export function getProductBomDetail(sqlite: Database.Database, variantId: string): ProductBomDetail {
   ensureMaterialManagerMirrorSchema(sqlite);
-  const imported = listMmBomComponents(sqlite, { variantId });
+  const importedRaw = listMmBomComponents(sqlite, { variantId });
   const drafts = listMmBomDrafts(sqlite, { variantId });
-  const productName = imported[0]?.productName ?? drafts[0]?.productName ?? '';
-  const variantName = imported[0]?.variantName ?? drafts[0]?.variantName ?? '';
-  // Build a unit-cost map from the materials table for cost rollup.
-  const costRows = sqlite.prepare('SELECT id, cost FROM material_manager_materials').all() as Array<{ id: string; cost: number }>;
-  const costById = new Map(costRows.map(r => [r.id, Number(r.cost) || 0]));
-  const importedCost = imported.reduce((sum, b) => sum + (costById.get(b.materialId) ?? 0) * b.quantity, 0);
+  const overrides = listMmBomOverrides(sqlite, { variantId });
+  const overrideByMaterial = new Map(overrides.map(o => [o.materialId, o] as const));
+
+  // Effective cost = use effective materials so override edits to cost reflect
+  // immediately in the BOM editor cost rollup. (Round-trip export still reads
+  // from the pristine `material_manager_materials` table directly.)
+  const effectiveMaterials = listMmMaterialsEffective(sqlite);
+  const costById = new Map(effectiveMaterials.map(m => [m.id, Number(m.cost) || 0]));
+
+  const imported = importedRaw.map(b => {
+    const override = overrideByMaterial.get(b.materialId);
+    const quantity = override?.quantity != null ? override.quantity : b.quantity;
+    const unit = override?.unit ?? null;
+    return {
+      ...b,
+      quantity,
+      isModifiedLocal: Boolean(override && !override.removed && (override.quantity != null || (override.unit ?? null) !== null)),
+      isRemovedLocal: Boolean(override?.removed),
+      originalQuantity: b.quantity,
+      originalUnit: null,
+      overrideUnit: unit,
+    };
+  });
+
+  const productName = importedRaw[0]?.productName ?? drafts[0]?.productName ?? '';
+  const variantName = importedRaw[0]?.variantName ?? drafts[0]?.variantName ?? '';
+
+  // Cost rollup honors removals (treat removed rows as 0) and overridden quantities.
+  const importedCost = imported.reduce((sum, b) => {
+    if (b.isRemovedLocal) return sum;
+    return sum + (costById.get(b.materialId) ?? 0) * b.quantity;
+  }, 0);
   const draftCost = drafts.reduce((sum, d) => sum + (costById.get(d.materialId) ?? 0) * d.quantity, 0);
+
   return {
     variantId,
     productName,
@@ -894,4 +974,247 @@ export function countBomDrafts(sqlite: Database.Database): number {
   ensureMaterialManagerMirrorSchema(sqlite);
   const row = sqlite.prepare('SELECT COUNT(*) AS c FROM material_manager_bom_drafts').get() as { c: number };
   return Number(row.c);
+}
+
+// ---------- Material overrides (local-only edits) ----------
+
+function mapMaterialOverrideRow(row: Record<string, unknown>): MmMaterialOverrideRow {
+  return {
+    materialId: String(row.material_id),
+    name: row.name === null || row.name === undefined ? null : String(row.name),
+    description: row.description === null || row.description === undefined ? null : String(row.description),
+    measurement: row.measurement === null || row.measurement === undefined ? null : String(row.measurement),
+    sku: row.sku === null || row.sku === undefined ? null : String(row.sku),
+    barcode: row.barcode === null || row.barcode === undefined ? null : String(row.barcode),
+    category: row.category === null || row.category === undefined ? null : String(row.category),
+    supplier: row.supplier === null || row.supplier === undefined ? null : String(row.supplier),
+    cost: row.cost === null || row.cost === undefined ? null : Number(row.cost),
+    currencyCode: row.currency_code === null || row.currency_code === undefined ? null : String(row.currency_code),
+    updateShopifyInventory: row.update_shopify_inventory === null || row.update_shopify_inventory === undefined
+      ? null
+      : Number(row.update_shopify_inventory) === 1,
+    limitShopifyInventory: row.limit_shopify_inventory === null || row.limit_shopify_inventory === undefined
+      ? null
+      : Number(row.limit_shopify_inventory) === 1,
+    materialsUsedInAllOrders: row.materials_used_in_all_orders === null || row.materials_used_in_all_orders === undefined
+      ? null : String(row.materials_used_in_all_orders),
+    stock: row.stock === null || row.stock === undefined ? null : Number(row.stock),
+    note: row.note === null || row.note === undefined ? null : String(row.note),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+export function getMaterialOverride(sqlite: Database.Database, materialId: string): MmMaterialOverrideRow | null {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const row = sqlite.prepare('SELECT * FROM material_manager_material_overrides WHERE material_id = ?').get(materialId) as Record<string, unknown> | undefined;
+  return row ? mapMaterialOverrideRow(row) : null;
+}
+
+export function listMaterialOverrides(sqlite: Database.Database): MmMaterialOverrideRow[] {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const rows = sqlite.prepare('SELECT * FROM material_manager_material_overrides').all() as Array<Record<string, unknown>>;
+  return rows.map(mapMaterialOverrideRow);
+}
+
+function mergeMaterialWithOverride(base: MmMaterialRow, override: MmMaterialOverrideRow | null): MmMaterialRow {
+  if (!override) return base;
+  return {
+    ...base,
+    name: override.name ?? base.name,
+    description: override.description ?? base.description,
+    measurement: override.measurement ?? base.measurement,
+    sku: override.sku ?? base.sku,
+    barcode: override.barcode ?? base.barcode,
+    category: override.category ?? base.category,
+    supplier: override.supplier ?? base.supplier,
+    cost: override.cost ?? base.cost,
+    currencyCode: override.currencyCode ?? base.currencyCode,
+    updateShopifyInventory: override.updateShopifyInventory ?? base.updateShopifyInventory,
+    limitShopifyInventory: override.limitShopifyInventory ?? base.limitShopifyInventory,
+    materialsUsedInAllOrders: override.materialsUsedInAllOrders ?? base.materialsUsedInAllOrders,
+    stock: override.stock ?? base.stock,
+  };
+}
+
+export function listMmMaterialsEffective(sqlite: Database.Database): MmMaterialEffective[] {
+  const base = listMmMaterials(sqlite);
+  const overridesById = new Map(listMaterialOverrides(sqlite).map(o => [o.materialId, o] as const));
+  return base.map(m => {
+    const override = overridesById.get(m.id) ?? null;
+    return {
+      ...mergeMaterialWithOverride(m, override),
+      hasLocalEdit: override !== null,
+      override,
+      baseMaterial: m,
+    };
+  });
+}
+
+export function getMmMaterialEffective(sqlite: Database.Database, materialId: string): MmMaterialEffective | null {
+  const base = getMmMaterial(sqlite, materialId);
+  if (!base) return null;
+  const override = getMaterialOverride(sqlite, materialId);
+  return {
+    ...mergeMaterialWithOverride(base, override),
+    hasLocalEdit: override !== null,
+    override,
+    baseMaterial: base,
+  };
+}
+
+export function upsertMaterialOverride(
+  sqlite: Database.Database,
+  materialId: string,
+  payload: UpdateMaterialOverride,
+): MmMaterialOverrideRow | null {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const base = getMmMaterial(sqlite, materialId);
+  if (!base) return null;
+  const existing = getMaterialOverride(sqlite, materialId);
+  const now = new Date().toISOString();
+  // Reduce a field: if `null` is explicitly passed, clear it back to MM; if
+  // omitted (undefined), keep the previous override value (or null).
+  const pick = <K extends keyof UpdateMaterialOverride>(key: K) =>
+    Object.prototype.hasOwnProperty.call(payload, key)
+      ? (payload[key] ?? null)
+      : (existing ? (existing as any)[key] ?? null : null);
+  const next = {
+    name: pick('name'),
+    description: pick('description'),
+    measurement: pick('measurement'),
+    sku: pick('sku'),
+    barcode: pick('barcode'),
+    category: pick('category'),
+    supplier: pick('supplier'),
+    cost: pick('cost'),
+    currency_code: pick('currencyCode'),
+    update_shopify_inventory: pick('updateShopifyInventory') === null ? null
+      : pick('updateShopifyInventory') ? 1 : 0,
+    limit_shopify_inventory: pick('limitShopifyInventory') === null ? null
+      : pick('limitShopifyInventory') ? 1 : 0,
+    materials_used_in_all_orders: pick('materialsUsedInAllOrders'),
+    stock: pick('stock'),
+    note: pick('note'),
+  };
+  sqlite.prepare(`
+    INSERT INTO material_manager_material_overrides (
+      material_id, name, description, measurement, sku, barcode, category, supplier,
+      cost, currency_code, update_shopify_inventory, limit_shopify_inventory,
+      materials_used_in_all_orders, stock, note, updated_at
+    ) VALUES (
+      @material_id, @name, @description, @measurement, @sku, @barcode, @category, @supplier,
+      @cost, @currency_code, @update_shopify_inventory, @limit_shopify_inventory,
+      @materials_used_in_all_orders, @stock, @note, @updated_at
+    )
+    ON CONFLICT(material_id) DO UPDATE SET
+      name = excluded.name,
+      description = excluded.description,
+      measurement = excluded.measurement,
+      sku = excluded.sku,
+      barcode = excluded.barcode,
+      category = excluded.category,
+      supplier = excluded.supplier,
+      cost = excluded.cost,
+      currency_code = excluded.currency_code,
+      update_shopify_inventory = excluded.update_shopify_inventory,
+      limit_shopify_inventory = excluded.limit_shopify_inventory,
+      materials_used_in_all_orders = excluded.materials_used_in_all_orders,
+      stock = excluded.stock,
+      note = excluded.note,
+      updated_at = excluded.updated_at
+  `).run({ material_id: materialId, ...next, updated_at: now });
+  return getMaterialOverride(sqlite, materialId);
+}
+
+export function deleteMaterialOverride(sqlite: Database.Database, materialId: string): boolean {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const info = sqlite.prepare('DELETE FROM material_manager_material_overrides WHERE material_id = ?').run(materialId);
+  return info.changes > 0;
+}
+
+// ---------- BOM imported-row overrides (quantity/unit/removed) ----------
+
+function mapBomOverrideRow(row: Record<string, unknown>): MmBomOverrideRow {
+  return {
+    id: Number(row.id),
+    variantId: String(row.variant_id),
+    materialId: String(row.material_id),
+    quantity: row.quantity === null || row.quantity === undefined ? null : Number(row.quantity),
+    unit: row.unit === null || row.unit === undefined ? null : String(row.unit),
+    removed: Number(row.removed) === 1,
+    note: row.note === null || row.note === undefined ? null : String(row.note),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+export function listMmBomOverrides(
+  sqlite: Database.Database,
+  filter?: { variantId?: string; materialId?: string },
+): MmBomOverrideRow[] {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (filter?.variantId) { where.push('variant_id = ?'); params.push(filter.variantId); }
+  if (filter?.materialId) { where.push('material_id = ?'); params.push(filter.materialId); }
+  const sql = `
+    SELECT * FROM material_manager_bom_overrides
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY updated_at DESC, id DESC
+  `;
+  return (sqlite.prepare(sql).all(...params) as Array<Record<string, unknown>>).map(mapBomOverrideRow);
+}
+
+export function upsertMmBomOverride(
+  sqlite: Database.Database,
+  variantId: string,
+  materialId: string,
+  payload: UpdateBomOverride,
+): MmBomOverrideRow | null {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  // Ensure (variant, material) exists in MM mirror — otherwise it's a "draft"
+  // addition, not an override of an imported row.
+  const existsMm = sqlite.prepare(`
+    SELECT 1 FROM material_manager_bom_components WHERE variant_id = ? AND material_id = ?
+  `).get(variantId, materialId);
+  if (!existsMm) return null;
+  const now = new Date().toISOString();
+  const existing = sqlite.prepare(`
+    SELECT * FROM material_manager_bom_overrides WHERE variant_id = ? AND material_id = ?
+  `).get(variantId, materialId) as Record<string, unknown> | undefined;
+  const quantity = Object.prototype.hasOwnProperty.call(payload, 'quantity')
+    ? payload.quantity ?? null
+    : (existing ? (existing.quantity as number | null) : null);
+  const unit = Object.prototype.hasOwnProperty.call(payload, 'unit')
+    ? payload.unit ?? null
+    : (existing ? (existing.unit as string | null) : null);
+  const removed = Object.prototype.hasOwnProperty.call(payload, 'removed')
+    ? (payload.removed ? 1 : 0)
+    : (existing ? Number(existing.removed) : 0);
+  const note = Object.prototype.hasOwnProperty.call(payload, 'note')
+    ? payload.note ?? null
+    : (existing ? (existing.note as string | null) : null);
+  sqlite.prepare(`
+    INSERT INTO material_manager_bom_overrides (
+      variant_id, material_id, quantity, unit, removed, note, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(variant_id, material_id) DO UPDATE SET
+      quantity = excluded.quantity,
+      unit = excluded.unit,
+      removed = excluded.removed,
+      note = excluded.note,
+      updated_at = excluded.updated_at
+  `).run(variantId, materialId, quantity, unit, removed, note, now, now);
+  const row = sqlite.prepare(`
+    SELECT * FROM material_manager_bom_overrides WHERE variant_id = ? AND material_id = ?
+  `).get(variantId, materialId) as Record<string, unknown>;
+  return mapBomOverrideRow(row);
+}
+
+export function deleteMmBomOverride(sqlite: Database.Database, variantId: string, materialId: string): boolean {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const info = sqlite.prepare(`
+    DELETE FROM material_manager_bom_overrides WHERE variant_id = ? AND material_id = ?
+  `).run(variantId, materialId);
+  return info.changes > 0;
 }
