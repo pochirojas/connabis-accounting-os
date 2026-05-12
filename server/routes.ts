@@ -4,6 +4,7 @@ import type { Server } from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { insertExpenseSchema, updateCashAccountSchema, updateCloseChecklistSchema } from '@shared/schema';
+import type { DailyPerformance } from '@shared/schema';
 import { storage } from './storage';
 import {
   channels, years, months, kpis, products,
@@ -380,6 +381,85 @@ function mapOrdersToIncomeDetails(orders: LiveIncomeOrder[]) {
       };
     }).slice(0, lineCount);
   });
+}
+
+function listDatesInMonth(month: string) {
+  const [year, monthNumber] = month.split('-').map(Number);
+  const days = new Date(year, monthNumber, 0).getDate();
+  return Array.from({ length: days }, (_, index) => `${month}-${String(index + 1).padStart(2, '0')}`);
+}
+
+async function buildDailyPerformanceRows(): Promise<DailyPerformance[]> {
+  const incomeRows = mapOrdersToIncomeDetails(await loadLiveShopifyIncomeOrders());
+  const expenseRows = [...loadHistoricalExpenses(), ...(await storage.listManualExpenses())] as Array<{
+    date: string;
+    month: string;
+    amount: number;
+  }>;
+
+  const monthsWithData = new Set<string>();
+  incomeRows.forEach(row => monthsWithData.add(row.month));
+  expenseRows.forEach(row => monthsWithData.add(row.month));
+
+  const byDate = new Map<string, {
+    orders: Set<string>;
+    revenue: number;
+    expenses: number;
+    products: Map<string, { revenue: number; units: number }>;
+  }>();
+
+  function ensureDate(date: string) {
+    const existing = byDate.get(date);
+    if (existing) return existing;
+    const created = {
+      orders: new Set<string>(),
+      revenue: 0,
+      expenses: 0,
+      products: new Map<string, { revenue: number; units: number }>(),
+    };
+    byDate.set(date, created);
+    return created;
+  }
+
+  for (const row of incomeRows) {
+    const day = ensureDate(row.date);
+    day.orders.add(row.orderName);
+    day.revenue += row.netRevenue;
+    const product = day.products.get(row.product) ?? { revenue: 0, units: 0 };
+    product.revenue += row.netRevenue;
+    product.units += row.qty;
+    day.products.set(row.product, product);
+  }
+
+  for (const row of expenseRows) {
+    const day = ensureDate(row.date);
+    day.expenses += Number(row.amount || 0);
+  }
+
+  return Array.from(monthsWithData)
+    .sort()
+    .flatMap(month => listDatesInMonth(month))
+    .map(date => {
+      const day = byDate.get(date);
+      const productEntries = day ? Array.from(day.products.entries()) : [];
+      const topProduct = productEntries.sort((a, b) => b[1].revenue - a[1].revenue)[0];
+      const revenue = day?.revenue ?? 0;
+      const expenses = day?.expenses ?? 0;
+      const orders = day?.orders.size ?? 0;
+      return {
+        date,
+        month: date.slice(0, 7),
+        orders,
+        revenue,
+        expenses,
+        profit: revenue - expenses,
+        aov: orders ? revenue / orders : 0,
+        topProduct: topProduct?.[0] ?? '—',
+        topProductRevenue: topProduct?.[1].revenue ?? 0,
+        topProductUnits: topProduct?.[1].units ?? 0,
+        note: orders === 0 && expenses === 0 ? 'Sin movimiento registrado' : undefined,
+      };
+    });
 }
 
 function summarizeYears(orders: LiveIncomeOrder[]) {
@@ -764,7 +844,13 @@ export async function registerRoutes(
     const deleted = await storage.deleteManualExpense(req.params.id);
     res.json({ deleted });
   });
-  app.get('/api/daily-performance', (_req, res) => res.json(dailyPerformance));
+  app.get('/api/daily-performance', async (_req, res) => {
+    try {
+      res.json(await buildDailyPerformanceRows());
+    } catch {
+      res.json(dailyPerformance);
+    }
+  });
   app.get('/api/alerts', (_req, res) => res.json(alerts));
   app.get('/api/integration-phases', (_req, res) => res.json(integrationPhases));
   app.get('/api/glossary', (_req, res) => res.json(glossaryTerms));
