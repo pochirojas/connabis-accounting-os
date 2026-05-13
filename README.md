@@ -65,6 +65,12 @@ npm start
 | `GET /api/material-manager/variants/:variantId/bom` | BOM de una variante (importado MM + drafts locales con desglose de costo) |
 | `GET/POST/PATCH/DELETE /api/material-manager/bom-drafts` | Draft BOM overlay local (no afecta el round-trip MM CSV). Etiquetado como _draft local_ en UI. |
 
+## Reglas de UI y datos recientes (2026-05-13)
+
+- **POs orden cronológico**: `/api/material-manager/purchase-orders` y la tabla "Órdenes de compra" listan de más reciente a más antigua. POs sin fecha (ej. PO10 cancelada) caen al final ordenadas por número desc; la cancelación no rompe el orden.
+- **Gastos · paidTo fallback**: si un gasto histórico no trae `paidTo`, el servidor lo expone igual a su `description` al cargar (en `loadAllExpenses`). La fila persistida queda intacta — es un **campo efectivo**, no una migración. Analítica (pivot, breakdowns, CSV) atribuye el gasto a algo en lugar de "Sin proveedor". Si se edita el `paidTo` real, ese valor gana (idempotente).
+- **Material section · todos los campos editables**: el detalle de material permite editar nombre/descripción/SKU/barcode/categoría (datalist con categorías existentes + categoría nueva)/medida/stock/costo/moneda/proveedor/flag Used-in-all-orders/switches Update y Limit Shopify, además de campos locales de notificación (email + umbral stock bajo). Persiste como override en `material_manager_material_overrides`; el round-trip MM CSV exporta los valores originales pristine. Botón "Restablecer al MM original" borra el override. Las notificaciones se serializan como JSON con prefijo `__matnote__:` dentro del `note` del override para no alterar el schema. Lo que sigue pendiente para paridad total con MM está en `ROADMAP.md` ("Qué falta para reemplazar bulletproof a Material Manager / Shopify embedded app").
+
 ## Documentación
 
 - `METRICS.md`: definiciones contables y fórmulas.

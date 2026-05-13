@@ -19,6 +19,9 @@ type Props = {
   materialId: string;
   onBack: () => void;
   onOpenVariant?: (variantId: string) => void;
+  // Existing category strings from the materials list. Used to populate the
+  // category combobox in the detail view so the user can pick or type a new one.
+  categoryOptions?: string[];
 };
 
 function postJson(url: string, body: unknown, method: 'POST' | 'PATCH' | 'DELETE' = 'POST') {
@@ -46,9 +49,45 @@ type MaterialEditState = {
   materialsUsedInAllOrders: string;
   updateShopifyInventory: boolean;
   limitShopifyInventory: boolean;
+  // Local-only notification fields encoded in the override `note` JSON blob.
+  // Never sent to Shopify / never part of the round-trip MM CSV.
+  notifyEmail: string;
+  lowStockThreshold: string;
 };
 
+// Notification fields live inside the override `note` column as JSON so we
+// don't have to alter the override schema. The note field is otherwise a free
+// text — wrapping the JSON with a sentinel keeps it backwards-compatible.
+const NOTE_JSON_PREFIX = '__matnote__:';
+
+function parseNoteJson(note: string | null | undefined): { notifyEmail: string; lowStockThreshold: string; raw: string } {
+  const fallback = { notifyEmail: '', lowStockThreshold: '', raw: '' };
+  if (!note) return fallback;
+  if (!note.startsWith(NOTE_JSON_PREFIX)) return { ...fallback, raw: note };
+  try {
+    const parsed = JSON.parse(note.slice(NOTE_JSON_PREFIX.length));
+    return {
+      notifyEmail: typeof parsed.notifyEmail === 'string' ? parsed.notifyEmail : '',
+      lowStockThreshold: parsed.lowStockThreshold != null ? String(parsed.lowStockThreshold) : '',
+      raw: typeof parsed.raw === 'string' ? parsed.raw : '',
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function serializeNoteJson(state: { notifyEmail: string; lowStockThreshold: string }, raw?: string): string | null {
+  const hasContent = state.notifyEmail.trim() || state.lowStockThreshold.trim() || (raw ?? '').trim();
+  if (!hasContent) return null;
+  return NOTE_JSON_PREFIX + JSON.stringify({
+    notifyEmail: state.notifyEmail.trim() || undefined,
+    lowStockThreshold: state.lowStockThreshold.trim() ? Number(state.lowStockThreshold) : undefined,
+    raw: (raw ?? '').trim() || undefined,
+  });
+}
+
 function toEditState(m: MaterialDetail['material'] | undefined | null): MaterialEditState {
+  const note = parseNoteJson(m?.override?.note ?? null);
   return {
     name: m?.name ?? '',
     description: m?.description ?? '',
@@ -63,10 +102,12 @@ function toEditState(m: MaterialDetail['material'] | undefined | null): Material
     materialsUsedInAllOrders: m?.materialsUsedInAllOrders ?? '',
     updateShopifyInventory: Boolean(m?.updateShopifyInventory),
     limitShopifyInventory: Boolean(m?.limitShopifyInventory),
+    notifyEmail: note.notifyEmail,
+    lowStockThreshold: note.lowStockThreshold,
   };
 }
 
-export function MaterialDetailView({ materialId, onBack, onOpenVariant }: Props) {
+export function MaterialDetailView({ materialId, onBack, onOpenVariant, categoryOptions }: Props) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const detail = useQuery<MaterialDetail>({ queryKey: [`/api/material-manager/materials/${materialId}`] });
@@ -90,7 +131,7 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant }: Props)
   };
 
   const saveOverride = useMutation({
-    mutationFn: (payload: Partial<MaterialEditState>) =>
+    mutationFn: (payload: MaterialEditState) =>
       postJson(`/api/material-manager/materials/${materialId}/override`, {
         name: payload.name,
         description: payload.description,
@@ -105,6 +146,10 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant }: Props)
         materialsUsedInAllOrders: payload.materialsUsedInAllOrders,
         updateShopifyInventory: payload.updateShopifyInventory,
         limitShopifyInventory: payload.limitShopifyInventory,
+        note: serializeNoteJson({
+          notifyEmail: payload.notifyEmail,
+          lowStockThreshold: payload.lowStockThreshold,
+        }),
       }, 'PATCH'),
     onSuccess: () => {
       toast({ title: 'Material guardado (edición local)', description: 'No se envía a Shopify ni a Material Manager. El export de rollback sigue mostrando los valores originales.' });
@@ -281,11 +326,19 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant }: Props)
               </EditField>
               <EditField label="Categoría" testId="field-mat-category">
                 <Input
+                  list={`mat-cat-options-${materialId}`}
                   value={edit.category}
                   onChange={(e) => onFieldChange('category', e.target.value)}
                   className="h-8"
+                  placeholder="Categoría o nueva categoría"
                   data-testid="input-material-category"
                 />
+                {categoryOptions && categoryOptions.length > 0 ? (
+                  <datalist id={`mat-cat-options-${materialId}`}>
+                    {categoryOptions.map(cat => <option key={cat} value={cat} />)}
+                  </datalist>
+                ) : null}
+                <p className="text-[10px] text-muted-foreground mt-1">Original MM: {m.baseMaterial?.category || '—'}</p>
               </EditField>
               <EditField label="Proveedor" testId="field-mat-supplier">
                 <Input
@@ -472,23 +525,85 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant }: Props)
         <div className="space-y-4">
           <Card className="p-4" data-testid="card-material-inventory">
             <div className="flex items-center gap-2"><BoxesIcon className="h-4 w-4 text-accent" /><h3 className="text-sm font-semibold">Inventario</h3></div>
-            <dl className="mt-3 text-[12.5px] space-y-1.5">
-              <div className="flex justify-between"><dt className="text-muted-foreground">Stock disponible</dt><dd className="tabular font-semibold">{formatQty(m.stock)} {m.measurement}</dd></div>
-              <div className="flex justify-between"><dt className="text-muted-foreground">Update Shopify inventory</dt><dd>{m.updateShopifyInventory ? 'Sí' : 'No'}</dd></div>
-              <div className="flex justify-between"><dt className="text-muted-foreground">Limit Shopify inventory</dt><dd>{m.limitShopifyInventory ? 'Sí' : 'No'}</dd></div>
-            </dl>
+            <div className="mt-3 space-y-2 text-[12.5px]">
+              <label className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Stock disponible</span>
+                <span className="flex items-center gap-1.5">
+                  <Input
+                    type="number"
+                    step="any"
+                    value={edit.stock}
+                    onChange={(e) => onFieldChange('stock', e.target.value)}
+                    className="h-7 w-[110px] text-right tabular"
+                    data-testid="input-material-stock-side"
+                  />
+                  <span className="text-[11px] text-muted-foreground">{edit.measurement || m.measurement}</span>
+                </span>
+              </label>
+              <label className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Update Shopify inventory</span>
+                <Switch
+                  checked={edit.updateShopifyInventory}
+                  onCheckedChange={(v) => onFieldChange('updateShopifyInventory', Boolean(v))}
+                  data-testid="switch-update-shopify-side"
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Limit Shopify inventory</span>
+                <Switch
+                  checked={edit.limitShopifyInventory}
+                  onCheckedChange={(v) => onFieldChange('limitShopifyInventory', Boolean(v))}
+                  data-testid="switch-limit-shopify-side"
+                />
+              </label>
+            </div>
             <p className="text-[10.5px] text-muted-foreground mt-3 leading-relaxed">
-              Lectura desde el mirror MM. Las escrituras a Shopify quedan bloqueadas en Phase 2.1.
+              Edición local · override sobre el mirror MM. Las escrituras a Shopify quedan bloqueadas en Phase 2.1.
+              {/* TODO Phase 2.5: full inventory adjustment history (movements log).
+                  Por ahora el historial de costos en "Procurement" hace de placeholder. */}
             </p>
           </Card>
 
           <Card className="p-4" data-testid="card-material-procurement">
             <div className="flex items-center gap-2"><Truck className="h-4 w-4 text-accent" /><h3 className="text-sm font-semibold">Procurement</h3></div>
-            <dl className="mt-3 text-[12.5px] space-y-1.5">
-              <div className="flex justify-between"><dt className="text-muted-foreground">Proveedor</dt><dd>{m.supplier || '—'}</dd></div>
-              <div className="flex justify-between"><dt className="text-muted-foreground">Último costo</dt><dd className="tabular">{latestCost ? formatCOP(latestCost.unitCostCop) : formatCOP(m.cost)}</dd></div>
-              <div className="flex justify-between"><dt className="text-muted-foreground">Última compra</dt><dd>{latestCost ? formatDate(latestCost.date) : '—'}</dd></div>
-            </dl>
+            <div className="mt-3 space-y-2 text-[12.5px]">
+              <label className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Proveedor</span>
+                <Input
+                  value={edit.supplier}
+                  onChange={(e) => onFieldChange('supplier', e.target.value)}
+                  className="h-7 w-[55%]"
+                  data-testid="input-material-supplier-side"
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Costo unitario</span>
+                <span className="flex items-center gap-1.5">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={edit.cost}
+                    onChange={(e) => onFieldChange('cost', e.target.value)}
+                    className="h-7 w-[110px] text-right tabular"
+                    data-testid="input-material-cost-side"
+                  />
+                  <Input
+                    value={edit.currencyCode}
+                    onChange={(e) => onFieldChange('currencyCode', e.target.value.toUpperCase().slice(0, 8))}
+                    className="h-7 w-[60px] uppercase"
+                    data-testid="input-material-currency-side"
+                  />
+                </span>
+              </label>
+              <div className="flex justify-between text-[12px]">
+                <span className="text-muted-foreground">Último costo (compra)</span>
+                <span className="tabular">{latestCost ? formatCOP(latestCost.unitCostCop) : formatCOP(m.cost)}</span>
+              </div>
+              <div className="flex justify-between text-[12px]">
+                <span className="text-muted-foreground">Última compra</span>
+                <span>{latestCost ? formatDate(latestCost.date) : '—'}</span>
+              </div>
+            </div>
             {detail.data.costHistory.length ? (
               <div className="mt-3 pt-2 border-t border-card-border">
                 <div className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Historial reciente</div>
@@ -526,19 +641,43 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant }: Props)
 
           <Card className="p-4" data-testid="card-material-notifications">
             <div className="flex items-center gap-2"><Bell className="h-4 w-4 text-accent" /><h3 className="text-sm font-semibold">Notificaciones</h3></div>
+            <div className="mt-3 space-y-2 text-[12px]">
+              <label className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground inline-flex items-center gap-1"><Mail className="h-3 w-3" /> Email</span>
+                <Input
+                  type="email"
+                  value={edit.notifyEmail}
+                  onChange={(e) => onFieldChange('notifyEmail', e.target.value)}
+                  className="h-7 w-[60%]"
+                  placeholder="alertas@…"
+                  data-testid="input-material-notify-email"
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Umbral stock bajo</span>
+                <Input
+                  type="number"
+                  step="any"
+                  value={edit.lowStockThreshold}
+                  onChange={(e) => onFieldChange('lowStockThreshold', e.target.value)}
+                  className="h-7 w-[110px] text-right tabular"
+                  placeholder="50"
+                  data-testid="input-material-low-stock-threshold"
+                />
+              </label>
+            </div>
             <ul className="mt-3 space-y-2 text-[12px]">
-              {m.stock <= 0 ? (
-                <li className="rounded-md border border-rose-500/30 bg-rose-500/8 p-2 text-rose-200">Sin stock disponible.</li>
-              ) : m.stock < 50 ? (
-                <li className="rounded-md border border-amber-500/30 bg-amber-500/8 p-2 text-amber-200">Stock bajo ({formatQty(m.stock)} {m.measurement}).</li>
-              ) : (
-                <li className="rounded-md border border-emerald-500/30 bg-emerald-500/8 p-2 text-emerald-200">Stock OK.</li>
-              )}
+              {(() => {
+                const threshold = Number(edit.lowStockThreshold) || 50;
+                if (m.stock <= 0) return <li className="rounded-md border border-rose-500/30 bg-rose-500/8 p-2 text-rose-200">Sin stock disponible.</li>;
+                if (m.stock < threshold) return <li className="rounded-md border border-amber-500/30 bg-amber-500/8 p-2 text-amber-200">Stock bajo ({formatQty(m.stock)} {m.measurement}) · umbral {threshold}.</li>;
+                return <li className="rounded-md border border-emerald-500/30 bg-emerald-500/8 p-2 text-emerald-200">Stock OK (umbral {threshold}).</li>;
+              })()}
               {productsUsing.length === 0 ? (
                 <li className="rounded-md border border-border bg-muted/25 p-2 text-muted-foreground">Nadie consume este material todavía — candidato a depurar.</li>
               ) : null}
-              <li className="rounded-md border border-border bg-muted/25 p-2 text-muted-foreground inline-flex items-start gap-1.5">
-                <Mail className="h-3 w-3 mt-0.5" /> Email/Slack alerts pendientes (Phase 2.2).
+              <li className="rounded-md border border-border bg-muted/25 p-2 text-muted-foreground text-[10.5px]">
+                Email/Slack alerts efectivos pendientes (Phase 2.5). Por ahora se guardan localmente en el override.
               </li>
             </ul>
           </Card>

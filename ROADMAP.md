@@ -57,17 +57,40 @@ Convertir Connabis Accounting OS en el sistema que maneja materiales, BOM, inven
   - Expandir una variante muestra sus líneas BOM con costo estimado por componente y el botón "Editar drafts" (sin cambios en la lógica draft).
   - Compatible con Productos & Márgenes; el editor de BOM por variante se mantiene tal cual.
 
+### Phase 2.5 — pulido datos y UX MM (implementado parcial 2026-05-13)
+
+- **Órdenes de compra · orden cronológico**: API y UI listan POs desc por fecha (más reciente primero). Si una PO no tiene fecha (ej. PO10 cancelada), cae al final ordenando desc por número de PO. La cancelación no rompe el orden.
+- **Gastos · paidTo fallback**: cuando `paidTo` está vacío o nulo, el servidor (en `loadAllExpenses`) lo sustituye por `description` para que la analítica histórica (pivot Mes×Categoría×Proveedor, breakdown por proveedor, export CSV) atribuya el gasto a algo en lugar de "Sin proveedor". Es un fallback de **campo efectivo** aplicado al cargar — la fila persistida en SQLite/JSON queda intacta. Si más adelante el usuario edita el `paidTo` real, ese valor gana sobre el fallback (idempotente). Documentado aquí porque no se migra DB.
+- **Material section editable**: el detalle de material ahora permite editar todos los campos visibles (nombre, descripción, SKU, barcode, categoría con datalist de categorías existentes + nueva, medida/unidad, stock, costo, moneda, proveedor, flag/qty "Used in all orders", switches Update/Limit Shopify inventory) además de campos locales de notificación (email + umbral stock bajo). Todo vive en `material_manager_material_overrides`; el export round-trip a MM sigue usando la tabla pristine intocada. Borrar el override revierte al MM original.
+- Las notificaciones locales (email + umbral) se persisten en el campo `note` del override como JSON con prefijo `__matnote__:` para no alterar el schema. Cuando se implemente envío real de email/Slack, el formato es estable.
+
 ### Phase 2.5+ — pendientes
 
 Módulos:
 
 - Promover drafts a MM (escritura segura, requiere stage tienda separada).
-- Materiales: edición/borrado/creación local con sync opt-in a MM.
+- Materiales: borrado/creación local con sync opt-in a MM (hoy solo edición local).
 - BOM editor con merge MM↔drafts en una sola vista (hoy se muestran lado a lado).
-- Inventario de materiales con receiving real (PO → stock).
+- Inventario de materiales con receiving real (PO → stock movements log).
+- Adjustment history completo (hoy es placeholder: el historial de costos en card Procurement hace de proxy).
+- Email/Slack real de alertas (hoy solo se guarda destinatario+umbral locales).
 - Landed cost, batch costing.
 - Calculadora de blends/carts.
 - Calendario de restock + alertas de stock + compras sugeridas.
+
+## Qué falta para reemplazar bulletproof a Material Manager / Shopify embedded app
+
+Resumen ejecutivo de gaps abiertos (mantener este checklist actualizado al cerrar cada uno):
+
+- [ ] **Visual MM parity**: revisar lado a lado con MM y cerrar diferencias de tipografía/spacing/cards en `/inventario` y detalle de material.
+- [ ] **Promote drafts to official**: pipeline para empujar drafts a MM (o reemplazo) con validación previa y log de quién promovió qué.
+- [ ] **Test-store embedded Shopify app**: registrar la app en una tienda Shopify de pruebas, pasar el handshake OAuth, smoke de embedded iframe antes de habilitar cualquier escritura.
+- [ ] **Inventory sync preview/write**: dry-run de diferencias mirror↔Shopify y un toggle explícito para escribir; bloqueado hoy.
+- [ ] **Adjustment history**: tabla de movimientos de inventario (ajuste manual, recibo PO, consumo BOM, devolución) con quién/cuándo/por qué.
+- [ ] **Notifications**: enviar el email/Slack real cuando un material cae bajo el umbral del override; hoy solo se guarda destinatario.
+- [ ] **PO receiving / stock movements**: marcar una PO como recibida total/parcial y aplicar el stock a la(s) bodega(s), con reversión.
+- [ ] **User auth / permissions**: hoy la app corre con sesión local básica; falta multi-usuario con roles (admin/staff/read-only).
+- [ ] **Backups / restore**: snapshots periódicos del SQLite + script de restore (y export cifrado off-site).
 
 Entrada necesaria:
 

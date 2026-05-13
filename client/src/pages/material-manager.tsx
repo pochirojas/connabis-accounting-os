@@ -239,6 +239,7 @@ export default function MaterialManagerPage() {
           materialId={selectedMaterialId}
           onBack={() => setSelectedMaterialId(null)}
           onOpenVariant={(variantId) => { setBomEditorVariantId(variantId); }}
+          categoryOptions={Array.from(new Set((materials.data ?? []).map(m => m.category).filter(Boolean))).sort()}
         />
         <ProductBomEditor
           open={Boolean(bomEditorVariantId)}

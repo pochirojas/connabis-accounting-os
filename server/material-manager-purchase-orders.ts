@@ -481,9 +481,24 @@ function mapPoLineRow(row: Record<string, unknown>): MmPurchaseOrderLine {
   };
 }
 
-function poSortKey(po: { poNumber: string }) {
+function poNumberSortKey(po: { poNumber: string }) {
   const m = po.poNumber.match(/^PO(\d+)/i);
   return m ? Number(m[1]) : 0;
+}
+
+// Descending: newest date first; if date missing, fall back to highest PO number.
+// Cancelled POs (e.g. PO10) keep their date if present and otherwise sort by PO number,
+// never throwing the order off.
+function poSortDescCompare(a: MmPurchaseOrder, b: MmPurchaseOrder): number {
+  const aHasDate = Boolean(a.date);
+  const bHasDate = Boolean(b.date);
+  if (aHasDate && bHasDate) {
+    if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+    return poNumberSortKey(b) - poNumberSortKey(a);
+  }
+  if (aHasDate) return -1;
+  if (bHasDate) return 1;
+  return poNumberSortKey(b) - poNumberSortKey(a);
 }
 
 export function listMmPurchaseOrders(sqlite: Database.Database): MmPurchaseOrder[] {
@@ -501,7 +516,7 @@ export function listMmPurchaseOrders(sqlite: Database.Database): MmPurchaseOrder
   const countById = new Map(counts.map(r => [Number(r.poId), Number(r.c)]));
   return rows
     .map(r => mapPoRow(r, countById.get(Number(r.id)) ?? 0))
-    .sort((a, b) => poSortKey(a) - poSortKey(b));
+    .sort(poSortDescCompare);
 }
 
 export function getMmPurchaseOrder(sqlite: Database.Database, idOrNumber: string | number): MmPurchaseOrder | null {

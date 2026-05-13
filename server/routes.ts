@@ -101,13 +101,27 @@ function loadHistoricalExpenses() {
   return payload.expenses ?? [];
 }
 
+// Effective-field fallback: when paidTo is blank/null, surface description as paidTo
+// so historic provider analytics (pivot, breakdowns, CSV) attribute the expense to
+// something instead of an "(sin proveedor)" bucket. Idempotent — never overwrites a
+// real paidTo. The DB row itself is not mutated; the override is applied at load time.
+function applyPaidToFallback<T extends { paidTo?: string | null; description?: string | null }>(expense: T): T {
+  const raw = typeof expense.paidTo === 'string' ? expense.paidTo.trim() : '';
+  if (raw) return expense;
+  const desc = typeof expense.description === 'string' ? expense.description.trim() : '';
+  if (!desc) return expense;
+  return { ...expense, paidTo: desc };
+}
+
 async function loadAllExpenses() {
   const manualExpenses = await storage.listManualExpenses();
   const overrides = await storage.listExpenseOverrides();
-  return [...loadHistoricalExpenses(), ...manualExpenses].map(expense => ({
-    ...expense,
-    ...(overrides[String(expense.id)] ?? {}),
-  }));
+  return [...loadHistoricalExpenses(), ...manualExpenses]
+    .map(expense => ({
+      ...expense,
+      ...(overrides[String(expense.id)] ?? {}),
+    }))
+    .map(applyPaidToFallback);
 }
 
 function parseCsvLine(line: string) {
