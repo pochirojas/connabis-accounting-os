@@ -1,8 +1,28 @@
 # Phase 2 — Reemplazo controlado de Material Manager
 
-Phase 2 no sincroniza ni escribe inventario en Shopify al inicio. El objetivo es replicar Material Manager dentro de Connabis Accounting OS, validar que los números coinciden, y solo después activar sincronización en modo preview.
+Phase 2 reemplaza **Material Manager dentro del OS**, no Dataico. Dataico es Phase 3 separada. Phase 2 no sincroniza ni escribe inventario en Shopify al inicio: el objetivo es replicar Material Manager dentro de Connabis Accounting OS, validar que los números coinciden, y solo después activar sincronización en modo preview.
 
 Principio operativo: el cambio debe ser reversible. El OS debe poder importar y exportar exactamente los mismos formatos CSV que Material Manager para que, si algo falla, se pueda volver a Material Manager sin downtime ni pérdida de inventario.
+
+## Estado actual (2026-05-13)
+
+Lo que ya está en código y vivo:
+
+- Phase 2.1 — mirror read-only completo (materiales, BOM, historial de costos, QA round-trip, export bit-exact).
+- Phase 2.1.1 — capa de overrides locales para materiales y filas BOM + drafts BOM, todo aislado del rollback CSV.
+- Phase 2.2 — POs reales importadas desde CSV MM, quantities float-strict, PO10 cancelada manejada.
+- Phase 2.3 — Calculadora de Carts con MM live + seed fallback etiquetado.
+- Phase 2.4 — Análisis de gastos, packaging Jeringa 1mL, BOM agrupado por producto base.
+- Phase 2.5 — POs orden cronológico, gastos paidTo fallback, detalle de material totalmente editable como override.
+
+Lo que falta para cerrar Phase 2 (mantener sincronizado con `ROADMAP.md`):
+
+- **Paridad UI total con Material Manager**: interacciones, atajos, edición inline, micro-UX. Hoy hay paridad funcional parcial.
+- **Crear materiales nuevos dentro del OS**: hoy solo se edita lo que viene del mirror MM. El flujo "+ Nuevo material" con ID local estable y sync opt-in a MM no existe.
+- **Detalle de material completo**: campos secundarios MM (multi-ubicación, lead time por proveedor, alias, equivalencias de unidad, adjuntos) aún no cubiertos.
+- **BOM editor robusto (draft/edit)**: vista combinada MM ∪ overrides ∪ drafts, validaciones cruzadas, búsqueda dentro del modal, batch edit multi-variante, undo por fila, promoción controlada.
+- **UI QA**: pasada lado a lado con MM de Inventario, detalle de material y editor BOM.
+- **Terpene Rotation Manager** (ver sección dedicada más abajo): bloqueante para considerar el switch desde MM como seamless.
 
 ## Draft BOM overlay (Phase 2.1+)
 
@@ -588,3 +608,98 @@ Toda cantidad de material es float en CSV parser → DB → API → UI. Cambios 
 - `material_manager_purchase_order_lines.quantity` es `REAL`.
 - En cliente, se introduce `formatQty()` (Intl con `maximumFractionDigits: 6, minimumFractionDigits: 0`, trim de ceros). `formatNumber()` queda para conteos enteros (órdenes, líneas, materiales). Inputs `<input type="number">` para cantidades llevan `step="any"`.
 - El bug visible en el screenshot (productos usando un material mostraban `0` para cantidades decimales) queda resuelto: los valores `0.88`, `0.12`, `0.5`, etc., ahora se renderizan literales.
+
+## Phase 2.6 — Terpene Rotation Manager (parte requerida de Phase 2)
+
+Phase 2 no cierra sin un módulo de **Terpene Rotation Manager** que herede el modelo SEO/terpenos previo y consolide en el OS lo que hoy vive disperso entre Shopify metaobjects, Material Manager y planillas externas. Hasta que este módulo exista, el equipo seguirá tocando MM/Shopify a mano para rotar terpenos — eso no es un reemplazo seamless.
+
+### Modelo conceptual
+
+- **10 terpenos activos** a la vez. La rotación define qué terpenos están vivos en producción/catálogo en un periodo. El resto queda en banca o retirados.
+- **Canonical ID por terpeno**: ID interno estable que **nunca cambia**, incluso si el terpeno se renombra, cambia proveedor o sale/entra de rotación. Esto evita el problema actual de "el mismo terpeno con dos nombres distintos en MM y Shopify".
+- **Rotation status como metaobject equivalente**: cada terpeno tiene `status ∈ { active, rotating_in, rotating_out, retired }` + historial de cambios de estado con fecha entrada/salida y motivo. Esto reemplaza el metaobject de Shopify para uso interno; la exposición a Shopify storefront se hace por sync opt-in posterior.
+- **Product family + container variants**: cada terpeno tiene una familia de producto con variantes de contenedor estandarizadas — `1ml`, `2.25ml`, `4ml`, `Jeringa`. Todas comparten la receta/blend del terpeno canónico pero difieren en packaging, precio y costo. La Calculadora de Carts ya distingue estos contenedores (`jeringa-1ml` ya existe).
+- **Inventory / material mappings**: un terpeno canónico se mapea a uno o más `material_id` (mirror MM o creados en OS), porque el mismo terpeno puede tener proveedores/lotes distintos. La rotación cambia qué material es el "primario" sin perder el ID canónico del terpeno.
+
+### Tablas propuestas
+
+#### `terpenes`
+
+Catálogo canónico.
+
+- `canonical_id` (PK estable, string corto, ej. `TRPN-OG-KUSH`).
+- `canonical_name`.
+- `status`: `active | rotating_in | rotating_out | retired`.
+- `aliases` (JSON array de nombres alternativos vistos en MM/Shopify/planillas).
+- `notes`.
+- `active_since`, `retired_at` (nullable).
+
+#### `terpene_rotations`
+
+Historial de cambios de estado.
+
+- `id`.
+- `terpene_id` → `terpenes.canonical_id`.
+- `from_status`, `to_status`.
+- `changed_at`.
+- `reason`.
+- `notes`.
+
+#### `terpene_material_mappings`
+
+Relación n:m con materiales del mirror MM o creados en OS.
+
+- `id`.
+- `terpene_id`.
+- `material_id` (apunta a `material_manager_materials.id` o equivalente en tabla OS).
+- `is_primary` (qué material está activo hoy para producción).
+- `supplier` (denormalizado para query rápida).
+- `effective_from`, `effective_to`.
+
+#### `terpene_product_variants`
+
+Relación con productos/variantes Shopify por tamaño de contenedor.
+
+- `id`.
+- `terpene_id`.
+- `shopify_product_id`.
+- `shopify_variant_id`.
+- `container_size`: `1ml | 2.25ml | 4ml | jeringa`.
+- `active`.
+
+### Endpoints mínimos
+
+- `GET /api/terpenes` — lista, filtrable por status.
+- `GET /api/terpenes/active` — los 10 activos vigentes.
+- `GET /api/terpenes/:canonicalId` — detalle con materiales mapeados, variantes de contenedor, historial de rotación.
+- `POST /api/terpenes` — crear terpeno canónico.
+- `PATCH /api/terpenes/:canonicalId` — editar campos básicos (nombre, aliases, notas).
+- `POST /api/terpenes/:canonicalId/rotate` — body `{ to_status, reason }`. Genera entrada en `terpene_rotations` y actualiza el status del terpeno.
+- `POST /api/terpenes/:canonicalId/mappings` — agregar/quitar `material_id` con flag `is_primary`.
+- `GET /api/terpenes/export.csv` y `POST /api/terpenes/import` — rollback/fallback.
+
+### CSV import/export — fallback obligatorio
+
+Headers mínimos del CSV (round-trip): `canonical_id,canonical_name,status,rotation_started_at,rotation_ended_at,aliases,material_ids,container_variants,notes`. Cuando no haya conexión con Shopify/MM (o el sync falle), el CSV es la fuente de respaldo. Mismas reglas que MM CSV: headers exactos, sin redondeos destructivos, IDs canónicos preservados.
+
+### No-asunciones explícitas
+
+- **No se asume API directa a omatic ni a Material Manager** para mutar rotation status. El OS es la fuente de verdad de la rotación; Shopify/MM se sincronizan opcionalmente por export CSV/JSON manual.
+- **No se asume** que los nombres en MM/Shopify ya estén normalizados — por eso el `aliases` array y el matching por `canonical_id`.
+- **No se asume** que el proveedor o el lote sea único por terpeno — por eso `terpene_material_mappings` es n:m con `is_primary`.
+
+### Integración con materials/BOM/inventory
+
+- La Calculadora de Carts resuelve costo por terpeno vía `terpene_material_mappings.is_primary` → `material.cost`. Si no hay mapping, cae al seed sheet (igual que hoy).
+- BOM por variante: cuando una variante usa un terpeno, el BOM apunta al `canonical_id` y resuelve al material primario al momento del cálculo. Cambiar el material primario por rotación **no rompe** el BOM histórico — porque el `canonical_id` es estable.
+- Alertas: cuando un terpeno entra en `rotating_out`, el OS genera alerta en productos que aún dependen de él y bloquea POs nuevas para ese material.
+
+### Criterio de "switch seamless desde MM"
+
+El módulo se considera listo cuando:
+
+1. Los 10 terpenos activos hoy en MM/Shopify están importados con `canonical_id` estables.
+2. Cada uno tiene al menos un `material_id` mapeado y resuelve costo correctamente en la Calculadora de Carts.
+3. Las variantes de contenedor (1ml/2.25ml/4ml/Jeringa) están conectadas vía `terpene_product_variants` a Shopify product/variant IDs reales.
+4. Export CSV + re-import es bit-exact (round-trip QA).
+5. El equipo confirma que puede rotar un terpeno (entrada/salida) sin abrir Material Manager ni el admin de Shopify.

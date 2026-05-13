@@ -1,5 +1,18 @@
 # Connabis Accounting OS — ROADMAP
 
+## Estado actual (2026-05-13)
+
+Lo que ya está cerrado y vivo en producción:
+
+- **Phase 1 estable**: KPIs/P&L, productos y simulador, performance/drilldown, alertas, diccionario. Métricas reales sin seed mezclado.
+- **Ingresos Shopify** como fuente oficial; matching contra MM para COGS por línea.
+- **Gastos reales** con clasificación operativo/inventario/capex, decimales correctos, filtro por año en análisis, `paidTo` fallback al cargar, persistencia de proveedor custom y display de medio de pago (Nequi/Nu Crédito).
+- **MM Mirror Phase 2.1** read-only completo: import/export bit-exact, BOM, historial de costos, QA round-trip.
+- **MM editable parcial dentro del OS**: override de materiales (campos completos + notificaciones locales), override de BOM por fila, drafts BOM para filas nuevas, todo aislado del rollback CSV.
+- **Órdenes de compra reales** importadas desde CSVs MM, listadas en orden cronológico desc, PO10 cancelada manejada.
+- **Calculadora de Carts** con 13 recetas, packaging Jeringa 1mL incluido, fuente MM vs seed etiquetada.
+- **Producto BOM agrupado** por producto base/variante con COGS estimado.
+
 ## Phase 1 — OS interno con métricas reales
 
 Estado: cerrado funcionalmente para decisiones operativas, con caveat de cobertura BOM.
@@ -25,7 +38,17 @@ Pendientes menores:
 
 Objetivo:
 
-Convertir Connabis Accounting OS en el sistema que maneja materiales, BOM, inventario, órdenes de compra, costos y producción.
+Convertir Connabis Accounting OS en el sistema que maneja materiales, BOM, inventario, órdenes de compra, costos y producción. **Phase 2 reemplaza Material Manager dentro del OS, no Dataico.** Dataico es Phase 3 y no se toca aquí.
+
+### Qué falta para cerrar Phase 2
+
+Bloques explícitos antes de declarar el OS como reemplazo bulletproof de MM:
+
+- **Paridad UI completa con MM**: interacciones, atajos, filtros, tablas inline, drag/drop y toda la sensación de uso día a día. Hoy hay paridad visual parcial y paridad funcional parcial.
+- **Crear materiales nuevos dentro del OS**: hoy solo se editan materiales que vienen del mirror MM. Falta el flujo de "+ Nuevo material" con ID local estable, validaciones, asignación de categoría/proveedor/medida, y opción opt-in a sincronizar luego a MM/Shopify.
+- **Edición completa de detalle de material**: cubrir campos secundarios (multi-ubicación, lead time por proveedor, alias, equivalencias de unidad, adjuntos/notas largas) que MM expone y el OS aún no.
+- **Editor de BOM robusto (draft/edit)**: vista combinada MM ∪ overrides ∪ drafts, validaciones cruzadas (unidades, materiales inactivos, dependencias circulares), búsqueda dentro del modal, multi-variante batch edit, undo por fila, y promoción controlada de drafts.
+- **UI QA**: pasada lado-a-lado con MM en `/inventario`, detalle de material, editor BOM, y Calculadora de Carts. Cerrar diferencias de spacing, tipografía, badges, estados vacíos y mensajes de error.
 
 ### Phase 2.1 — Mirror read-only + módulo Inventario & Materiales (implementado)
 
@@ -78,12 +101,50 @@ Módulos:
 - Calculadora de blends/carts.
 - Calendario de restock + alertas de stock + compras sugeridas.
 
+### Phase 2.6 — Terpene Rotation Manager (parte requerida de Phase 2)
+
+El reemplazo de Material Manager dentro del OS no se considera completo sin un módulo de **Terpene Rotation Manager** que herede el modelo mental del trabajo previo de SEO/terpenos. Hoy ese ciclo vive parcialmente en Shopify metaobjects + Material Manager + planillas externas y se quiere consolidar en el OS.
+
+Modelo mínimo:
+
+- **10 terpenos activos** a la vez. La rotación define cuáles están "activos" en un periodo dado y cuáles quedan en banca/retirados. Estado por terpeno: `active | rotating_in | rotating_out | retired`.
+- **Concepto metaobject/rotation status**: un terpeno tiene `canonical_id` (estable, nunca cambia) y `canonical_name`. Existe un registro de rotación por periodo (fecha de entrada/salida, motivo, notas). Esto reemplaza el metaobject de Shopify para el manejo interno; la publicación a Shopify se hace después como sync opt-in.
+- **Product family + container variants**: un terpeno se vende en una familia de producto con variantes de contenedor estandarizadas: `1ml`, `2.25ml`, `4ml`, `Jeringa`. Cada variante apunta al mismo terpeno canónico, hereda receta/blend pero difiere en packaging y costo.
+- **Inventory / material mappings**: cada terpeno canónico mapea a uno o más `material_id` del mirror MM (o material creado en el OS) — porque el mismo terpeno puede tener proveedores/lotes distintos. La rotación cambia qué material está activo para producción sin perder el ID canónico del terpeno.
+- **Integración con materials/BOM/inventory**: el módulo de Terpenos consume y escribe contra las mismas tablas de Phase 2 (`material_manager_materials`, overrides, `bom_*`). Cambiar la rotación dispara alertas en BOM (productos que dependen de un terpeno saliente), en stock (quemar inventario residual antes de salida) y en POs (no comprar terpenos en `rotating_out`).
+- **CSV import/export fallback**: import desde CSV con columnas mínimas (`canonical_id`, `canonical_name`, `status`, `rotation_started_at`, `rotation_ended_at`, `material_ids`, `notes`) y export con los mismos headers. Sirve como fuente alterna si no se conecta a Shopify/MM, y como rollback si algo se rompe.
+- **Sin asumir API directa de omatic/Material Manager para rotación**: el OS no llama a omatic ni a MM para mutar el estado de rotación. La fuente de verdad pasa a ser el OS; opcionalmente se exporta CSV/JSON para sincronizar a mano con Shopify metaobjects o con MM.
+- **Switch desde MM debe ser seamless**: cuando este módulo esté listo, el equipo debe poder dejar de tocar Material Manager para terpenos. Esto exige: mapeo 1:1 importado del estado actual, validación de que los `canonical_id` cubren los 10 activos hoy, y que BOM/Calculadora de Carts sigan resolviendo costo por terpeno por la vía OS.
+
+Tablas propuestas (a refinar en `PHASE2_MATERIAL_MANAGER_DESIGN.md`):
+
+- `terpenes` — `canonical_id`, `canonical_name`, `status`, `aliases[]`, `notes`.
+- `terpene_rotations` — historial de cambios de estado con fecha entrada/salida y motivo.
+- `terpene_material_mappings` — `terpene_id` ↔ `material_id` (n:m) con flag `is_primary`.
+- `terpene_product_variants` — `terpene_id` ↔ `(shopify_product_id, shopify_variant_id, container_size)` para 1ml/2.25ml/4ml/Jeringa.
+
+Endpoints (mínimo):
+
+- `GET/POST /api/terpenes` — CRUD de terpenos canónicos.
+- `POST /api/terpenes/:id/rotate` — cambio de estado con motivo.
+- `GET /api/terpenes/active` — los 10 activos vigentes.
+- `GET /api/terpenes/export.csv` y `POST /api/terpenes/import` — rollback/fallback.
+
+UI:
+
+- Tab nuevo dentro de **Inventario & Materiales** o página separada `/terpenos`, con tabla de 10 activos arriba + banca/retirados abajo, acciones de rotación, vínculos a productos/variantes y a materiales relacionados.
+
 ## Qué falta para reemplazar bulletproof a Material Manager / Shopify embedded app
 
 Resumen ejecutivo de gaps abiertos (mantener este checklist actualizado al cerrar cada uno):
 
-- [ ] **Visual MM parity**: revisar lado a lado con MM y cerrar diferencias de tipografía/spacing/cards en `/inventario` y detalle de material.
-- [ ] **Promote drafts to official**: pipeline para empujar drafts a MM (o reemplazo) con validación previa y log de quién promovió qué.
+- [ ] **Full UI parity con MM**: paridad funcional + visual de todas las interacciones de Material Manager dentro de `/inventario` y detalle de material. No solo tipografía/spacing — también atajos, filtros, edición inline, drag/drop y micro-interacciones.
+- [ ] **Crear materiales nuevos en el OS**: hoy solo se edita lo que viene del mirror MM. Falta el flujo "+ Nuevo material" con ID local estable, sync opt-in a MM.
+- [ ] **Detalle de material completo**: cubrir campos secundarios MM (multi-ubicación real, lead time por proveedor, alias, equivalencias de unidad, adjuntos).
+- [ ] **BOM editor robusto (draft/edit)**: vista combinada MM ∪ overrides ∪ drafts en una sola tabla, validaciones cruzadas, búsqueda dentro del modal, batch edit multi-variante, undo por fila.
+- [ ] **UI QA general**: pasada lado-a-lado de todo el módulo Inventario & Materiales contra MM antes de declarar paridad.
+- [ ] **Terpene Rotation Manager** (ver Phase 2.6): bloqueante para considerar el switch desde MM seamless.
+- [ ] **Promote drafts to official**: pipeline para empujar drafts/overrides a MM (o al sucesor) con validación previa y log de quién promovió qué.
 - [ ] **Test-store embedded Shopify app**: registrar la app en una tienda Shopify de pruebas, pasar el handshake OAuth, smoke de embedded iframe antes de habilitar cualquier escritura.
 - [ ] **Inventory sync preview/write**: dry-run de diferencias mirror↔Shopify y un toggle explícito para escribir; bloqueado hoy.
 - [ ] **Adjustment history**: tabla de movimientos de inventario (ajuste manual, recibo PO, consumo BOM, devolución) con quién/cuándo/por qué.
@@ -103,11 +164,16 @@ Entrada necesaria:
 
 Objetivo:
 
-Evaluar integración contable/fiscal formal cuando el OS interno esté estable.
+Evaluar integración contable/fiscal formal **solo después** de que Phase 2 cierre (MM completamente reemplazado dentro del OS, incluyendo Terpene Rotation Manager). Phase 3 es exclusivamente la capa fiscal/Dataico — no incluye trabajo de MM, BOM, inventario ni terpenos.
 
 No incluido hoy:
 
 - No hay integración Dataico activa.
 - No hay declaraciones automáticas.
 - No hay cierre fiscal automatizado.
+
+Regla de scope:
+
+- Cualquier trabajo de inventario/BOM/materiales/terpenos pertenece a Phase 2, no a Phase 3.
+- Phase 3 arranca cuando el equipo deje de tocar Material Manager para operar.
 
