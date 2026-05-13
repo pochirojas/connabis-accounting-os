@@ -165,12 +165,15 @@ function recipe(id: string, name: string, rows: Array<[string, number]>): CartRe
 
 // Packaging options seeded from sheet rows A25..A28 (cart/dispositivo prices)
 // + Clear Bubble Bags row H19/I19. `defaultMlPerCart` matches the column
-// headers from the top of the sheet.
+// headers from the top of the sheet. Jeringa 1mL ("syringe") is added as a
+// packaging option for blend-only sales — the MM cost lookup will fill in the
+// real unit cost when a matching material exists.
 export const CART_PACKAGING_OPTIONS: CartPackagingOption[] = [
   { id: 'cart-1ml', name: 'Cart 1mL', defaultMlPerCart: 1, unitCost: 5968.2796 },
   { id: 'cart-2-25ml', name: 'Cart 2.25mL', defaultMlPerCart: 2.25, unitCost: 6356.2596 },
   { id: 'desechable-4ml', name: 'Desechable 4mL', defaultMlPerCart: 4, unitCost: 23273.81441 },
   { id: 'desechable-5ml', name: 'Desechable 5mL', defaultMlPerCart: 5, unitCost: 41836.58462 },
+  { id: 'jeringa-1ml', name: 'Jeringa 1mL', defaultMlPerCart: 1, unitCost: 1500 },
 ];
 
 export const CLEAR_BUBBLE_BAG_COST = 439.4673903;
@@ -194,6 +197,37 @@ export function lookupMmCostPerMl(
   // MM `cost` is per unit (e.g. per gram / per mL depending on the material).
   // We treat it as cost-per-mL here; the UI clearly labels source: 'mm'.
   return { materialId: pick.id, materialName: pick.name, costPerMl: Number(pick.cost) };
+}
+
+// Try to find a real MM cost for packaging by name. Used by the API to fill
+// in the syringe unit cost from the live mirror when the seed value is just
+// a placeholder. Returns null if no plausible match exists.
+export function lookupMmPackagingCost(
+  sqlite: Database.Database,
+  hints: string[],
+): { materialId: string; materialName: string; unitCost: number } | null {
+  for (const hint of hints) {
+    const term = hint.toLowerCase().trim();
+    if (!term) continue;
+    const rows = sqlite.prepare(
+      `SELECT id, name, cost FROM material_manager_materials WHERE LOWER(name) LIKE ? AND cost > 0 ORDER BY cost ASC LIMIT 5`,
+    ).all(`%${term}%`) as Array<{ id: string; name: string; cost: number }>;
+    if (rows.length > 0) {
+      const pick = rows[0];
+      return { materialId: pick.id, materialName: pick.name, unitCost: Number(pick.cost) };
+    }
+  }
+  return null;
+}
+
+export function buildPackagingWithMmCosts(sqlite: Database.Database) {
+  return CART_PACKAGING_OPTIONS.map(p => {
+    if (p.id !== 'jeringa-1ml') return { ...p, costSource: 'sheet' as const, mmMaterialName: null as string | null };
+    const mm = lookupMmPackagingCost(sqlite, ['jeringa', 'syringe']);
+    return mm
+      ? { ...p, unitCost: mm.unitCost, costSource: 'mm' as const, mmMaterialName: mm.materialName }
+      : { ...p, costSource: 'sheet' as const, mmMaterialName: null };
+  });
 }
 
 export function buildRecipesWithMmCosts(sqlite: Database.Database) {

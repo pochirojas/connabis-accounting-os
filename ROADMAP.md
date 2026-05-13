@@ -42,7 +42,22 @@ Convertir Connabis Accounting OS en el sistema que maneja materiales, BOM, inven
 - **Sin escrituras a Shopify ni a Material Manager.** MM sigue siendo la fuente oficial vigente.
 - App correrá eventualmente como Shopify embedded app; antes de cualquier escritura se probará en una tienda separada.
 
-### Phase 2.2 → 2.5 — pendientes
+### Phase 2.4 — Análisis de gastos, jeringas 1mL, BOM agrupado (implementado)
+
+- **Gastos · análisis dónde recortar** en `/#/gastos`:
+  - Scope toggle Operativos vs Todo (preserva separación inventario/capex).
+  - Filtros por mes, categoría, proveedor + búsqueda libre (descripción/proveedor/notas).
+  - Pie charts y tablas % por proveedor y por categoría sobre gastos operativos por defecto.
+  - Tabla pivot Mes × Categoría × Proveedor con monto y % del filtro activo. Útil para identificar gastos recurrentes y candidatos de recorte.
+- **Calculadora de Carts**:
+  - Nueva opción de packaging **Jeringa 1mL** (id `jeringa-1ml`). El servidor intenta el costo real desde el mirror MM (`buildPackagingWithMmCosts`) por nombre `jeringa`/`syringe`; fallback al valor seed cuando no hay match. El select muestra badge `MM`/`seed`.
+  - Nueva sección **Todas las recetas · costo actual** que lista las 13 recetas con blend/cart y total/cart usando el packaging seleccionado. Source badge MM/Seed por receta según si al menos un ingrediente cayó al seed sheet.
+- **Inventario & Materiales · BOM agrupado**:
+  - El tab BOM ahora agrupa filas por producto base (colapsable). Cada producto muestra # variantes, componentes, COGS estimado (min · avg · max) basado en el último costo MM por material, y banderas si hay materiales sin costo.
+  - Expandir una variante muestra sus líneas BOM con costo estimado por componente y el botón "Editar drafts" (sin cambios en la lógica draft).
+  - Compatible con Productos & Márgenes; el editor de BOM por variante se mantiene tal cual.
+
+### Phase 2.5+ — pendientes
 
 Módulos:
 

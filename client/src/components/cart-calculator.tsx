@@ -29,6 +29,8 @@ type Packaging = {
   name: string;
   defaultMlPerCart: number;
   unitCost: number;
+  costSource?: 'mm' | 'sheet';
+  mmMaterialName?: string | null;
 };
 
 type CalcResponse = {
@@ -104,7 +106,14 @@ export function CartCalculator() {
             </select>
           </label>
           <label className="block">
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Cart / Dispositivo</div>
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
+              Cart / Dispositivo
+              {packaging.costSource === 'mm'
+                ? <span className="ml-1 text-[10px] text-emerald-300">· MM</span>
+                : packaging.id === 'jeringa-1ml'
+                ? <span className="ml-1 text-[10px] text-amber-300">· seed</span>
+                : null}
+            </div>
             <select
               value={packaging.id}
               onChange={e => { setPackagingId(e.target.value); setMlPerCartStr(''); }}
@@ -202,6 +211,8 @@ export function CartCalculator() {
         </div>
       </Card>
 
+      <RecipePriceList data={data} packaging={packaging} includeBag={includeBag} bagCost={data.bagCost} />
+
       <Card className="p-5" data-testid="card-cart-calculator-totals">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Totals label="Blend total" value={formatCOP(blendCost)} testId="totals-blend" />
@@ -224,6 +235,79 @@ export function CartCalculator() {
         </p>
       </Card>
     </div>
+  );
+}
+
+function RecipePriceList({
+  data,
+  packaging,
+  includeBag,
+  bagCost,
+}: {
+  data: CalcResponse;
+  packaging: Packaging;
+  includeBag: boolean;
+  bagCost: number;
+}) {
+  const mlPerCart = packaging.defaultMlPerCart;
+  const packagingTotal = packaging.unitCost + (includeBag ? bagCost : 0);
+  const rows = data.recipes.map(r => {
+    const blendPerCart = r.ingredients.reduce(
+      (s, ing) => s + ing.ratio * mlPerCart * ing.effectiveCostPerMl,
+      0,
+    );
+    const hasFallback = r.ingredients.some(ing => ing.costSource === 'sheet');
+    return {
+      id: r.id,
+      name: r.name,
+      ingredientCount: r.ingredients.length,
+      blendPerCart,
+      total: blendPerCart + packagingTotal,
+      hasFallback,
+    };
+  });
+  return (
+    <Card className="p-5" data-testid="card-cart-recipe-prices">
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <h4 className="text-sm font-semibold tracking-tight">Todas las recetas · costo actual</h4>
+          <p className="text-[11.5px] text-muted-foreground">
+            Costo por cart con la opción de packaging seleccionada ({packaging.name}, {mlPerCart} mL{includeBag ? ' + bolsa' : ''}). Source MM cuando el costo viene del mirror; Seed si cae al valor de la hoja.
+          </p>
+        </div>
+        <Badge variant="outline" className="text-[10px]">{data.recipes.length} recetas</Badge>
+      </div>
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Receta</TableHead>
+              <TableHead className="text-right">Ingredientes</TableHead>
+              <TableHead className="text-right">Blend / cart</TableHead>
+              <TableHead className="text-right">Total / cart</TableHead>
+              <TableHead>Fuente</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map(row => (
+              <TableRow key={row.id} data-testid={`row-recipe-price-${row.id}`}>
+                <TableCell className="text-[12.5px] font-medium">{row.name}</TableCell>
+                <TableCell className="text-right tabular text-[12px]">{row.ingredientCount}</TableCell>
+                <TableCell className="text-right tabular text-[12px]">{formatCOP(row.blendPerCart)}</TableCell>
+                <TableCell className="text-right tabular text-[12.5px] font-semibold">{formatCOP(row.total)}</TableCell>
+                <TableCell>
+                  {row.hasFallback ? (
+                    <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-300">Seed fallback</Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[10px] border-emerald-500/40 text-emerald-300">MM mirror</Badge>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </Card>
   );
 }
 

@@ -10,9 +10,9 @@ import {
 } from '@/components/ui/table';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Boxes, Database, Download, FileWarning, GitCompare, ListChecks, Pencil, Package2, RefreshCcw, ShieldCheck, Truck,
+  Boxes, ChevronDown, ChevronRight, Database, Download, FileWarning, GitCompare, ListChecks, Pencil, Package2, RefreshCcw, ShieldCheck, Truck,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { formatCOP, formatDate, formatNumber, formatQty } from '@/lib/format';
 import type {
@@ -48,6 +48,8 @@ export default function MaterialManagerPage() {
   const [selectedMaterialId, setSelectedMaterialId] = useState<string | null>(null);
   const [bomEditorVariantId, setBomEditorVariantId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'materials' | 'bom' | 'purchase' | 'calculator' | 'admin'>('materials');
+  const [expandedProducts, setExpandedProducts] = useState<Record<string, boolean>>({});
+  const [expandedVariants, setExpandedVariants] = useState<Record<string, boolean>>({});
 
   const status = useQuery<MmMirrorStatus>({ queryKey: ['/api/material-manager/status'] });
   const materials = useQuery<MmMaterialRow[]>({ queryKey: ['/api/material-manager/materials'] });
@@ -123,6 +125,82 @@ export default function MaterialManagerPage() {
       row.variantId.includes(term),
     );
   }, [bom.data, bomFilter]);
+
+  // Group BOM rows by product, with variants underneath. Computes per-variant
+  // estimated COGS using current MM material costs (when present) so the
+  // collapsed product row can show a useful range.
+  const materialCostById = useMemo(() => {
+    const map = new Map<string, number>();
+    (materials.data ?? []).forEach(m => map.set(m.id, Number(m.cost) || 0));
+    return map;
+  }, [materials.data]);
+
+  type VariantGroup = {
+    variantId: string;
+    variantName: string;
+    rows: MmBomRow[];
+    componentCount: number;
+    estimatedCogs: number; // sum(qty * material cost) when costs known
+    missingCost: boolean;
+  };
+  type ProductGroup = {
+    productName: string;
+    variants: VariantGroup[];
+    variantCount: number;
+    totalComponents: number;
+    cogsMin: number;
+    cogsMax: number;
+    cogsAvg: number;
+    missingBomCount: number; // variants with 0 rows (always 0 here since MM only lists rows that exist)
+  };
+
+  const productGroups: ProductGroup[] = useMemo(() => {
+    const productMap = new Map<string, Map<string, VariantGroup>>();
+    filteredBom.forEach(row => {
+      let variantMap = productMap.get(row.productName);
+      if (!variantMap) {
+        variantMap = new Map();
+        productMap.set(row.productName, variantMap);
+      }
+      let vg = variantMap.get(row.variantId);
+      if (!vg) {
+        vg = {
+          variantId: row.variantId,
+          variantName: row.variantName,
+          rows: [],
+          componentCount: 0,
+          estimatedCogs: 0,
+          missingCost: false,
+        };
+        variantMap.set(row.variantId, vg);
+      }
+      vg.rows.push(row);
+      vg.componentCount += 1;
+      const cost = materialCostById.get(row.materialId) ?? 0;
+      if (cost === 0) vg.missingCost = true;
+      vg.estimatedCogs += row.quantity * cost;
+    });
+
+    return Array.from(productMap.entries())
+      .map(([productName, variantMap]) => {
+        const variants = Array.from(variantMap.values()).sort((a, b) => a.variantName.localeCompare(b.variantName));
+        const cogsValues = variants.map(v => v.estimatedCogs);
+        const cogsMin = cogsValues.length ? Math.min(...cogsValues) : 0;
+        const cogsMax = cogsValues.length ? Math.max(...cogsValues) : 0;
+        const cogsAvg = cogsValues.length ? cogsValues.reduce((s, n) => s + n, 0) / cogsValues.length : 0;
+        return {
+          productName,
+          variants,
+          variantCount: variants.length,
+          totalComponents: variants.reduce((s, v) => s + v.componentCount, 0),
+          cogsMin,
+          cogsMax,
+          cogsAvg,
+          missingBomCount: variants.filter(v => v.componentCount === 0).length,
+        };
+      })
+      .sort((a, b) => a.productName.localeCompare(b.productName));
+  }, [filteredBom, materialCostById]);
 
   // Variants for the BOM editor — derive from MM BOM rows (variant_id + product_name + variant_name).
   const variantsForEditor = useMemo(() => {
@@ -271,55 +349,149 @@ export default function MaterialManagerPage() {
 
         <TabsContent value="bom" className="mt-4">
           <Card className="p-5" data-testid="card-mm-bom">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
               <div>
-                <h3 className="text-sm font-semibold tracking-tight">BOM por variante</h3>
-                <p className="text-xs text-muted-foreground">Materiales por variante Shopify (exactamente como están en MM). Abre el editor para añadir <em>drafts locales</em>.</p>
+                <h3 className="text-sm font-semibold tracking-tight">BOM por producto · variantes anidadas</h3>
+                <p className="text-xs text-muted-foreground">
+                  Agrupado por producto base. Cada fila muestra # variantes, componentes y COGS estimado (min/avg/max).
+                  Expande para ver variantes; expande una variante para ver su BOM. El filtro aplica a producto/variante/material.
+                </p>
               </div>
-              <Input
-                value={bomFilter}
-                onChange={e => setBomFilter(e.target.value)}
-                placeholder="Filtrar BOM…"
-                className="max-w-xs"
-                data-testid="input-mm-bom-filter"
-              />
+              <div className="flex items-center gap-2">
+                <Input
+                  value={bomFilter}
+                  onChange={e => setBomFilter(e.target.value)}
+                  placeholder="Filtrar BOM…"
+                  className="max-w-xs"
+                  data-testid="input-mm-bom-filter"
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    const next: Record<string, boolean> = {};
+                    productGroups.forEach(g => { next[g.productName] = true; });
+                    setExpandedProducts(next);
+                  }}
+                  data-testid="button-expand-all-products"
+                >
+                  Expandir todo
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => { setExpandedProducts({}); setExpandedVariants({}); }}
+                  data-testid="button-collapse-all-products"
+                >
+                  Colapsar
+                </Button>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Producto</TableHead>
-                    <TableHead>Variante</TableHead>
-                    <TableHead>Material</TableHead>
-                    <TableHead className="text-right">Cant.</TableHead>
+                    <TableHead className="w-6"></TableHead>
+                    <TableHead>Producto / Variante / Material</TableHead>
+                    <TableHead className="text-right">Variantes</TableHead>
+                    <TableHead className="text-right">Componentes</TableHead>
+                    <TableHead className="text-right">COGS est. (min · avg · max)</TableHead>
                     <TableHead></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredBom.slice(0, 300).map(row => (
-                    <TableRow key={`${row.materialId}-${row.variantId}`} data-testid={`row-mm-bom-${row.materialId}-${row.variantId}`}>
-                      <TableCell className="text-[12.5px]">{row.productName}</TableCell>
-                      <TableCell className="text-[12px] text-muted-foreground">{row.variantName}</TableCell>
-                      <TableCell className="text-[12.5px]">{row.materialName}</TableCell>
-                      <TableCell className="text-right tabular">{formatQty(row.quantity)}</TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setBomEditorVariantId(row.variantId)}
-                          data-testid={`button-bom-edit-${row.variantId}`}
+                  {productGroups.length === 0 && (
+                    <TableRow><TableCell colSpan={6} className="text-center text-xs text-muted-foreground py-4">Sin filas BOM. Importa el mirror o ajusta el filtro.</TableCell></TableRow>
+                  )}
+                  {productGroups.slice(0, 200).map(group => {
+                    const productOpen = !!expandedProducts[group.productName];
+                    const hasMissing = group.variants.some(v => v.missingCost);
+                    return (
+                      <Fragment key={`product-frag-${group.productName}`}>
+                        <TableRow
+                          className="cursor-pointer hover:bg-muted/40 bg-muted/15"
+                          onClick={() => setExpandedProducts(prev => ({ ...prev, [group.productName]: !productOpen }))}
+                          data-testid={`row-bom-product-${group.productName}`}
                         >
-                          <Pencil className="h-3 w-3 mr-1" /> Editar drafts
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                          <TableCell>
+                            {productOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          </TableCell>
+                          <TableCell className="text-[12.5px] font-semibold">{group.productName || '—'}</TableCell>
+                          <TableCell className="text-right tabular text-[12px]">{group.variantCount}</TableCell>
+                          <TableCell className="text-right tabular text-[12px]">{group.totalComponents}</TableCell>
+                          <TableCell className="text-right tabular text-[12px]">
+                            {group.cogsAvg > 0 ? (
+                              <span>
+                                {formatCOP(group.cogsMin)} · <strong>{formatCOP(group.cogsAvg)}</strong> · {formatCOP(group.cogsMax)}
+                                {hasMissing ? <span className="ml-1 text-amber-300">·*</span> : null}
+                              </span>
+                            ) : <span className="text-muted-foreground">—</span>}
+                          </TableCell>
+                          <TableCell>
+                            {hasMissing && <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-300">Costo MM parcial</Badge>}
+                          </TableCell>
+                        </TableRow>
+                        {productOpen && group.variants.map(variant => {
+                          const variantKey = `${group.productName}::${variant.variantId}`;
+                          const variantOpen = !!expandedVariants[variantKey];
+                          return (
+                            <Fragment key={`variant-frag-${variantKey}`}>
+                              <TableRow
+                                className="cursor-pointer hover:bg-muted/30"
+                                onClick={() => setExpandedVariants(prev => ({ ...prev, [variantKey]: !variantOpen }))}
+                                data-testid={`row-bom-variant-${variant.variantId}`}
+                              >
+                                <TableCell className="pl-6">
+                                  {variantOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                                </TableCell>
+                                <TableCell className="text-[12px] pl-2">↳ {variant.variantName || variant.variantId}</TableCell>
+                                <TableCell></TableCell>
+                                <TableCell className="text-right tabular text-[11.5px]">{variant.componentCount}</TableCell>
+                                <TableCell className="text-right tabular text-[11.5px]">
+                                  {variant.estimatedCogs > 0 ? formatCOP(variant.estimatedCogs) : <span className="text-muted-foreground">—</span>}
+                                  {variant.missingCost ? <span className="ml-1 text-amber-300">·*</span> : null}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={(e) => { e.stopPropagation(); setBomEditorVariantId(variant.variantId); }}
+                                    data-testid={`button-bom-edit-${variant.variantId}`}
+                                  >
+                                    <Pencil className="h-3 w-3 mr-1" /> Editar drafts
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                              {variantOpen && variant.rows.map(row => (
+                                <TableRow key={`mat-${variantKey}-${row.materialId}`} className="bg-background/40" data-testid={`row-bom-material-${variant.variantId}-${row.materialId}`}>
+                                  <TableCell></TableCell>
+                                  <TableCell className="text-[12px] pl-10 text-muted-foreground">• {row.materialName}</TableCell>
+                                  <TableCell></TableCell>
+                                  <TableCell className="text-right tabular text-[11.5px]">{formatQty(row.quantity)}</TableCell>
+                                  <TableCell className="text-right tabular text-[11.5px]">
+                                    {(() => {
+                                      const c = materialCostById.get(row.materialId) ?? 0;
+                                      return c > 0 ? formatCOP(c * row.quantity) : <span className="text-amber-300">sin costo</span>;
+                                    })()}
+                                  </TableCell>
+                                  <TableCell></TableCell>
+                                </TableRow>
+                              ))}
+                            </Fragment>
+                          );
+                        })}
+                      </Fragment>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
-            {filteredBom.length > 300 && (
-              <p className="text-[11px] text-muted-foreground mt-2">Mostrando 300 de {filteredBom.length}. Refina el filtro.</p>
+            {productGroups.length > 200 && (
+              <p className="text-[11px] text-muted-foreground mt-2">Mostrando 200 de {productGroups.length} productos. Refina el filtro.</p>
             )}
+            <p className="text-[10.5px] text-muted-foreground mt-2">
+              * COGS estimado usa el último costo del mirror MM por material. Las variantes con materiales sin costo asignado se marcan con asterisco.
+            </p>
           </Card>
         </TabsContent>
 

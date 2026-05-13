@@ -37,10 +37,10 @@ npm start
 | --- | --- | --- |
 | `/` | `client/src/pages/dashboard.tsx` | KPIs reales y P&L por período |
 | `/ingresos` | `client/src/pages/ingresos.tsx` | Ingresos Shopify |
-| `/gastos` | `client/src/pages/gastos.tsx` | Gastos reales, clasificación, caja, export |
+| `/gastos` | `client/src/pages/gastos.tsx` | Gastos reales, clasificación, caja, export. Analítica con pie charts + filtros por mes/proveedor/categoría y pivot Mes×Categoría×Proveedor para identificar candidatos de recorte. |
 | `/productos` | `client/src/pages/productos.tsx` | Productos activos, ventas por SKU, COGS MM, simulador. Botón **Editar BOM (draft local)** abre el editor compartido con Inventario. |
 | `/performance` | `client/src/pages/performance.tsx` | Filtros por fecha y drilldown diario |
-| `/inventario` y `/material-manager` | `client/src/pages/material-manager.tsx` | **Inventario & Materiales** (módulo único). Tabs: Materiales · BOM/Productos · Órdenes de compra · Admin/QA/Costos. Click en un material abre dashboard de detalle (info, productos que lo usan, inventario/procurement/notificaciones). Las dos rutas renderizan la misma página para mantener enlaces antiguos. |
+| `/inventario` y `/material-manager` | `client/src/pages/material-manager.tsx` | **Inventario & Materiales** (módulo único). Tabs: Materiales · BOM/Productos (agrupado por producto base, expandible a variantes y materiales) · Órdenes de compra · Calculadora de Carts (con Jeringa 1mL + listado global de recetas) · Admin/QA/Costos. |
 | `/sugerencias` | `client/src/pages/sugerencias.tsx` | Sugerencias reales + restock Phase 2 model |
 | `/alertas` | `client/src/pages/alertas.tsx` | Alertas específicas |
 | `/glosario` | `client/src/pages/glosario.tsx` | Diccionario contable |

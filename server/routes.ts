@@ -35,9 +35,9 @@ import {
   getMmPurchaseOrdersStatus,
 } from './material-manager-purchase-orders';
 import {
-  CART_PACKAGING_OPTIONS,
   CLEAR_BUBBLE_BAG_COST,
   buildRecipesWithMmCosts,
+  buildPackagingWithMmCosts,
 } from './cart-calculator';
 import {
   insertBomDraftSchema,
@@ -2165,7 +2165,7 @@ export async function registerRoutes(
   app.get('/api/material-manager/cart-calculator', (_req, res) => {
     res.json({
       recipes: buildRecipesWithMmCosts(sqlite),
-      packaging: CART_PACKAGING_OPTIONS,
+      packaging: buildPackagingWithMmCosts(sqlite),
       bagCost: CLEAR_BUBBLE_BAG_COST,
     });
   });

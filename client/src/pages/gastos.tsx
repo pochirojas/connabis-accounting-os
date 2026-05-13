@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/table';
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
+  PieChart, Pie, Cell,
 } from 'recharts';
 import type { MonthlyRow, Expense } from '@shared/schema';
 import { formatCOP, formatCOPCompact, formatDate } from '@/lib/format';
@@ -59,6 +60,11 @@ type ExpenseDraft = {
 };
 
 const CATEGORY_OPTIONS = ['Operación', 'Inventario', 'Capex', 'Marketing', 'Logística', 'Comisiones', 'Impuestos', 'Muestras', 'Reposiciones', 'Software', 'Nómina', 'Servicios profesionales', 'Otros'];
+const PIE_COLORS = [
+  'hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))',
+  'hsl(var(--chart-4))', 'hsl(var(--chart-5))',
+  'hsl(160 60% 45%)', 'hsl(45 90% 55%)', 'hsl(0 70% 55%)',
+];
 const PAID_WITH_OPTIONS = ['Nequi', 'Nu crédito', 'Nu débito', 'Mercado Pago liberado', 'Mercado Pago no liberado', 'Efectivo', 'Otro'];
 
 export default function Gastos() {
@@ -84,6 +90,11 @@ export default function Gastos() {
   const [monthlySort, setMonthlySort] = useState<ChartSortOrder>('oldest');
   const [monthlyTableSort, setMonthlyTableSort] = useState<ChartSortOrder>('newest');
   const [expenseDetailSort, setExpenseDetailSort] = useState<ChartSortOrder>('newest');
+  const [analyticsScope, setAnalyticsScope] = useState<'operating' | 'all'>('operating');
+  const [filterProvider, setFilterProvider] = useState<string>('all');
+  const [filterCategory, setFilterCategory] = useState<string>('all');
+  const [filterMonth, setFilterMonth] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState('');
 
   const allExpenses = useMemo(() => expenses.data ?? [], [expenses.data]);
   const manualExpenses = useMemo(() => allExpenses.filter(e => e.source === 'manual'), [allExpenses]);
@@ -117,6 +128,71 @@ export default function Gastos() {
   const yearOptions = Array.from(new Set(monthOptions.map(month => month.slice(0, 4)))).sort().reverse();
   const monthlyChartRows = useMemo(() => sortByMonth(monthsWithManual, monthlySort), [monthsWithManual, monthlySort]);
   const monthlyTableRows = useMemo(() => sortByMonth(monthsWithManual, monthlyTableSort), [monthsWithManual, monthlyTableSort]);
+  const isOperating = (e: Expense) => {
+    const c = e.classification ?? 'operating';
+    return c !== 'inventory' && c !== 'capex';
+  };
+  const scopedExpenses = useMemo(() => (
+    analyticsScope === 'operating' ? allExpenses.filter(isOperating) : allExpenses
+  ), [allExpenses, analyticsScope]);
+  const providerOptions = useMemo(() => Array.from(new Set(scopedExpenses.map(e => e.paidTo).filter((v): v is string => Boolean(v)))).sort(), [scopedExpenses]);
+  const categoryOptions = useMemo(() => Array.from(new Set(scopedExpenses.map(e => e.category).filter(Boolean))).sort(), [scopedExpenses]);
+  const monthOptionsAnalytics = useMemo(() => Array.from(new Set(scopedExpenses.map(e => e.month))).sort().reverse(), [scopedExpenses]);
+
+  const filteredScoped = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return scopedExpenses.filter(e => {
+      if (filterProvider !== 'all' && (e.paidTo ?? '') !== filterProvider) return false;
+      if (filterCategory !== 'all' && e.category !== filterCategory) return false;
+      if (filterMonth !== 'all' && e.month !== filterMonth) return false;
+      if (term) {
+        const blob = `${e.description} ${e.paidTo ?? ''} ${e.category} ${e.notes ?? ''}`.toLowerCase();
+        if (!blob.includes(term)) return false;
+      }
+      return true;
+    });
+  }, [scopedExpenses, filterProvider, filterCategory, filterMonth, searchTerm]);
+  const filteredTotal = filteredScoped.reduce((s, e) => s + e.amount, 0);
+
+  const byProvider = useMemo(() => {
+    const map = new Map<string, number>();
+    filteredScoped.forEach(e => {
+      const key = e.paidTo || 'Sin proveedor';
+      map.set(key, (map.get(key) ?? 0) + e.amount);
+    });
+    return Array.from(map.entries())
+      .map(([name, amount]) => ({ name, amount, share: filteredTotal > 0 ? amount / filteredTotal : 0 }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [filteredScoped, filteredTotal]);
+
+  const byCategory = useMemo(() => {
+    const map = new Map<string, number>();
+    filteredScoped.forEach(e => {
+      const key = e.category || 'Sin categoría';
+      map.set(key, (map.get(key) ?? 0) + e.amount);
+    });
+    return Array.from(map.entries())
+      .map(([name, amount]) => ({ name, amount, share: filteredTotal > 0 ? amount / filteredTotal : 0 }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [filteredScoped, filteredTotal]);
+
+  // Monthly breakdown rows for the table: month × category × provider × amount.
+  const monthlyBreakdownRows = useMemo(() => {
+    const map = new Map<string, { month: string; category: string; provider: string; amount: number }>();
+    filteredScoped.forEach(e => {
+      const provider = e.paidTo || 'Sin proveedor';
+      const category = e.category || 'Sin categoría';
+      const key = `${e.month}|${category}|${provider}`;
+      const cur = map.get(key);
+      if (cur) cur.amount += e.amount;
+      else map.set(key, { month: e.month, category, provider, amount: e.amount });
+    });
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.month !== b.month) return b.month.localeCompare(a.month);
+      return b.amount - a.amount;
+    });
+  }, [filteredScoped]);
+
   const expenseDetailRows = useMemo(() => sortByDate(allExpenses, expenseDetailSort), [allExpenses, expenseDetailSort]);
   const sellerOptions = useMemo(() => {
     const saved = manualExpenses
@@ -533,6 +609,192 @@ export default function Gastos() {
               </TableRow>
             </TableBody>
           </Table>
+        </Card>
+      </section>
+
+      <section className="mt-6">
+        <Card className="p-5 bg-card border-card-border" data-testid="card-expense-analytics">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div>
+              <h2 className="text-sm font-semibold tracking-tight">Análisis de gastos · dónde recortar</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Mix por proveedor y categoría con filtros por mes/proveedor/categoría. Scope por defecto: gastos operativos (inventario/capex aparte). Cambia a "Todo" para ver inventario y capex también.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={analyticsScope}
+                onChange={e => setAnalyticsScope(e.target.value as 'operating' | 'all')}
+                className="h-9 rounded-md border border-input bg-background px-3 text-xs"
+                data-testid="select-analytics-scope"
+              >
+                <option value="operating">Solo operativos</option>
+                <option value="all">Todo (operativos + inv/capex)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-4">
+            <label className="space-y-1">
+              <span className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Buscar</span>
+              <Input
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                placeholder="Descripción, proveedor, categoría…"
+                data-testid="input-expense-search"
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Proveedor</span>
+              <select
+                value={filterProvider}
+                onChange={e => setFilterProvider(e.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                data-testid="select-filter-provider"
+              >
+                <option value="all">Todos</option>
+                {providerOptions.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </label>
+            <label className="space-y-1">
+              <span className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Categoría</span>
+              <select
+                value={filterCategory}
+                onChange={e => setFilterCategory(e.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                data-testid="select-filter-category"
+              >
+                <option value="all">Todas</option>
+                {categoryOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+            <label className="space-y-1">
+              <span className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Mes</span>
+              <select
+                value={filterMonth}
+                onChange={e => setFilterMonth(e.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                data-testid="select-filter-month"
+              >
+                <option value="all">Todos</option>
+                {monthOptionsAnalytics.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div data-testid="analytics-by-provider">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-semibold tracking-tight">% por proveedor</h3>
+                <Badge variant="outline" className="text-[10px]">{byProvider.length} proveedores · {formatCOP(filteredTotal)}</Badge>
+              </div>
+              <div className="h-[260px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={byProvider.slice(0, 8)} dataKey="amount" nameKey="name" innerRadius={50} outerRadius={84} paddingAngle={2} stroke="hsl(var(--card))" strokeWidth={2}>
+                      {byProvider.slice(0, 8).map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
+                      formatter={(v: number) => `${formatCOP(v)} · ${filteredTotal > 0 ? ((v / filteredTotal) * 100).toFixed(1) : '0.0'}%`}
+                    />
+                    <Legend iconSize={8} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Proveedor</TableHead>
+                    <TableHead className="text-right">Monto</TableHead>
+                    <TableHead className="text-right">%</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {byProvider.slice(0, 12).map(row => (
+                    <TableRow key={row.name} data-testid={`row-provider-${row.name}`}>
+                      <TableCell className="text-[12.5px]">{row.name}</TableCell>
+                      <TableCell className="text-right tabular text-[12px]">{formatCOP(row.amount)}</TableCell>
+                      <TableCell className="text-right tabular text-[12px]">{(row.share * 100).toFixed(1)}%</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div data-testid="analytics-by-category">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-semibold tracking-tight">% por categoría</h3>
+                <Badge variant="outline" className="text-[10px]">{byCategory.length} categorías</Badge>
+              </div>
+              <div className="h-[260px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={byCategory} dataKey="amount" nameKey="name" innerRadius={50} outerRadius={84} paddingAngle={2} stroke="hsl(var(--card))" strokeWidth={2}>
+                      {byCategory.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
+                      formatter={(v: number) => `${formatCOP(v)} · ${filteredTotal > 0 ? ((v / filteredTotal) * 100).toFixed(1) : '0.0'}%`}
+                    />
+                    <Legend iconSize={8} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Categoría</TableHead>
+                    <TableHead className="text-right">Monto</TableHead>
+                    <TableHead className="text-right">%</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {byCategory.map(row => (
+                    <TableRow key={row.name} data-testid={`row-category-${row.name}`}>
+                      <TableCell className="text-[12.5px]">{row.name}</TableCell>
+                      <TableCell className="text-right tabular text-[12px]">{formatCOP(row.amount)}</TableCell>
+                      <TableCell className="text-right tabular text-[12px]">{(row.share * 100).toFixed(1)}%</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-semibold tracking-tight">Mes × Categoría × Proveedor</h3>
+              <Badge variant="outline" className="text-[10px]">{monthlyBreakdownRows.length} filas</Badge>
+            </div>
+            <div className="max-h-[420px] overflow-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Mes</TableHead>
+                    <TableHead>Categoría</TableHead>
+                    <TableHead>Proveedor</TableHead>
+                    <TableHead className="text-right">Monto</TableHead>
+                    <TableHead className="text-right">% del filtro</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {monthlyBreakdownRows.map(row => (
+                    <TableRow key={`${row.month}|${row.category}|${row.provider}`} data-testid={`row-breakdown-${row.month}-${row.category}-${row.provider}`}>
+                      <TableCell className="text-[12px] tabular">{row.month}</TableCell>
+                      <TableCell><Badge variant="outline" className="text-[10.5px]">{row.category}</Badge></TableCell>
+                      <TableCell className="text-[12.5px]">{row.provider}</TableCell>
+                      <TableCell className="text-right tabular text-[12.5px] font-semibold">{formatCOP(row.amount)}</TableCell>
+                      <TableCell className="text-right tabular text-[11.5px] text-muted-foreground">{filteredTotal > 0 ? ((row.amount / filteredTotal) * 100).toFixed(1) : '0.0'}%</TableCell>
+                    </TableRow>
+                  ))}
+                  {monthlyBreakdownRows.length === 0 && (
+                    <TableRow><TableCell colSpan={5} className="text-center text-xs text-muted-foreground py-4">Sin gastos para el filtro actual.</TableCell></TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
         </Card>
       </section>
 
