@@ -6,6 +6,16 @@ const cop = new Intl.NumberFormat('es-CO', {
   maximumFractionDigits: 0,
 });
 
+// Same currency style but keeps up to 2 decimals — used when the underlying value
+// actually has a fractional part (e.g. 123.45). For whole-COP amounts we keep the
+// existing zero-decimal display so historic rows look identical.
+const copWithCents = new Intl.NumberFormat('es-CO', {
+  style: 'currency',
+  currency: 'COP',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
 const num = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 });
 const num2 = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 2 });
 // Quantity formatter: float-friendly, never rounds decimal quantities to 0.
@@ -14,7 +24,7 @@ const numQty = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 6, minimu
 
 export function formatCOP(value: number): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
-  return cop.format(value);
+  return Number.isInteger(value) ? cop.format(value) : copWithCents.format(value);
 }
 
 // Compact: 11.7M, 94.1M, 1.2K

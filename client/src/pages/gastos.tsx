@@ -36,13 +36,27 @@ const RECURRENT_SELLERS = [
   'Otro',
 ];
 
+// Allow digits, a single decimal separator, and preserve a trailing dot (e.g. "123.")
+// while the user is typing. Returns the raw string sanitized — formatting with
+// thousand separators is intentionally avoided so the controlled input doesn't
+// fight the user on every keystroke and so decimals round-trip cleanly.
+function sanitizeAmountInput(value: string) {
+  const cleaned = value.replace(/,/g, '.').replace(/[^\d.]/g, '');
+  const firstDot = cleaned.indexOf('.');
+  if (firstDot === -1) return cleaned;
+  return cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, '');
+}
+
 function parseAmountInput(value: string) {
-  return Number(value.replace(/[^\d]/g, '') || 0);
+  if (typeof value !== 'string') return Number(value) || 0;
+  const sanitized = sanitizeAmountInput(value);
+  if (!sanitized || sanitized === '.') return 0;
+  const parsed = Number(sanitized);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function formatAmountInput(value: string) {
-  const parsed = parseAmountInput(value);
-  return parsed ? parsed.toLocaleString('en-US') : '';
+  return sanitizeAmountInput(value);
 }
 
 type ExpenseDraft = {
@@ -65,7 +79,18 @@ const PIE_COLORS = [
   'hsl(var(--chart-4))', 'hsl(var(--chart-5))',
   'hsl(160 60% 45%)', 'hsl(45 90% 55%)', 'hsl(0 70% 55%)',
 ];
-const PAID_WITH_OPTIONS = ['Nequi', 'Nu crédito', 'Nu débito', 'Mercado Pago liberado', 'Mercado Pago no liberado', 'Efectivo', 'Otro'];
+const PAID_WITH_OPTIONS = ['Nequi', 'Nu Crédito', 'Nu Débito', 'Mercado Pago liberado', 'Mercado Pago no liberado', 'Efectivo', 'Otro'];
+
+// Historic rows often have blank / "No especificado" paidWith. Display-only: prefer
+// "Nequi" for those, since every new flow is Nequi or Nu Crédito. We do NOT rewrite
+// the underlying record — historic non-blank values (e.g. "Cash", "Credit card") are
+// shown verbatim so we don't lose data.
+function displayPaidWith(value?: string | null): string {
+  const raw = (value ?? '').trim();
+  if (!raw) return 'Nequi';
+  if (raw.toLowerCase() === 'no especificado') return 'Nequi';
+  return raw;
+}
 
 export default function Gastos() {
   const months = useQuery<MonthlyRow[]>({ queryKey: ['/api/months'] });
@@ -195,12 +220,23 @@ export default function Gastos() {
 
   const expenseDetailRows = useMemo(() => sortByDate(allExpenses, expenseDetailSort), [allExpenses, expenseDetailSort]);
   const sellerOptions = useMemo(() => {
-    const saved = manualExpenses
-      .map(expense => expense.paidTo)
-      .filter((seller): seller is string => Boolean(seller))
-      .filter(seller => !RECURRENT_SELLERS.includes(seller));
-    return [...RECURRENT_SELLERS.slice(0, -1), ...Array.from(new Set(saved)), 'Otro'];
-  }, [manualExpenses]);
+    const normalizeSeller = (seller: string) => seller.trim();
+    const knownLower = new Set(RECURRENT_SELLERS.map(s => s.toLowerCase()));
+    const saved = allExpenses
+      .map(expense => normalizeSeller(expense.paidTo ?? ''))
+      .filter(seller => seller.length > 0 && seller !== 'Sin proveedor')
+      .filter(seller => !knownLower.has(seller.toLowerCase()));
+    const seen = new Set<string>();
+    const deduped: string[] = [];
+    saved.forEach(seller => {
+      const key = seller.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      deduped.push(seller);
+    });
+    deduped.sort((a, b) => a.localeCompare(b, 'es'));
+    return [...RECURRENT_SELLERS.slice(0, -1), ...deduped, 'Otro'];
+  }, [allExpenses]);
 
   const createExpense = useMutation({
     mutationFn: async (payload: {
@@ -300,7 +336,7 @@ export default function Gastos() {
       description: expense.description,
       paidTo: sellerExists ? expense.paidTo ?? 'Otro' : 'Otro',
       paidToOther: sellerExists ? '' : expense.paidTo ?? '',
-      paidWith: expense.paidWith ?? 'Nequi',
+      paidWith: displayPaidWith(expense.paidWith),
       currency: expense.currency ?? 'COP',
       amount: formatAmountInput(String(expense.amount)),
       originalAmount: formatAmountInput(String(expense.originalAmount ?? expense.amount)),
@@ -437,7 +473,7 @@ export default function Gastos() {
               <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{draft.currency === 'USD' ? 'Monto COP calculado' : 'Monto COP'}</span>
               <Input
                 type="text"
-                inputMode="numeric"
+                inputMode="decimal"
                 value={draft.currency === 'USD' && draft.originalAmount && draft.fxRate ? formatAmountInput(String(parseAmountInput(draft.originalAmount) * parseAmountInput(draft.fxRate))) : draft.amount}
                 onChange={e => setDraft(prev => ({ ...prev, amount: formatAmountInput(e.target.value) }))}
                 placeholder="0"
@@ -452,7 +488,7 @@ export default function Gastos() {
                   <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Monto USD</span>
                   <Input
                     type="text"
-                    inputMode="numeric"
+                    inputMode="decimal"
                     value={draft.originalAmount}
                     onChange={e => setDraft(prev => ({ ...prev, originalAmount: formatAmountInput(e.target.value) }))}
                     className="text-right tabular pr-4"
@@ -463,7 +499,7 @@ export default function Gastos() {
                   <span className="text-[11px] uppercase tracking-wider text-muted-foreground">TRM</span>
                   <Input
                     type="text"
-                    inputMode="numeric"
+                    inputMode="decimal"
                     value={draft.fxRate}
                     onChange={e => setDraft(prev => ({ ...prev, fxRate: formatAmountInput(e.target.value) }))}
                     className="text-right tabular pr-4"
@@ -857,7 +893,7 @@ export default function Gastos() {
                 <label className="space-y-1.5">
                   <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Pagado con</span>
                   <select value={editDraft.paidWith} onChange={e => setEditDraft(prev => prev ? { ...prev, paidWith: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-paid-with">
-                    {PAID_WITH_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                    {(PAID_WITH_OPTIONS.includes(editDraft.paidWith) ? PAID_WITH_OPTIONS : [editDraft.paidWith, ...PAID_WITH_OPTIONS]).map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </label>
                 <label className="space-y-1.5">
@@ -871,7 +907,7 @@ export default function Gastos() {
                   <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{editDraft.currency === 'USD' ? 'Monto COP calculado' : 'Monto COP'}</span>
                   <Input
                     type="text"
-                    inputMode="numeric"
+                    inputMode="decimal"
                     value={editDraft.currency === 'USD' && editDraft.originalAmount && editDraft.fxRate ? formatAmountInput(String(parseAmountInput(editDraft.originalAmount) * parseAmountInput(editDraft.fxRate))) : editDraft.amount}
                     onChange={e => setEditDraft(prev => prev ? { ...prev, amount: formatAmountInput(e.target.value) } : prev)}
                     className="text-right tabular pr-4"
@@ -883,11 +919,11 @@ export default function Gastos() {
                   <>
                     <label className="space-y-1.5">
                       <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Monto USD</span>
-                      <Input type="text" inputMode="numeric" value={editDraft.originalAmount} onChange={e => setEditDraft(prev => prev ? { ...prev, originalAmount: formatAmountInput(e.target.value) } : prev)} className="text-right tabular pr-4" data-testid="input-edit-expense-original-amount" />
+                      <Input type="text" inputMode="decimal" value={editDraft.originalAmount} onChange={e => setEditDraft(prev => prev ? { ...prev, originalAmount: formatAmountInput(e.target.value) } : prev)} className="text-right tabular pr-4" data-testid="input-edit-expense-original-amount" />
                     </label>
                     <label className="space-y-1.5">
                       <span className="text-[11px] uppercase tracking-wider text-muted-foreground">TRM</span>
-                      <Input type="text" inputMode="numeric" value={editDraft.fxRate} onChange={e => setEditDraft(prev => prev ? { ...prev, fxRate: formatAmountInput(e.target.value) } : prev)} className="text-right tabular pr-4" data-testid="input-edit-expense-fx-rate" />
+                      <Input type="text" inputMode="decimal" value={editDraft.fxRate} onChange={e => setEditDraft(prev => prev ? { ...prev, fxRate: formatAmountInput(e.target.value) } : prev)} className="text-right tabular pr-4" data-testid="input-edit-expense-fx-rate" />
                     </label>
                   </>
                 )}
@@ -929,7 +965,7 @@ export default function Gastos() {
                   </TableCell>
                   <TableCell className="text-sm">{e.description}</TableCell>
                   <TableCell className="text-sm">{e.paidTo ?? '—'}</TableCell>
-                  <TableCell className="text-sm">{e.paidWith ?? '—'}</TableCell>
+                  <TableCell className="text-sm">{displayPaidWith(e.paidWith)}</TableCell>
                   <TableCell className="text-sm">{e.paidBy ?? '—'}</TableCell>
                   <TableCell>
                     <Badge variant={e.source === 'shopify' ? 'default' : e.source === 'manual' ? 'outline' : 'secondary'} className="text-[10px] uppercase tracking-wide">

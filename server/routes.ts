@@ -1700,7 +1700,7 @@ export async function registerRoutes(
         monto_original: expense.originalAmount ?? expense.amount,
         trm: expense.fxRate ?? '',
         impuesto_cop: expense.tax ?? '',
-        monto_cop: Math.round(expense.amount),
+        monto_cop: Math.round(expense.amount * 100) / 100,
         clasificacion: expense.classification,
         origen: expense.source,
         notas: expense.notes ?? '',

@@ -156,12 +156,15 @@ export class DatabaseStorage implements IStorage {
     if (!Number.isFinite(amountCop) || amountCop <= 0 || amountCop > 500_000_000) {
       throw new Error('Monto de gasto inválido.');
     }
+    // Round to 2 decimals to keep COP cents but avoid floating-point dust (e.g.
+    // 0.1 + 0.2 = 0.30000000000000004). Inputs like 123.45 round-trip exactly.
+    const preciseAmount = Math.round(amountCop * 100) / 100;
     return {
       month,
       currency,
       originalAmount,
       fxRate,
-      roundedAmount: Math.round(amountCop),
+      roundedAmount: preciseAmount,
       notes: expense.notes?.trim() || undefined,
     };
   }
@@ -353,7 +356,7 @@ export class DatabaseStorage implements IStorage {
     const nextAmount = account.type === 'liability'
       ? account.amount + amount * direction
       : account.amount - amount * direction;
-    this.upsertCashAmount(accountId, Math.max(0, Math.round(nextAmount)));
+    this.upsertCashAmount(accountId, Math.max(0, Math.round(nextAmount * 100) / 100));
   }
 
   async mergeCloseChecklist(seedItems: CloseChecklistItem[]): Promise<CloseChecklistItem[]> {
