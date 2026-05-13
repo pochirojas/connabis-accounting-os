@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { Fragment, useMemo, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
+import { apiRequest } from '@/lib/queryClient';
 import { formatCOP, formatDate, formatNumber, formatQty } from '@/lib/format';
 import type {
   MaterialCost, MmBomRow, MmCostHistoryRow, MmMaterialRow, MmMirrorStatus,
@@ -26,9 +27,10 @@ import { CartCalculator } from '@/components/cart-calculator';
 type ImportResponse = MmMirrorStatus & { warnings?: string[] };
 
 async function postJson(url: string) {
-  const response = await fetch(url, { method: 'POST', credentials: 'same-origin' });
-  if (!response.ok) throw new Error(`${url} → ${response.status}`);
-  return response.json();
+  const response = await apiRequest('POST', url);
+  if (response.status === 204) return null;
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
 }
 
 function downloadCsv(url: string, filename: string) {
@@ -66,8 +68,7 @@ export default function MaterialManagerPage() {
     queryKey: ['/api/material-manager/purchase-orders', selectedPoNumber],
     enabled: Boolean(selectedPoNumber),
     queryFn: async () => {
-      const response = await fetch(`/api/material-manager/purchase-orders/${selectedPoNumber}`);
-      if (!response.ok) throw new Error(`PO ${selectedPoNumber} → ${response.status}`);
+      const response = await apiRequest('GET', `/api/material-manager/purchase-orders/${selectedPoNumber}`);
       return response.json();
     },
   });

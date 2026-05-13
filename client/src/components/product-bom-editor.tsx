@@ -13,6 +13,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { formatCOP, formatQty } from '@/lib/format';
 import { Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
+import { apiRequest } from '@/lib/queryClient';
 import type { MmBomDraftRow, MmMaterialRow, ProductBomDetail } from '@shared/schema';
 
 type ImportedRow = ProductBomDetail['imported'][number];
@@ -27,21 +28,11 @@ type Props = {
   initialVariantId?: string;
 };
 
-function postJson(url: string, body: unknown, method: 'POST' | 'PATCH' | 'DELETE' = 'POST') {
-  return fetch(url, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: method === 'DELETE' ? undefined : JSON.stringify(body),
-  }).then(async response => {
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      let parsed: any;
-      try { parsed = text ? JSON.parse(text) : {}; } catch { parsed = { raw: text }; }
-      const detail = parsed.error || parsed.raw || `${response.status} ${response.statusText}`;
-      throw new Error(`${method} ${url} → ${detail}`);
-    }
-    return response.json();
-  });
+async function postJson(url: string, body: unknown, method: 'POST' | 'PATCH' | 'DELETE' = 'POST') {
+  const response = await apiRequest(method, url, method === 'DELETE' ? undefined : body);
+  if (response.status === 204) return null;
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
 }
 
 export function ProductBomEditor({ open, onClose, productName, variants, initialVariantId }: Props) {

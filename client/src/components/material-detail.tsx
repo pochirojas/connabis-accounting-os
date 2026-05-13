@@ -9,6 +9,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
+import { apiRequest } from '@/lib/queryClient';
 import { formatCOP, formatDate, formatNumber, formatQty } from '@/lib/format';
 import {
   ArrowLeft, Bell, Boxes as BoxesIcon, ChevronRight, Edit2, Mail, RotateCcw, Save, Trash2, TrendingUp, Truck,
@@ -24,15 +25,11 @@ type Props = {
   categoryOptions?: string[];
 };
 
-function postJson(url: string, body: unknown, method: 'POST' | 'PATCH' | 'DELETE' = 'POST') {
-  return fetch(url, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: method === 'DELETE' ? undefined : JSON.stringify(body),
-  }).then(async response => {
-    if (!response.ok) throw new Error(`${url} → ${response.status}`);
-    return response.json();
-  });
+async function postJson(url: string, body: unknown, method: 'POST' | 'PATCH' | 'DELETE' = 'POST') {
+  const response = await apiRequest(method, url, method === 'DELETE' ? undefined : body);
+  if (response.status === 204) return null;
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
 }
 
 type MaterialEditState = {
