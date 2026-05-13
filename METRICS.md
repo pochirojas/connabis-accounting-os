@@ -107,8 +107,20 @@ Proveedores que se tratan como inventario/capex para evitar doble conteo con COG
 - Gilded Extracts
 - Amazon
 - Imprenta
+- Dashmile (compras de disposables/materiales)
 
 Si un gasto de esos proveedores corresponde claramente a equipo/activo, se clasifica como `capex`; de lo contrario se clasifica como `inventory`.
+
+Orden de la función `classifyExpense` (`server/routes.ts`) — single source of truth para todo el OS (KPIs, P&L, dashboard, gastos analytics scope, day-details, daily performance):
+
+1. Categoría explícita Capex/Equipment/Equipo/Activo fijo → `capex`.
+2. Categoría explícita Inventario/Materials/Supplies/Insumos/Empaque/Hardware/Materia prima → `inventory`.
+3. paidTo / texto coincide con proveedor inventario/capex de la lista → `inventory` (o `capex` si la categoría sugiere capex).
+4. Sin categoría o categoría tipo `.`, `-`, `Otros`, `Sin categoría` → `uncategorized` (se mantiene en gastos operativos, pero alertado).
+5. Fallback heurístico por keywords en descripción/notas → `capex` / `inventory`.
+6. Default → `operating`.
+
+La categoría explícita gana sobre cualquier match de proveedor o keyword. Esto evita el regreso histórico donde gastos con categoría `Inventario` quedaban contados como operativos cuando el `paidTo` se parecía a un proveedor de operación. No se reescribe el dato en disco: `classification` es derivado al cargar (`withExpenseClassification`) y al resumir meses/KPIs (`summarizeMonths`, `buildDashboardKpis`).
 
 Regla anti doble conteo:
 
@@ -116,6 +128,16 @@ Regla anti doble conteo:
 - Esas compras no entran en `gastos operativos`.
 - El costo de venta del P&L viene solo de `COGS vendido` calculado desde BOM/MM por línea vendida.
 - Esto evita contar el mismo material dos veces: primero como compra del mes y luego como COGS cuando se vende el producto.
+
+## Shipping / Logística
+
+Benchmark estático Phase 1 (no calculado por orden todavía):
+
+- Shipping cobrado al cliente, orden estándar Connabis: **16.000 COP**.
+- Costo esperado por envío Envía estándar: **14.000–15.000 COP**.
+- Contribución bruta esperada por envío Envía estándar: **~1.000–2.000 COP** antes de fees adicionales, devoluciones o reenvíos. Envíos con Fedex u otros couriers premium suelen quedar negativos contra el shipping cobrado.
+
+Se documenta como nota de benchmark en la sección Logística de Gastos, no como KPI calculado, porque hoy el OS no tiene el cruce orden ↔ costo de envío real por proveedor. Cuando exista ese cruce (Phase 2+), reemplazar el bloque estático por un KPI real de margen de envío.
 
 ## Utilidad y márgenes
 

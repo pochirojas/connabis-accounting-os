@@ -559,7 +559,30 @@ const INVENTORY_CAPEX_SUPPLIERS = [
   'gilded extracts',
   'amazon',
   'imprenta',
+  'dashmile',
 ];
+
+// Explicit category buckets — the user-typed category alone is enough to classify the row.
+// Runs before the supplier heuristic so an "Inventario" row stays inventory even if paidTo
+// happens to look like an operating provider.
+const INVENTORY_CATEGORY_VALUES = new Set([
+  'inventario',
+  'inventory',
+  'materia prima',
+  'materials',
+  'supplies',
+  'insumos',
+  'empaque',
+  'hardware',
+]);
+
+const CAPEX_CATEGORY_VALUES = new Set([
+  'capex',
+  'activo fijo',
+  'equipment',
+  'equipo',
+  'equipos',
+]);
 
 function normalizeSearchText(value: unknown) {
   return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
@@ -574,9 +597,19 @@ function isInventoryCapexSupplier(expense: Record<string, unknown>) {
   });
 }
 
+// Single source of truth for "is this row an inventory/capex purchase?" — used for P&L,
+// KPIs, dashboard cards, gastos analytics scope, day-details, daily perf, etc. Order:
+//   1. Explicit Capex/Equipment category → capex
+//   2. Explicit Inventario/Materials/Supplies/Insumos/Empaque/Hardware category → inventory
+//   3. paidTo / text matches known inventory-supplier list → inventory (capex if category hints)
+//   4. Empty/junk category → uncategorized (counts as operating but alerted)
+//   5. Legacy keyword fallback in free-text → capex / inventory
+//   6. Default → operating
 function classifyExpense(expense: Record<string, unknown>): ExpenseClassification {
   const text = getExpenseText(expense);
-  const category = String(expense.category ?? '').trim().toLowerCase();
+  const category = normalizeSearchText(expense.category);
+  if (CAPEX_CATEGORY_VALUES.has(category)) return 'capex';
+  if (INVENTORY_CATEGORY_VALUES.has(category)) return 'inventory';
   if (isInventoryCapexSupplier(expense)) return category.includes('capex') ? 'capex' : 'inventory';
   if (!category || category === '.' || category === '-' || category.includes('sin categor') || category === 'otros' || category === 'other') {
     return 'uncategorized';

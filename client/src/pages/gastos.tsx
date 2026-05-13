@@ -815,6 +815,16 @@ export default function Gastos() {
             </div>
           </div>
 
+          <div className="mt-6 rounded-md border border-sky-500/30 bg-sky-500/5 p-3" data-testid="note-shipping-benchmark">
+            <h3 className="text-xs font-semibold tracking-tight text-sky-200">Logística · benchmark de envíos</h3>
+            <p className="text-[11.5px] text-muted-foreground mt-1 leading-snug">
+              Shipping cobrado al cliente (orden estándar): <span className="text-foreground font-medium">16.000 COP</span>.
+              Costo esperado por envío Envía: <span className="text-foreground font-medium">14.000–15.000 COP</span>.
+              Contribución bruta esperada por envío Envía estándar: <span className="text-foreground font-medium">~1.000–2.000 COP</span> antes de cualquier fee adicional, devolución o reenvío.
+              Comparar manualmente con recargas Envía/Skydropx y envíos Fedex en la tabla de Logística. No es un KPI calculado por orden: se mantiene como referencia estática hasta que haya tracking de costo por orden.
+            </p>
+          </div>
+
           <div className="mt-6">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-xs font-semibold tracking-tight">Mes × Categoría × Proveedor</h3>
