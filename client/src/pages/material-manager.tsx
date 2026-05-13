@@ -67,10 +67,6 @@ export default function MaterialManagerPage() {
   const selectedPoDetail = useQuery<MmPurchaseOrder>({
     queryKey: ['/api/material-manager/purchase-orders', selectedPoNumber],
     enabled: Boolean(selectedPoNumber),
-    queryFn: async () => {
-      const response = await apiRequest('GET', `/api/material-manager/purchase-orders/${selectedPoNumber}`);
-      return response.json();
-    },
   });
   const reimportPos = useMutation({
     mutationFn: () => postJson('/api/material-manager/purchase-orders/import'),
