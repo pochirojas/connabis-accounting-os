@@ -119,6 +119,7 @@ export default function Gastos() {
   const [filterProvider, setFilterProvider] = useState<string>('all');
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [filterMonth, setFilterMonth] = useState<string>('all');
+  const [filterYear, setFilterYear] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
   const allExpenses = useMemo(() => expenses.data ?? [], [expenses.data]);
@@ -163,6 +164,7 @@ export default function Gastos() {
   const providerOptions = useMemo(() => Array.from(new Set(scopedExpenses.map(e => e.paidTo).filter((v): v is string => Boolean(v)))).sort(), [scopedExpenses]);
   const categoryOptions = useMemo(() => Array.from(new Set(scopedExpenses.map(e => e.category).filter(Boolean))).sort(), [scopedExpenses]);
   const monthOptionsAnalytics = useMemo(() => Array.from(new Set(scopedExpenses.map(e => e.month))).sort().reverse(), [scopedExpenses]);
+  const yearOptionsAnalytics = useMemo(() => Array.from(new Set(scopedExpenses.map(e => (e.month ?? '').slice(0, 4)).filter(Boolean))).sort().reverse(), [scopedExpenses]);
 
   const filteredScoped = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -170,13 +172,14 @@ export default function Gastos() {
       if (filterProvider !== 'all' && (e.paidTo ?? '') !== filterProvider) return false;
       if (filterCategory !== 'all' && e.category !== filterCategory) return false;
       if (filterMonth !== 'all' && e.month !== filterMonth) return false;
+      if (filterYear !== 'all' && (e.month ?? '').slice(0, 4) !== filterYear) return false;
       if (term) {
         const blob = `${e.description} ${e.paidTo ?? ''} ${e.category} ${e.notes ?? ''}`.toLowerCase();
         if (!blob.includes(term)) return false;
       }
       return true;
     });
-  }, [scopedExpenses, filterProvider, filterCategory, filterMonth, searchTerm]);
+  }, [scopedExpenses, filterProvider, filterCategory, filterMonth, filterYear, searchTerm]);
   const filteredTotal = filteredScoped.reduce((s, e) => s + e.amount, 0);
 
   const byProvider = useMemo(() => {
@@ -670,7 +673,7 @@ export default function Gastos() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-2 mb-4">
             <label className="space-y-1">
               <span className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Buscar</span>
               <Input
@@ -705,6 +708,18 @@ export default function Gastos() {
               </select>
             </label>
             <label className="space-y-1">
+              <span className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Año</span>
+              <select
+                value={filterYear}
+                onChange={e => setFilterYear(e.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                data-testid="select-filter-year"
+              >
+                <option value="all">Todos</option>
+                {yearOptionsAnalytics.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </label>
+            <label className="space-y-1">
               <span className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Mes</span>
               <select
                 value={filterMonth}
@@ -713,7 +728,9 @@ export default function Gastos() {
                 data-testid="select-filter-month"
               >
                 <option value="all">Todos</option>
-                {monthOptionsAnalytics.map(m => <option key={m} value={m}>{m}</option>)}
+                {monthOptionsAnalytics
+                  .filter(m => filterYear === 'all' || m.slice(0, 4) === filterYear)
+                  .map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </label>
           </div>
