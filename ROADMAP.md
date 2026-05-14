@@ -177,3 +177,41 @@ Regla de scope:
 - Cualquier trabajo de inventario/BOM/materiales/terpenos pertenece a Phase 2, no a Phase 3.
 - Phase 3 arranca cuando el equipo deje de tocar Material Manager para operar.
 
+## Phase 4 — Blend editor + bulk BOM replace (NO implementado)
+
+Objetivo:
+
+Permitir editar las **recetas de la Calculadora de Carts** como borradores y, tras
+una **doble confirmación**, aplicar el reemplazo de ingredientes cannabinoides
+dentro del BOM de todos los productos que usen ese blend. Esto consolida la
+relación blend → familia de productos en lugar de tener que editar cada BOM
+variante por variante.
+
+Alcance:
+
+- Editor de blends draft (no destructivo) basado en la lista actual de recetas
+  (X, XX, XXX, CBDOBLE, etc.).
+- Vista previa de qué productos / variantes serían afectados por aplicar el
+  borrador, con costos antes/después.
+- Aplicación bulk **opt-in con doble confirmación**: actualiza los valores de
+  los ingredientes cannabinoides dentro del BOM de todos los productos que
+  usen ese blend.
+
+Exclusiones explícitas (no se actualizan bulk):
+
+- Mushrooms.
+- Solubles.
+- Distillates puros (productos que el blend no compone).
+
+Pre-requisitos antes de implementar:
+
+- Phase 2 cerrada (MM reemplazado completamente dentro del OS).
+- BOM editor robusto con undo por fila (Phase 2 pendiente).
+- Mapeo canónico blend → producto/variante confirmado (deriva del Terpene
+  Rotation Manager + manual override del operador).
+- Snapshot/export de BOM antes de cada aplicación bulk para rollback rápido.
+
+Estado: **NO implementado**. Hoy el Terpene Rotation Manager (Phase 2)
+gestiona los nombres canónicos y borradores de reemplazo de terpenos sin
+tocar BOM. La aplicación masiva a BOM vive aquí en Phase 4.
+

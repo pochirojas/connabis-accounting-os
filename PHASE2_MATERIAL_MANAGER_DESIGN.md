@@ -703,3 +703,10 @@ El módulo se considera listo cuando:
 3. Las variantes de contenedor (1ml/2.25ml/4ml/Jeringa) están conectadas vía `terpene_product_variants` a Shopify product/variant IDs reales.
 4. Export CSV + re-import es bit-exact (round-trip QA).
 5. El equipo confirma que puede rotar un terpeno (entrada/salida) sin abrir Material Manager ni el admin de Shopify.
+
+### Estado actual del Terpene Rotation Manager
+
+- **Implementado (`/terpenos`)**: gestor local de slots de rotación con nombre canónico, estado (`active | incoming | retired`) y ancla opcional a material MM; borradores de reemplazo terpeno-saliente → terpeno-entrante con marcado de contenedores afectados (1ml/2.25ml/4ml/Jeringa).
+- **Persistencia local**: tablas `terpene_rotation_slots` y `terpene_replacement_drafts`. Ningún cambio aquí toca MM mirror, BOM ni Shopify — los drafts son revisables/archivables pero no se aplican.
+- **Pendiente (Phase 2.6 completa)**: catálogo canónico con `canonical_id` global, historial de rotaciones, `terpene_product_variants` por contenedor, mapeos a `material_id`, alertas de salida de rotación, integración con Calculadora de Carts.
+- **Aplicación bulk a BOM**: movida a **Phase 4** (ver `ROADMAP.md`). El módulo actual nunca destruye BOM — solo enumera el plan.

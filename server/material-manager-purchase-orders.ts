@@ -354,8 +354,19 @@ export function importMmPurchaseOrders(sqlite: Database.Database): ImportPosResu
   let cancelledPos = 0;
 
   const tx = sqlite.transaction(() => {
-    sqlite.prepare('DELETE FROM material_manager_purchase_order_lines').run();
-    sqlite.prepare('DELETE FROM material_manager_purchase_orders').run();
+    // Preserve manually-created POs (source_file = 'manual') so reimporting the
+    // CSV set never destroys hand-entered orders. Cascading delete on the lines
+    // table is handled by the FK.
+    const manualIdRows = sqlite.prepare(`SELECT id FROM material_manager_purchase_orders WHERE source_file = 'manual'`).all() as Array<{ id: number }>;
+    const manualIds = manualIdRows.map(r => Number(r.id));
+    if (manualIds.length) {
+      const placeholders = manualIds.map(() => '?').join(',');
+      sqlite.prepare(`DELETE FROM material_manager_purchase_order_lines WHERE purchase_order_id NOT IN (${placeholders})`).run(...manualIds);
+      sqlite.prepare(`DELETE FROM material_manager_purchase_orders WHERE id NOT IN (${placeholders})`).run(...manualIds);
+    } else {
+      sqlite.prepare('DELETE FROM material_manager_purchase_order_lines').run();
+      sqlite.prepare('DELETE FROM material_manager_purchase_orders').run();
+    }
 
     const insertPo = sqlite.prepare(`
       INSERT INTO material_manager_purchase_orders (
@@ -575,6 +586,116 @@ export function getMmPurchaseOrdersStatus(sqlite: Database.Database): MmPurchase
     suppliers: Number(suppliersRow.c ?? 0),
     lastImportedAt: lastRow?.imported_at ? String(lastRow.imported_at) : null,
   };
+}
+
+// ---------- Manual PO creation (Phase 2.2+) ----------
+// Manually-entered purchase orders live alongside the CSV-imported ones but
+// are tagged with `source_file = 'manual'`. They survive reimporting the CSV
+// set and are included in totals/status so the UI works for new in-house POs.
+export type CreateManualPoInput = {
+  poNumber?: string;          // optional — auto-assigned if omitted
+  date: string;               // YYYY-MM-DD
+  supplier: string;
+  shipTo?: string;
+  currency?: string;
+  referenceNumber?: string | null;
+  notes?: string | null;
+  shipping?: number;
+  taxes?: number;
+  lines: Array<{
+    product: string;
+    sku?: string;
+    quantity: number;
+    unitCost: number;
+    taxPct?: number;
+  }>;
+};
+
+function nextManualPoNumber(sqlite: Database.Database): string {
+  ensureMmPurchaseOrderSchema(sqlite);
+  const rows = sqlite.prepare(`SELECT po_number FROM material_manager_purchase_orders`).all() as Array<{ po_number: string }>;
+  let maxN = 0;
+  rows.forEach(r => {
+    const m = String(r.po_number).match(/^PO(\d+)/i);
+    if (m) maxN = Math.max(maxN, Number(m[1]));
+  });
+  return `PO${maxN + 1}`;
+}
+
+export function createMmPurchaseOrder(sqlite: Database.Database, input: CreateManualPoInput): MmPurchaseOrder {
+  ensureMmPurchaseOrderSchema(sqlite);
+  if (!input.lines.length) throw new Error('po_requires_lines');
+  if (!input.supplier.trim()) throw new Error('po_requires_supplier');
+  if (!input.date) throw new Error('po_requires_date');
+
+  const poNumber = (input.poNumber && input.poNumber.trim()) ? input.poNumber.trim() : nextManualPoNumber(sqlite);
+  const existing = sqlite.prepare('SELECT id FROM material_manager_purchase_orders WHERE po_number = ?').get(poNumber);
+  if (existing) throw new Error(`po_already_exists:${poNumber}`);
+
+  const importedAt = new Date().toISOString();
+  const shipping = Number(input.shipping ?? 0) || 0;
+  const taxesOverride = Number(input.taxes ?? 0) || 0;
+  let subtotal = 0;
+  let taxes = 0;
+  const linesPrepared = input.lines.map((line, idx) => {
+    const qty = Number(line.quantity) || 0;
+    const unitCost = Number(line.unitCost) || 0;
+    const taxPct = Number(line.taxPct ?? 0) || 0;
+    const lineSubtotal = qty * unitCost;
+    const lineTax = lineSubtotal * (taxPct / 100);
+    subtotal += lineSubtotal;
+    taxes += lineTax;
+    return {
+      product: line.product,
+      sku: line.sku ?? '',
+      quantity: qty,
+      unitCost,
+      taxPct,
+      totalCop: lineSubtotal + lineTax,
+      lineIndex: idx,
+    };
+  });
+  if (taxesOverride > 0) taxes = taxesOverride;
+  const total = subtotal + taxes + shipping;
+
+  const tx = sqlite.transaction(() => {
+    const info = sqlite.prepare(`
+      INSERT INTO material_manager_purchase_orders (
+        po_number, date, supplier, ship_to, currency, reference_number, notes,
+        subtotal, taxes, shipping, total, status, source_file, imported_at
+      ) VALUES (
+        @po_number, @date, @supplier, @ship_to, @currency, @reference_number, @notes,
+        @subtotal, @taxes, @shipping, @total, 'received', 'manual', @imported_at
+      )
+    `).run({
+      po_number: poNumber,
+      date: input.date,
+      supplier: input.supplier.trim(),
+      ship_to: input.shipTo ?? '',
+      currency: input.currency ?? 'COP',
+      reference_number: input.referenceNumber ?? null,
+      notes: input.notes ?? null,
+      subtotal,
+      taxes,
+      shipping,
+      total,
+      imported_at: importedAt,
+    });
+    const poId = Number(info.lastInsertRowid);
+    const insertLine = sqlite.prepare(`
+      INSERT INTO material_manager_purchase_order_lines (
+        purchase_order_id, po_number, product, sku, quantity, unit_cost, tax_pct, total_cop, line_index
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    linesPrepared.forEach(line => {
+      insertLine.run(poId, poNumber, line.product, line.sku, line.quantity, line.unitCost, line.taxPct, line.totalCop, line.lineIndex);
+    });
+    return poId;
+  });
+  tx();
+  const created = getMmPurchaseOrder(sqlite, poNumber);
+  if (!created) throw new Error('po_create_failed');
+  return created;
 }
 
 // Auto-import on startup if the table is empty. Idempotent.

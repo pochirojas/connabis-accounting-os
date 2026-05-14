@@ -46,7 +46,15 @@ export const queryClient = new QueryClient({
       queryFn: getQueryFn({ on401: "throw" }),
       refetchInterval: false,
       refetchOnWindowFocus: false,
+      refetchOnMount: false,
       staleTime: Infinity,
+      // Keep cached results around for the whole session instead of the default
+      // 5 min so screen-to-screen navigation reuses data instantly. Mutations
+      // continue to invalidate per query key when state actually changes.
+      gcTime: 1000 * 60 * 60 * 12,
+      // Show last data for parameterised queries (e.g. /api/day-details?date=…)
+      // instead of going back to a loading state while the new key fetches.
+      placeholderData: (previousData: unknown) => previousData,
       retry: false,
     },
     mutations: {

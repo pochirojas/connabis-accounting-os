@@ -50,6 +50,11 @@ type MaterialEditState = {
   // Never sent to Shopify / never part of the round-trip MM CSV.
   notifyEmail: string;
   lowStockThreshold: string;
+  // Local photo URL. MM does not currently expose a `photo_url` column in the
+  // round-trip CSV, so until the canonical field lands we store it in the same
+  // override note JSON. When the canonical MM field is added we will read from
+  // it preferentially and treat this as a fallback.
+  imageUrl: string;
 };
 
 // Notification fields live inside the override `note` column as JSON so we
@@ -57,8 +62,8 @@ type MaterialEditState = {
 // text — wrapping the JSON with a sentinel keeps it backwards-compatible.
 const NOTE_JSON_PREFIX = '__matnote__:';
 
-function parseNoteJson(note: string | null | undefined): { notifyEmail: string; lowStockThreshold: string; raw: string } {
-  const fallback = { notifyEmail: '', lowStockThreshold: '', raw: '' };
+function parseNoteJson(note: string | null | undefined): { notifyEmail: string; lowStockThreshold: string; imageUrl: string; raw: string } {
+  const fallback = { notifyEmail: '', lowStockThreshold: '', imageUrl: '', raw: '' };
   if (!note) return fallback;
   if (!note.startsWith(NOTE_JSON_PREFIX)) return { ...fallback, raw: note };
   try {
@@ -66,6 +71,7 @@ function parseNoteJson(note: string | null | undefined): { notifyEmail: string; 
     return {
       notifyEmail: typeof parsed.notifyEmail === 'string' ? parsed.notifyEmail : '',
       lowStockThreshold: parsed.lowStockThreshold != null ? String(parsed.lowStockThreshold) : '',
+      imageUrl: typeof parsed.imageUrl === 'string' ? parsed.imageUrl : '',
       raw: typeof parsed.raw === 'string' ? parsed.raw : '',
     };
   } catch {
@@ -73,12 +79,13 @@ function parseNoteJson(note: string | null | undefined): { notifyEmail: string; 
   }
 }
 
-function serializeNoteJson(state: { notifyEmail: string; lowStockThreshold: string }, raw?: string): string | null {
-  const hasContent = state.notifyEmail.trim() || state.lowStockThreshold.trim() || (raw ?? '').trim();
+function serializeNoteJson(state: { notifyEmail: string; lowStockThreshold: string; imageUrl?: string }, raw?: string): string | null {
+  const hasContent = state.notifyEmail.trim() || state.lowStockThreshold.trim() || (state.imageUrl ?? '').trim() || (raw ?? '').trim();
   if (!hasContent) return null;
   return NOTE_JSON_PREFIX + JSON.stringify({
     notifyEmail: state.notifyEmail.trim() || undefined,
     lowStockThreshold: state.lowStockThreshold.trim() ? Number(state.lowStockThreshold) : undefined,
+    imageUrl: (state.imageUrl ?? '').trim() || undefined,
     raw: (raw ?? '').trim() || undefined,
   });
 }
@@ -101,6 +108,7 @@ function toEditState(m: MaterialDetail['material'] | undefined | null): Material
     limitShopifyInventory: Boolean(m?.limitShopifyInventory),
     notifyEmail: note.notifyEmail,
     lowStockThreshold: note.lowStockThreshold,
+    imageUrl: note.imageUrl,
   };
 }
 
@@ -146,6 +154,7 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant, category
         note: serializeNoteJson({
           notifyEmail: payload.notifyEmail,
           lowStockThreshold: payload.lowStockThreshold,
+          imageUrl: payload.imageUrl,
         }),
       }, 'PATCH'),
     onSuccess: () => {
@@ -242,7 +251,13 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant, category
         {/* Left column — material info + products using this material */}
         <div className="space-y-4">
           <Card className="p-5" data-testid="card-material-info">
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-4">
+              <MaterialPhoto
+                imageUrl={edit.imageUrl}
+                alt={edit.name || m.name}
+                onChange={(v) => onFieldChange('imageUrl', v)}
+              />
+              <div className="flex-1 flex items-start justify-between gap-3">
               <div className="flex-1">
                 <Input
                   value={edit.name}
@@ -263,6 +278,7 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant, category
               <div className="flex flex-col items-end gap-1.5">
                 <Badge variant="outline" className="text-[11px] tabular">{edit.currencyCode || m.currencyCode}</Badge>
                 {dirty ? <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-300">Sin guardar</Badge> : null}
+              </div>
               </div>
             </div>
 
@@ -709,6 +725,57 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant, category
           </Card>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Material thumbnail + URL editor. MM does not expose a `photo_url` column in
+// the current round-trip CSV, so the URL is persisted in the local override
+// `note` JSON. When the canonical MM field lands we will switch to reading
+// from it first and keep this as a manual fallback. The image is rendered
+// only when a URL is present; otherwise a neutral placeholder is shown so the
+// layout stays stable.
+function MaterialPhoto({ imageUrl, alt, onChange }: { imageUrl: string; alt: string; onChange: (next: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [broken, setBroken] = useState(false);
+  const trimmed = (imageUrl || '').trim();
+  return (
+    <div className="shrink-0 w-[88px]" data-testid="material-photo">
+      <div
+        className="aspect-square w-full rounded-md border border-border bg-muted/40 overflow-hidden flex items-center justify-center cursor-pointer"
+        title={trimmed ? 'Click para cambiar foto' : 'Click para agregar URL de foto (local, no sincroniza con MM)'}
+        onClick={() => setOpen(v => !v)}
+        data-testid="material-photo-thumb"
+      >
+        {trimmed && !broken ? (
+          <img
+            src={trimmed}
+            alt={alt}
+            className="w-full h-full object-cover"
+            onError={() => setBroken(true)}
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <div className="flex flex-col items-center text-muted-foreground">
+            <BoxesIcon className="h-6 w-6 opacity-70" />
+            <span className="text-[9px] uppercase tracking-wider mt-0.5">Sin foto</span>
+          </div>
+        )}
+      </div>
+      {open ? (
+        <div className="mt-1">
+          <Input
+            value={imageUrl}
+            onChange={(e) => { setBroken(false); onChange(e.target.value); }}
+            placeholder="https://… (foto)"
+            className="h-7 text-[11px] font-mono"
+            data-testid="input-material-photo-url"
+          />
+          <p className="text-[9.5px] text-muted-foreground mt-1 leading-tight">
+            URL local (override note). Mientras MM no exporte un campo <code>photo_url</code> en el CSV, el editor MM seguirá guardando foto manualmente aquí.
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }

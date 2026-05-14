@@ -23,6 +23,7 @@ import type {
 import { MaterialDetailView } from '@/components/material-detail';
 import { ProductBomEditor } from '@/components/product-bom-editor';
 import { CartCalculator } from '@/components/cart-calculator';
+import { CreatePurchaseOrderDialog } from '@/components/create-purchase-order-dialog';
 
 type ImportResponse = MmMirrorStatus & { warnings?: string[] };
 
@@ -57,6 +58,13 @@ export default function MaterialManagerPage() {
   const materials = useQuery<MmMaterialRow[]>({ queryKey: ['/api/material-manager/materials'] });
   const bom = useQuery<MmBomRow[]>({ queryKey: ['/api/material-manager/bom'] });
   const costHistory = useQuery<MmCostHistoryRow[]>({ queryKey: ['/api/material-manager/cost-history'] });
+  // Active Shopify variant IDs — used to scope the BOM page to active products.
+  // Falls back to "show everything" when Shopify is not connected so dev / seed
+  // mode keeps working.
+  const activeVariants = useQuery<{ connected: boolean; variantIds: string[]; productCount: number }>({
+    queryKey: ['/api/material-manager/active-variant-ids'],
+  });
+  const [bomActiveOnly, setBomActiveOnly] = useState(true);
 
   // Legacy "Inventario & Compras" data — Purchase Orders + material lastCost reference list.
   const materialsLegacy = useQuery<MaterialCost[]>({ queryKey: ['/api/materials'] });
@@ -112,16 +120,28 @@ export default function MaterialManagerPage() {
     );
   }, [materials.data, materialFilter]);
 
+  const activeVariantSet = useMemo(() => {
+    const ids = activeVariants.data?.variantIds;
+    return ids && ids.length ? new Set(ids) : null;
+  }, [activeVariants.data]);
+
   const filteredBom = useMemo(() => {
     const term = bomFilter.trim().toLowerCase();
-    if (!term) return bom.data ?? [];
-    return (bom.data ?? []).filter(row =>
+    let rows = bom.data ?? [];
+    // Scope to active Shopify variants when the user wants it AND we have the
+    // list. When Shopify is not connected we don't filter — the empty set
+    // would otherwise hide every row in seed/dev mode.
+    if (bomActiveOnly && activeVariantSet) {
+      rows = rows.filter(row => activeVariantSet.has(row.variantId));
+    }
+    if (!term) return rows;
+    return rows.filter(row =>
       row.materialName.toLowerCase().includes(term) ||
       row.productName.toLowerCase().includes(term) ||
       row.variantName.toLowerCase().includes(term) ||
       row.variantId.includes(term),
     );
-  }, [bom.data, bomFilter]);
+  }, [bom.data, bomFilter, bomActiveOnly, activeVariantSet]);
 
   // Group BOM rows by product, with variants underneath. Computes per-variant
   // estimated COGS using current MM material costs (when present) so the
@@ -353,9 +373,22 @@ export default function MaterialManagerPage() {
                 <p className="text-xs text-muted-foreground">
                   Agrupado por producto base. Cada fila muestra # variantes, componentes y COGS estimado (min/avg/max).
                   Expande para ver variantes; expande una variante para ver su BOM. El filtro aplica a producto/variante/material.
+                  {activeVariants.data?.connected
+                    ? <span className="block mt-1"><span className="text-emerald-300">Shopify conectado</span> · filtrando a {activeVariants.data.variantIds.length} variantes activas de {activeVariants.data.productCount} productos.</span>
+                    : <span className="block mt-1 text-amber-300">Shopify no conectado · se muestran todas las variantes del MM mirror.</span>}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <label className="inline-flex items-center gap-1.5 text-[11.5px] text-muted-foreground" title={activeVariants.data?.connected ? 'Filtra a productos activos de Shopify' : 'Shopify no conectado — el filtro no aplica.'}>
+                  <input
+                    type="checkbox"
+                    checked={bomActiveOnly}
+                    onChange={e => setBomActiveOnly(e.target.checked)}
+                    disabled={!activeVariants.data?.connected}
+                    data-testid="checkbox-bom-active-only"
+                  />
+                  Solo Shopify activos
+                </label>
                 <Input
                   value={bomFilter}
                   onChange={e => setBomFilter(e.target.value)}
@@ -533,8 +566,9 @@ export default function MaterialManagerPage() {
                   Click en una fila para ver líneas y resumen.
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Badge variant="outline" className="text-[11px]">{realPos.length} órdenes</Badge>
+                <CreatePurchaseOrderDialog />
                 <Button size="sm" variant="outline" onClick={() => reimportPos.mutate()} disabled={reimportPos.isPending} data-testid="button-reimport-pos">
                   <RefreshCcw className="h-3.5 w-3.5 mr-1.5" />
                   {reimportPos.isPending ? 'Reimportando…' : 'Reimportar CSV'}

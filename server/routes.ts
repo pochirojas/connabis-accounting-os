@@ -33,7 +33,16 @@ import {
   listMmPurchaseOrders,
   getMmPurchaseOrder,
   getMmPurchaseOrdersStatus,
+  createMmPurchaseOrder,
 } from './material-manager-purchase-orders';
+import {
+  listTerpeneSlots,
+  upsertTerpeneSlot,
+  deleteTerpeneSlot,
+  listTerpeneDrafts,
+  upsertTerpeneDraft,
+  deleteTerpeneDraft,
+} from './terpene-rotation';
 import {
   CLEAR_BUBBLE_BAG_COST,
   buildRecipesWithMmCosts,
@@ -1658,6 +1667,34 @@ export async function registerRoutes(
     const result = importMmPurchaseOrders(sqlite);
     res.json({ ...result, status: getMmPurchaseOrdersStatus(sqlite) });
   });
+
+  app.post('/api/material-manager/purchase-orders', (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const created = createMmPurchaseOrder(sqlite, {
+        poNumber: typeof body.poNumber === 'string' ? body.poNumber : undefined,
+        date: String(body.date ?? ''),
+        supplier: String(body.supplier ?? ''),
+        shipTo: typeof body.shipTo === 'string' ? body.shipTo : '',
+        currency: typeof body.currency === 'string' ? body.currency : 'COP',
+        referenceNumber: typeof body.referenceNumber === 'string' && body.referenceNumber ? body.referenceNumber : null,
+        notes: typeof body.notes === 'string' && body.notes ? body.notes : null,
+        shipping: typeof body.shipping === 'number' ? body.shipping : 0,
+        taxes: typeof body.taxes === 'number' ? body.taxes : 0,
+        lines: Array.isArray(body.lines) ? body.lines.map((line: Record<string, unknown>) => ({
+          product: String(line.product ?? ''),
+          sku: typeof line.sku === 'string' ? line.sku : '',
+          quantity: Number(line.quantity ?? 0),
+          unitCost: Number(line.unitCost ?? 0),
+          taxPct: typeof line.taxPct === 'number' ? line.taxPct : 0,
+        })) : [],
+      });
+      res.json(created);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'create_failed';
+      res.status(400).json({ error: message });
+    }
+  });
   app.get('/api/income-details', async (req, res) => {
     try {
       const month = typeof req.query.month === 'string' ? req.query.month : undefined;
@@ -2081,6 +2118,24 @@ export async function registerRoutes(
     }));
   });
 
+  // Returns the set of variant legacy IDs that belong to ACTIVE Shopify
+  // products. Used by the BOM/Productos tab to hide rows for archived /
+  // unpublished SKUs. Returns an empty list (with `connected: false`) when
+  // Shopify is not connected — the UI then falls back to showing all rows so
+  // dev/mock data still works.
+  app.get('/api/material-manager/active-variant-ids', async (_req, res) => {
+    try {
+      const live = await loadLiveShopifyProducts();
+      const ids = new Set<string>();
+      live.forEach(product => {
+        (product.variantLegacyIds ?? []).forEach(v => v.id && ids.add(v.id));
+      });
+      res.json({ connected: true, variantIds: Array.from(ids), productCount: live.length });
+    } catch {
+      res.json({ connected: false, variantIds: [], productCount: 0 });
+    }
+  });
+
   app.get('/api/material-manager/cost-history', (req, res) => {
     res.json(listMmCostHistory(sqlite, {
       materialKey: req.query.materialKey ? String(req.query.materialKey) : undefined,
@@ -2215,6 +2270,55 @@ export async function registerRoutes(
       packaging: buildPackagingWithMmCosts(sqlite),
       bagCost: CLEAR_BUBBLE_BAG_COST,
     });
+  });
+
+  // ---------- Terpene Rotation Manager (Phase 2 · draft-only) ----------
+  // Local-only canonical rotation slots + draft replacement plan. No mutation
+  // here is ever propagated to MM/BOM/Shopify — those are Phase 2.3+ tasks.
+  app.get('/api/terpene-rotation/slots', (_req, res) => {
+    res.json(listTerpeneSlots(sqlite));
+  });
+  app.post('/api/terpene-rotation/slots', (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const saved = upsertTerpeneSlot(sqlite, {
+        id: typeof body.id === 'number' ? body.id : undefined,
+        slotIndex: Number(body.slotIndex),
+        displayName: String(body.displayName ?? ''),
+        materialIdHint: typeof body.materialIdHint === 'string' && body.materialIdHint ? body.materialIdHint : null,
+        status: body.status,
+        notes: typeof body.notes === 'string' && body.notes ? body.notes : null,
+      });
+      res.json(saved);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'slot_save_failed' });
+    }
+  });
+  app.delete('/api/terpene-rotation/slots/:id', (req, res) => {
+    res.json({ deleted: deleteTerpeneSlot(sqlite, Number(req.params.id)) });
+  });
+  app.get('/api/terpene-rotation/drafts', (_req, res) => {
+    res.json(listTerpeneDrafts(sqlite));
+  });
+  app.post('/api/terpene-rotation/drafts', (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const saved = upsertTerpeneDraft(sqlite, {
+        id: typeof body.id === 'number' ? body.id : undefined,
+        fromName: String(body.fromName ?? '').trim(),
+        toName: String(body.toName ?? '').trim(),
+        affectedVariantPattern: typeof body.affectedVariantPattern === 'string' && body.affectedVariantPattern ? body.affectedVariantPattern : null,
+        containerVariants: typeof body.containerVariants === 'string' ? body.containerVariants : '',
+        status: body.status,
+        notes: typeof body.notes === 'string' && body.notes ? body.notes : null,
+      });
+      res.json(saved);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'draft_save_failed' });
+    }
+  });
+  app.delete('/api/terpene-rotation/drafts/:id', (req, res) => {
+    res.json({ deleted: deleteTerpeneDraft(sqlite, Number(req.params.id)) });
   });
 
   return httpServer;

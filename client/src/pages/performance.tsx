@@ -12,28 +12,66 @@ import type { DailyPerformance, MonthlyRow } from '@shared/schema';
 import { formatCOP, formatCOPCompact, formatDate, formatNumber } from '@/lib/format';
 import { KpiCard } from '@/components/kpi-card';
 import { CalendarDays, Crown, Package, TrendingUp } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { sortByDate, type ChartSortOrder } from '@/lib/chart-sort';
 import { apiRequest } from '@/lib/queryClient';
 
 export default function Performance() {
   const daily = useQuery<DailyPerformance[]>({ queryKey: ['/api/daily-performance'] });
   const months = useQuery<MonthlyRow[]>({ queryKey: ['/api/months'] });
-  const [selectedMonth, setSelectedMonth] = useState('2026-04');
-  const [compareMonth, setCompareMonth] = useState('2026-03');
+  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const currentMonth = today.slice(0, 7);
+  const currentYear = today.slice(0, 4);
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+  const [compareMonth, setCompareMonth] = useState('');
   const [dailyChartSort, setDailyChartSort] = useState<ChartSortOrder>('oldest');
   const [periodMode, setPeriodMode] = useState<'month' | 'year' | 'ytd' | 'week' | 'custom'>('month');
-  const [selectedYear, setSelectedYear] = useState('2026');
-  const [weekStart, setWeekStart] = useState('2026-04-01');
-  const [customStart, setCustomStart] = useState('2026-04-01');
-  const [customEnd, setCustomEnd] = useState('2026-04-30');
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const monthFirstDay = `${currentMonth}-01`;
+  const [weekStart, setWeekStart] = useState(monthFirstDay);
+  const [customStart, setCustomStart] = useState(monthFirstDay);
+  const [customEnd, setCustomEnd] = useState(today);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
-  const monthOptions = useMemo(() => (months.data ?? []).filter(m => {
-    if (periodMode === 'year' || periodMode === 'ytd') return m.month.startsWith(`${selectedYear}-`);
-    if (periodMode === 'week' || periodMode === 'custom') return (!customStart || m.month >= customStart.slice(0, 7)) && (!customEnd || m.month <= customEnd.slice(0, 7));
-    return true;
-  }), [customEnd, customStart, months.data, periodMode, selectedYear]);
+  // Snap selectedMonth/compareMonth to actual months returned by the API once
+  // they load. Without this, the dropdown can be stuck on a month with no
+  // backing row (e.g. user opens the page during a month with no data yet).
+  const monthIds = useMemo(() => (months.data ?? []).map(m => m.month), [months.data]);
+  useEffect(() => {
+    if (!monthIds.length) return;
+    if (!monthIds.includes(selectedMonth)) setSelectedMonth(monthIds[monthIds.length - 1]);
+    if (!compareMonth || !monthIds.includes(compareMonth)) {
+      const idx = monthIds.indexOf(selectedMonth);
+      const prev = idx > 0 ? monthIds[idx - 1] : monthIds[Math.max(0, monthIds.length - 2)];
+      setCompareMonth(prev || monthIds[0]);
+    }
+  }, [monthIds, selectedMonth, compareMonth]);
+
+  // Month dropdown options scoped to the active period mode. The previous
+  // version used customStart/customEnd to filter the "Semana" mode too, which
+  // left the months dropdown stale when the user changed weekStart. The new
+  // logic derives the visible range from the period's own state.
+  const monthOptions = useMemo(() => {
+    const all = months.data ?? [];
+    if (periodMode === 'year' || periodMode === 'ytd') {
+      return all.filter(m => m.month.startsWith(`${selectedYear}-`));
+    }
+    if (periodMode === 'week') {
+      const weekEnd = new Date(`${weekStart}T00:00:00`);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      const weekEndText = weekEnd.toISOString().slice(0, 10);
+      const lo = weekStart.slice(0, 7);
+      const hi = weekEndText.slice(0, 7);
+      return all.filter(m => m.month >= lo && m.month <= hi);
+    }
+    if (periodMode === 'custom') {
+      const lo = (customStart || '').slice(0, 7);
+      const hi = (customEnd || '').slice(0, 7);
+      return all.filter(m => (!lo || m.month >= lo) && (!hi || m.month <= hi));
+    }
+    return all;
+  }, [months.data, periodMode, selectedYear, weekStart, customStart, customEnd]);
+
   const rows = useMemo(() => {
     const all = daily.data ?? [];
     const weekEnd = new Date(`${weekStart}T00:00:00`);
@@ -42,11 +80,11 @@ export default function Performance() {
     return all.filter(r => {
       if (periodMode === 'month') return r.month === selectedMonth;
       if (periodMode === 'year') return r.month.startsWith(`${selectedYear}-`);
-      if (periodMode === 'ytd') return r.date >= `${selectedYear}-01-01` && r.date <= new Date().toISOString().slice(0, 10);
+      if (periodMode === 'ytd') return r.date >= `${selectedYear}-01-01` && r.date <= today;
       if (periodMode === 'week') return r.date >= weekStart && r.date <= weekEndText;
       return r.date >= customStart && r.date <= customEnd;
     }).sort((a, b) => a.date.localeCompare(b.date));
-  }, [customEnd, customStart, daily.data, periodMode, selectedMonth, selectedYear, weekStart]);
+  }, [customEnd, customStart, daily.data, periodMode, selectedMonth, selectedYear, today, weekStart]);
   const dayDetails = useQuery<{
     date: string;
     income: Array<{ orderName: string; product: string; sku: string; qty: number; netRevenue: number; cogsSold: number; hasBom: boolean }>;
@@ -134,16 +172,18 @@ export default function Performance() {
               <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} className="h-10 rounded-md border border-input bg-background px-3 text-sm" data-testid="input-performance-end" />
             </div>
           )}
-          <select
-            value={selectedMonth}
-            onChange={e => setSelectedMonth(e.target.value)}
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-            data-testid="select-performance-month"
-          >
-            {monthOptions.map(m => (
-              <option key={m.month} value={m.month}>{m.label}</option>
-            ))}
-          </select>
+          {periodMode === 'month' && (
+            <select
+              value={selectedMonth}
+              onChange={e => setSelectedMonth(e.target.value)}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              data-testid="select-performance-month"
+            >
+              {(monthOptions.length ? monthOptions : (months.data ?? [])).map(m => (
+                <option key={m.month} value={m.month}>{m.label}</option>
+              ))}
+            </select>
+          )}
           {month && (
             <div className="mt-4 space-y-2 text-sm">
               <Row label="Ingresos del mes" value={formatCOP(month.income)} />

@@ -69,21 +69,21 @@ const SEED_COST_PER_ML: Record<string, number> = {
 // `Receta `). The XTREME row also exposes `HHCp`/`HHCP` casing because the
 // sheet itself is inconsistent there.
 export const CART_RECIPES: CartRecipe[] = [
-  recipe('pineapple-x', 'Pineapple X', [
+  recipe('pineapple-x', 'X', [
     ['THC-O - Nuevo Bache', 0.32],
     ['HHC', 0.10],
     ['D8-THC', 0.10],
     ['CBD No Cristalizable', 0.40],
     ['Terpenos', 0.08],
   ]),
-  recipe('pineapple-xx', 'Pineapple XX', [
+  recipe('pineapple-xx', 'XX', [
     ['THC-O - Nuevo Bache', 0.52],
     ['HHC', 0.05],
     ['D8-THC', 0.05],
     ['CBD No Cristalizable', 0.30],
     ['Terpenos', 0.08],
   ]),
-  recipe('pineapple-xxx', 'Pineapple XXX', [
+  recipe('pineapple-xxx', 'XXX', [
     ['THC-O - Nuevo Bache', 0.62],
     ['HHC', 0.10],
     ['D8-THC', 0.10],
