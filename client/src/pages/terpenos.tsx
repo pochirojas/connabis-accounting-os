@@ -127,6 +127,19 @@ export default function Terpenos() {
               Los borradores se guardan localmente y <em>no</em> tocan el BOM ni Shopify. La aplicación masiva
               a BOM se mueve a Phase 4 (editor de blends).
             </p>
+            <p className="text-[11px] text-muted-foreground mt-2 leading-relaxed">
+              <strong className="text-amber-200/90">Fuente del baseline:</strong> los 10 slots iniciales reflejan la rotación
+              actual publicada en{' '}
+              <a
+                href="https://connabis.com.co/pages/aprende-mas-terpenos"
+                target="_blank"
+                rel="noreferrer"
+                className="underline decoration-dotted hover:text-amber-100"
+              >
+                connabis.com.co · Aprende Más · Terpenos
+              </a>
+              . Hasta que conectemos sync con Shopify/metaobjects, refresca esta lista manualmente cuando cambie la rotación pública.
+            </p>
           </div>
         </div>
       </Card>
@@ -136,9 +149,18 @@ export default function Terpenos() {
         <Card className="p-5" data-testid="card-rotation-slots">
           <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
             <div>
-              <h3 className="text-sm font-semibold tracking-tight">Rotación actual</h3>
+              <h3 className="text-sm font-semibold tracking-tight">Rotación actual (Aprende Más)</h3>
               <p className="text-xs text-muted-foreground">
-                {activeCount} activos · objetivo ~10. Edita inline; ancla a un material MM (opcional) si quieres mostrar costo.
+                {activeCount} activos · objetivo ~10. Baseline sembrado desde la página pública{' '}
+                <a
+                  href="https://connabis.com.co/pages/aprende-mas-terpenos"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline decoration-dotted"
+                >
+                  Aprende Más · Terpenos
+                </a>
+                . Edita inline; ancla a un material MM (opcional) si quieres mostrar costo.
               </p>
             </div>
             <Badge variant="outline" className="text-[11px]">{(slots.data ?? []).length} slots</Badge>

@@ -134,6 +134,11 @@ UI:
 
 - Tab nuevo dentro de **Inventario & Materiales** o página separada `/terpenos`, con tabla de 10 activos arriba + banca/retirados abajo, acciones de rotación, vínculos a productos/variantes y a materiales relacionados.
 
+Estado actual del baseline (manual, no sync):
+
+- Hoy `/terpenos` siembra automáticamente la rotación visible en la página pública [`connabis.com.co/pages/aprende-mas-terpenos`](https://connabis.com.co/pages/aprende-mas-terpenos) cuando la tabla local está vacía. La lista canónica vive en `server/terpene-rotation.ts → CURRENT_ROTATION_BASELINE` y se refresca manualmente.
+- **Mejora futura (Phase 2.6 completa)**: sync automático con Shopify metaobjects / Aprende Más metafields para sustituir el baseline hardcoded. Hasta entonces, cualquier cambio público obliga a actualizar el array a mano y redeploy.
+
 ## Qué falta para reemplazar bulletproof a Material Manager / Shopify embedded app
 
 Resumen ejecutivo de gaps abiertos (mantener este checklist actualizado al cerrar cada uno):

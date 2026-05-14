@@ -92,8 +92,48 @@ function mapDraft(row: Record<string, unknown>): TerpeneReplacementDraft {
   };
 }
 
+// Current active rotation extracted from the public Connabis "Aprende Más ·
+// Terpenos" page (https://connabis.com.co/pages/aprende-mas-terpenos). This is
+// the manual baseline used until Shopify/metaobject sync is implemented; refresh
+// it by hand when the rotation changes on the site.
+export const CURRENT_ROTATION_BASELINE: ReadonlyArray<{ displayName: string; notes: string }> = [
+  { displayName: 'Gelato AMP',           notes: 'Hybrid AMP · Día / Tarde' },
+  { displayName: 'Pineapple OG AMP CDT', notes: 'Sativa AMP · Mañana / Día' },
+  { displayName: 'White Widow',          notes: 'Hybrid · Día / Tarde' },
+  { displayName: 'Skywalker OG',         notes: 'Indica · Tarde / Noche' },
+  { displayName: 'Mango Tango',          notes: 'Sativa · Mañana / Día' },
+  { displayName: 'Sour Diesel',          notes: 'Sativa · Mañana / Día' },
+  { displayName: 'Forbidden Fruit AMP',  notes: 'Indica AMP · Tarde / Noche' },
+  { displayName: 'Banana Mimosa',        notes: 'Hybrid · Día / Tarde' },
+  { displayName: 'Razz Berry AMP',       notes: 'Hybrid AMP · Día / Tarde' },
+  { displayName: 'Pink Champagne AMP',   notes: 'Indica AMP · Tarde / Noche' },
+];
+
+function seedCurrentRotationIfEmpty(sqlite: Database.Database): void {
+  const count = (sqlite.prepare('SELECT COUNT(*) AS n FROM terpene_rotation_slots').get() as { n: number }).n;
+  if (count > 0) return;
+  const now = new Date().toISOString();
+  const insert = sqlite.prepare(`
+    INSERT INTO terpene_rotation_slots (slot_index, display_name, material_id_hint, status, notes, created_at, updated_at)
+    VALUES (@slot_index, @display_name, NULL, 'active', @notes, @created_at, @updated_at)
+  `);
+  const tx = sqlite.transaction(() => {
+    CURRENT_ROTATION_BASELINE.forEach((entry, i) => {
+      insert.run({
+        slot_index: i + 1,
+        display_name: entry.displayName,
+        notes: entry.notes,
+        created_at: now,
+        updated_at: now,
+      });
+    });
+  });
+  tx();
+}
+
 export function listTerpeneSlots(sqlite: Database.Database): TerpeneRotationSlot[] {
   ensureTerpeneRotationSchema(sqlite);
+  seedCurrentRotationIfEmpty(sqlite);
   const rows = sqlite.prepare('SELECT * FROM terpene_rotation_slots ORDER BY slot_index ASC').all() as Array<Record<string, unknown>>;
   return rows.map(mapSlot);
 }
