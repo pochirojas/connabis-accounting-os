@@ -1109,7 +1109,7 @@ function summarizeMonths(orders: LiveIncomeOrder[], expenses: Array<Record<strin
     profit: income - row.cogs - row.operatingExpenses,
     netMargin: income ? (income - row.cogs - row.operatingExpenses) / income : 0,
     inventoryPurchasesExcluded: row.inventoryPurchasesExcluded,
-    partial: month === new Date().toISOString().slice(0, 7),
+    partial: month === todayInReportTimeZone().slice(0, 7),
     note: `${orderCount} órdenes ShopifyQL; ingreso = total_sales Analytics; COGS vendido por BOM MM; gastos operativos reales. Compras de inventario/capex excluidas: ${Math.round(row.inventoryPurchasesExcluded).toLocaleString('es-CO')} COP.`,
     };
   }).sort((a, b) => a.month.localeCompare(b.month));
