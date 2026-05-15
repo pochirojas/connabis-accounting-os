@@ -229,7 +229,7 @@ function loadMaterialManagerData() {
     bomAverageCostByProductKey.set(productKey, costs.reduce((sum, cost) => sum + cost, 0) / Math.max(costs.length, 1));
   }
 
-  return { bomByVariantId, bomAverageCostByProductKey };
+  return { bomByVariantId, bomAverageCostByProductKey, variantCostByProductKey };
 }
 
 let materialManagerCache: ReturnType<typeof loadMaterialManagerData> | null = null;
@@ -261,21 +261,40 @@ function normalizeProductMatchKey(value: string) {
 
 // Historical Shopify line-item titles whose canonical Material Manager BOM
 // lives under a different product name. Keyed by the normalized Shopify title
-// (post-normalizeProductMatchKey) and mapped to the normalized MM product key.
+// (post-normalizeProductMatchKey).
+//
+// Targets must be UNAMBIGUOUS: either a specific MM Variant ID (preferred \u2014 uses
+// that variant's exact BOM cost) or an explicit `unitCost` confirmed by business.
+// We deliberately do NOT alias to a product NAME that spans multiple variants of
+// different sizes, because `bomAverageCostByProductKey` is the unweighted average
+// across variants \u2014 for products like "THC-O Destilado en Jeringa" the per-variant
+// cost spans 13.474 \u2192 131.665 COP (1ml \u2192 10ml), so an averaged value materially
+// overstates COGS for any single historical line whose size cannot be inferred.
 //
 // Use sparingly: only for confirmed-by-business equivalences where the historical
-// SKU is gone from Shopify but the BOM still matches an existing MM product.
+// SKU is gone from Shopify but the BOM still matches an existing MM variant.
 // Custom/generic products (custom line items without a stable equivalent) should
 // NOT be aliased here \u2014 they remain hasBom=false so they show up in alerts as
 // pending manual COGS.
-//
-// Format: [shopify_title_normalized, mm_product_name_normalized, note]
-const HISTORICAL_PRODUCT_ALIASES: ReadonlyArray<readonly [string, string, string]> = [
-  // 'Delta-8-THC-O Destilado' (historical Shopify line, not present in current
-  // Shopify catalog) is the same product as MM 'THC-O Destilado en Jeringa'.
-  // Confirmed by user 2026-05-15: "Delta-8-thco es igual que THCO destilado en
-  // jeringa btw, y no lo veo en shopify".
-  ['delta 8 thco destilado', 'thco destilado en jeringa', 'user-confirmed 2026-05-15'],
+type HistoricalAlias = {
+  shopifyKey: string; // normalizeProductMatchKey output for the historical Shopify title
+  target:
+    | { kind: 'variant'; variantId: string; note: string }
+    | { kind: 'fixed'; unitCost: number; note: string };
+};
+
+const HISTORICAL_PRODUCT_ALIASES: ReadonlyArray<HistoricalAlias> = [
+  // 'Delta-8-THC-O Destilado' \u2014 pending: user confirmed (2026-05-15) it is the
+  // same physical product as MM 'THC-O Destilado en Jeringa', but the MM product
+  // has 5 variants (Jeringa 1ml/5ml/10ml, Tarro 5ml/10ml) with per-variant cost
+  // spanning 13.474 \u2192 131.665 COP. Aliasing to the multi-variant average
+  // overstated COGS materially (all-time ~8.35M COP, 2026 ~946K COP) without a
+  // confirmed size. Disabled until business confirms the historical size or
+  // unit cost. To re-enable, add an entry like:
+  //   { shopifyKey: 'delta 8 thco destilado',
+  //     target: { kind: 'variant', variantId: '42845811507277',
+  //               note: 'historical Delta-8-THC-O = THCO Jeringa 1ml, confirmed YYYY-MM-DD' } }
+  // or with { kind: 'fixed', unitCost: <COP> } if a manual cost is preferred.
 ];
 
 function getBomUnitCostByVariantId(variantGid?: string | null, productTitle?: string) {
@@ -291,7 +310,7 @@ function getBomUnitCostByVariantId(variantGid?: string | null, productTitle?: st
   }
 
   if (productTitle) {
-    const { bomAverageCostByProductKey } = getMaterialManagerData();
+    const { bomAverageCostByProductKey, bomByVariantId: bomByVariantIdMap } = getMaterialManagerData();
     const titleKey = normalizeProductMatchKey(productTitle);
     const exact = bomAverageCostByProductKey.get(titleKey);
     if (exact !== undefined) return { unitCost: exact, hasBom: true, matchType: 'product_name' as const };
@@ -301,11 +320,18 @@ function getBomUnitCostByVariantId(variantGid?: string | null, productTitle?: st
 
     // Last resort: explicit historical alias (see HISTORICAL_PRODUCT_ALIASES).
     // Only triggers when Variant ID, exact-name and fuzzy substring all fail.
-    for (const [shopifyKey, mmKey] of HISTORICAL_PRODUCT_ALIASES) {
-      if (titleKey !== shopifyKey) continue;
-      const aliasCost = bomAverageCostByProductKey.get(mmKey);
-      if (aliasCost !== undefined) {
-        return { unitCost: aliasCost, hasBom: true, matchType: 'alias' as const };
+    // Aliases must resolve to a specific variant or a fixed cost — never to a
+    // multi-variant product-name average (see comment on HISTORICAL_PRODUCT_ALIASES).
+    for (const alias of HISTORICAL_PRODUCT_ALIASES) {
+      if (titleKey !== alias.shopifyKey) continue;
+      if (alias.target.kind === 'variant') {
+        const items = bomByVariantIdMap.get(alias.target.variantId) ?? [];
+        if (items.length === 0) continue;
+        const unitCost = items.reduce((sum, item) => sum + item.amount, 0);
+        return { unitCost, hasBom: true, matchType: 'alias' as const };
+      }
+      if (alias.target.kind === 'fixed') {
+        return { unitCost: alias.target.unitCost, hasBom: true, matchType: 'alias' as const };
       }
     }
   }
