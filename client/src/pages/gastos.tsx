@@ -8,6 +8,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '@/components/ui/dialog';
+import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
   PieChart, Pie, Cell,
 } from 'recharts';
@@ -878,95 +881,105 @@ export default function Gastos() {
               <option value="oldest">Viejo → nuevo</option>
             </select>
           </div>
-          {editDraft && (
-            <form onSubmit={saveEdit} className="mb-5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4" data-testid="form-edit-expense">
-              <div className="flex items-start justify-between gap-3 mb-4">
-                <div>
-                  <h3 className="text-sm font-semibold text-emerald-200">Editando gasto existente</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">Se guarda sobre el mismo ID, sin duplicar. Si es manual, ajusta caja revirtiendo el valor anterior.</p>
-                </div>
-                <Button type="button" variant="ghost" size="sm" onClick={() => { setEditingId(null); setEditDraft(null); }} data-testid="button-cancel-edit-expense">
-                  <X className="h-4 w-4 mr-1" />
-                  Cancelar
-                </Button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                <label className="space-y-1.5">
-                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Fecha</span>
-                  <Input type="date" value={editDraft.date} onChange={e => setEditDraft(prev => prev ? { ...prev, date: e.target.value } : prev)} data-testid="input-edit-expense-date" />
-                </label>
-                <label className="space-y-1.5">
-                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Categoría</span>
-                  <select value={editDraft.category} onChange={e => setEditDraft(prev => prev ? { ...prev, category: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-category">
-                    {CATEGORY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </label>
-                <label className="space-y-1.5">
-                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Pagado a</span>
-                  <select value={editDraft.paidTo} onChange={e => setEditDraft(prev => prev ? { ...prev, paidTo: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-paid-to">
-                    {sellerOptions.map(seller => <option key={seller} value={seller}>{seller}</option>)}
-                  </select>
-                </label>
-                {editDraft.paidTo === 'Otro' && (
-                  <label className="space-y-1.5">
-                    <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Nuevo seller</span>
-                    <Input value={editDraft.paidToOther} onChange={e => setEditDraft(prev => prev ? { ...prev, paidToOther: e.target.value } : prev)} data-testid="input-edit-expense-paid-to-other" />
-                  </label>
-                )}
-                <label className="space-y-1.5">
-                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Descripción</span>
-                  <Input value={editDraft.description} onChange={e => setEditDraft(prev => prev ? { ...prev, description: e.target.value } : prev)} data-testid="input-edit-expense-description" />
-                </label>
-                <label className="space-y-1.5">
-                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Pagado con</span>
-                  <select value={editDraft.paidWith} onChange={e => setEditDraft(prev => prev ? { ...prev, paidWith: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-paid-with">
-                    {(PAID_WITH_OPTIONS.includes(editDraft.paidWith) ? PAID_WITH_OPTIONS : [editDraft.paidWith, ...PAID_WITH_OPTIONS]).map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </label>
-                <label className="space-y-1.5">
-                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Moneda</span>
-                  <select value={editDraft.currency} onChange={e => setEditDraft(prev => prev ? { ...prev, currency: e.target.value as 'COP' | 'USD' } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-currency">
-                    <option value="COP">COP</option>
-                    <option value="USD">USD</option>
-                  </select>
-                </label>
-                <label className="space-y-1.5">
-                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{editDraft.currency === 'USD' ? 'Monto COP calculado' : 'Monto COP'}</span>
-                  <Input
-                    type="text"
-                    inputMode="decimal"
-                    value={editDraft.currency === 'USD' && editDraft.originalAmount && editDraft.fxRate ? formatAmountInput(String(parseAmountInput(editDraft.originalAmount) * parseAmountInput(editDraft.fxRate))) : editDraft.amount}
-                    onChange={e => setEditDraft(prev => prev ? { ...prev, amount: formatAmountInput(e.target.value) } : prev)}
-                    className="text-right tabular pr-4"
-                    disabled={editDraft.currency === 'USD'}
-                    data-testid="input-edit-expense-amount"
-                  />
-                </label>
-                {editDraft.currency === 'USD' && (
-                  <>
+          <Dialog
+            open={editDraft !== null}
+            onOpenChange={(open) => { if (!open) { setEditingId(null); setEditDraft(null); } }}
+          >
+            <DialogContent
+              className="max-w-3xl max-h-[90vh] overflow-y-auto"
+              data-testid="dialog-edit-expense"
+            >
+              <DialogHeader>
+                <DialogTitle className="text-emerald-200">Editando gasto existente</DialogTitle>
+                <DialogDescription>
+                  Se guarda sobre el mismo ID, sin duplicar. Si es manual, ajusta caja revirtiendo el valor anterior.
+                </DialogDescription>
+              </DialogHeader>
+              {editDraft && (
+                <form onSubmit={saveEdit} data-testid="form-edit-expense">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                     <label className="space-y-1.5">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Monto USD</span>
-                      <Input type="text" inputMode="decimal" value={editDraft.originalAmount} onChange={e => setEditDraft(prev => prev ? { ...prev, originalAmount: formatAmountInput(e.target.value) } : prev)} className="text-right tabular pr-4" data-testid="input-edit-expense-original-amount" />
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Fecha</span>
+                      <Input type="date" value={editDraft.date} onChange={e => setEditDraft(prev => prev ? { ...prev, date: e.target.value } : prev)} data-testid="input-edit-expense-date" />
                     </label>
                     <label className="space-y-1.5">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">TRM</span>
-                      <Input type="text" inputMode="decimal" value={editDraft.fxRate} onChange={e => setEditDraft(prev => prev ? { ...prev, fxRate: formatAmountInput(e.target.value) } : prev)} className="text-right tabular pr-4" data-testid="input-edit-expense-fx-rate" />
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Categoría</span>
+                      <select value={editDraft.category} onChange={e => setEditDraft(prev => prev ? { ...prev, category: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-category">
+                        {CATEGORY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
                     </label>
-                  </>
-                )}
-                <label className="space-y-1.5 md:col-span-2">
-                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Notas</span>
-                  <Input value={editDraft.notes} onChange={e => setEditDraft(prev => prev ? { ...prev, notes: e.target.value } : prev)} data-testid="input-edit-expense-notes" />
-                </label>
-              </div>
-              <div className="mt-4 flex justify-end">
-                <Button type="submit" className="gap-2" disabled={updateExpense.isPending} data-testid="button-save-edit-expense">
-                  <Save className="h-4 w-4" />
-                  {updateExpense.isPending ? 'Guardando' : 'Guardar cambios'}
-                </Button>
-              </div>
-            </form>
-          )}
+                    <label className="space-y-1.5">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Pagado a</span>
+                      <select value={editDraft.paidTo} onChange={e => setEditDraft(prev => prev ? { ...prev, paidTo: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-paid-to">
+                        {sellerOptions.map(seller => <option key={seller} value={seller}>{seller}</option>)}
+                      </select>
+                    </label>
+                    {editDraft.paidTo === 'Otro' && (
+                      <label className="space-y-1.5">
+                        <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Nuevo seller</span>
+                        <Input value={editDraft.paidToOther} onChange={e => setEditDraft(prev => prev ? { ...prev, paidToOther: e.target.value } : prev)} data-testid="input-edit-expense-paid-to-other" />
+                      </label>
+                    )}
+                    <label className="space-y-1.5 sm:col-span-2 xl:col-span-3">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Descripción</span>
+                      <Input value={editDraft.description} onChange={e => setEditDraft(prev => prev ? { ...prev, description: e.target.value } : prev)} data-testid="input-edit-expense-description" />
+                    </label>
+                    <label className="space-y-1.5">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Pagado con</span>
+                      <select value={editDraft.paidWith} onChange={e => setEditDraft(prev => prev ? { ...prev, paidWith: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-paid-with">
+                        {(PAID_WITH_OPTIONS.includes(editDraft.paidWith) ? PAID_WITH_OPTIONS : [editDraft.paidWith, ...PAID_WITH_OPTIONS]).map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </label>
+                    <label className="space-y-1.5">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Moneda</span>
+                      <select value={editDraft.currency} onChange={e => setEditDraft(prev => prev ? { ...prev, currency: e.target.value as 'COP' | 'USD' } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-currency">
+                        <option value="COP">COP</option>
+                        <option value="USD">USD</option>
+                      </select>
+                    </label>
+                    <label className="space-y-1.5">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{editDraft.currency === 'USD' ? 'Monto COP calculado' : 'Monto COP'}</span>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        value={editDraft.currency === 'USD' && editDraft.originalAmount && editDraft.fxRate ? formatAmountInput(String(parseAmountInput(editDraft.originalAmount) * parseAmountInput(editDraft.fxRate))) : editDraft.amount}
+                        onChange={e => setEditDraft(prev => prev ? { ...prev, amount: formatAmountInput(e.target.value) } : prev)}
+                        className="text-right tabular pr-4"
+                        disabled={editDraft.currency === 'USD'}
+                        data-testid="input-edit-expense-amount"
+                      />
+                    </label>
+                    {editDraft.currency === 'USD' && (
+                      <>
+                        <label className="space-y-1.5">
+                          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Monto USD</span>
+                          <Input type="text" inputMode="decimal" value={editDraft.originalAmount} onChange={e => setEditDraft(prev => prev ? { ...prev, originalAmount: formatAmountInput(e.target.value) } : prev)} className="text-right tabular pr-4" data-testid="input-edit-expense-original-amount" />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">TRM</span>
+                          <Input type="text" inputMode="decimal" value={editDraft.fxRate} onChange={e => setEditDraft(prev => prev ? { ...prev, fxRate: formatAmountInput(e.target.value) } : prev)} className="text-right tabular pr-4" data-testid="input-edit-expense-fx-rate" />
+                        </label>
+                      </>
+                    )}
+                    <label className="space-y-1.5 sm:col-span-2 xl:col-span-3">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Notas</span>
+                      <Input value={editDraft.notes} onChange={e => setEditDraft(prev => prev ? { ...prev, notes: e.target.value } : prev)} data-testid="input-edit-expense-notes" />
+                    </label>
+                  </div>
+                  <div className="mt-5 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+                    <Button type="button" variant="ghost" onClick={() => { setEditingId(null); setEditDraft(null); }} data-testid="button-cancel-edit-expense">
+                      <X className="h-4 w-4 mr-1" />
+                      Cancelar
+                    </Button>
+                    <Button type="submit" className="gap-2" disabled={updateExpense.isPending} data-testid="button-save-edit-expense">
+                      <Save className="h-4 w-4" />
+                      {updateExpense.isPending ? 'Guardando' : 'Guardar cambios'}
+                    </Button>
+                  </div>
+                </form>
+              )}
+            </DialogContent>
+          </Dialog>
           <Table>
             <TableHeader>
               <TableRow>
