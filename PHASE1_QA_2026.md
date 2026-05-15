@@ -81,7 +81,20 @@ Heurística de matching (`getBomUnitCostByVariantId`):
 1. Match exacto por `Variant ID` legacy contra `bomByVariantId` (más confiable).
 2. Si no, match exacto por nombre de producto normalizado contra `bomAverageCostByProductKey` (`normalizeProductMatchKey` aplica NFD, lowercase, sinónimos `cart→cartucho`, `cbd doble→cbdoble`, `thc-o→thco`, `blend→recarga`, `pxxx→pineapple xxx`).
 3. Si no, match fuzzy por substring (`titleKey.includes(productKey) || productKey.includes(titleKey)`).
-4. Si nada matchea → `hasBom: false`, `unitCost: 0`, marcado como alerta.
+4. Si no, alias histórico explícito (`HISTORICAL_PRODUCT_ALIASES` en `server/routes.ts`) — sólo para títulos de Shopify vendidos en el pasado cuyo SKU ya no existe en el catálogo Shopify pero cuyo BOM real sí está cargado en MM bajo otro nombre. Se aplica únicamente cuando el matching exacto/fuzzy falla.
+5. Si nada matchea → `hasBom: false`, `unitCost: 0`, marcado como alerta. **Productos custom/personalizados (líneas custom de Shopify sin BOM definido) caen aquí intencionalmente**: NO se les asigna costo automático; quedan flagged como "pendiente costo manual" en `/api/alerts` (`real-missing-bom`) y en el `dataQualityNote` de los KPIs.
+
+### Aliases históricos vigentes
+
+| Título Shopify (histórico) | MM Product name | Razón |
+| --- | --- | --- |
+| `Delta-8-THC-O Destilado` | `THC-O Destilado en Jeringa` | Mismo producto físico (confirmado por usuario 2026-05-15: "Delta-8-thco es igual que THCO destilado en jeringa btw, y no lo veo en shopify"). El SKU `Delta-8-THC-O Destilado` ya no aparece en Shopify pero sigue habiendo líneas vendidas históricas (~6.18M COP / 145 unidades en 2026 antes del alias) que matcheaban a 0 COGS. La normalización (`delta 8 thco destilado` vs `thco destilado en jeringa`) no comparte substring porque "delta 8" no aparece en el nombre MM, por eso requirió alias explícito. |
+
+Política de aliases (para evitar abuso del mecanismo):
+
+- Sólo agregar aliases **confirmados por negocio** donde el producto físico es el mismo.
+- Nunca usar el alias para forzar COGS sobre productos custom/personalizados o variantes nuevas — esos quedan en COGS 0 hasta cargar BOM real.
+- Documentar fecha y fuente de la confirmación junto al alias.
 
 Causas comunes de "missing" en el listado (priorizadas):
 
@@ -96,6 +109,7 @@ No se inventan costos: una línea sin BOM queda en COGS 0 y aparece en `/api/ale
 ### Resueltos en este commit
 
 - `summarizeMonths` calculaba `partial` con `new Date().toISOString().slice(0, 7)` (UTC). Entre 00:00 y 05:00 UTC del primer día del mes, esto marcaba el mes recién comenzado como cerrado en Bogotá. Cambiado a `todayInReportTimeZone().slice(0, 7)`. Impacto: bajo, pero el flag `partial` se consume en la UI de meses; mejor que coincida con el resto del corte Bogotá.
+- **Alias histórico `Delta-8-THC-O Destilado` → `THC-O Destilado en Jeringa`**: la línea histórica `Delta-8-THC-O Destilado` (~6.18M COP / 145 unidades vendidas en 2026, sin BOM hasta este commit) no matcheaba con ningún producto MM por exact/fuzzy. Usuario confirmó (2026-05-15) que es el mismo producto que `THC-O Destilado en Jeringa` y que el SKU original ya no existe en Shopify. Agregado en `HISTORICAL_PRODUCT_ALIASES` (`server/routes.ts`) como paso 4 del matching (post-fuzzy). Resultado: cobertura BOM 2026 subió de **91.3% → 97.5%** (1012/1038 líneas), ingresos sin COGS bajaron de **8.65M → 2.47M COP**, COGS vendido 2026 YTD subió ~950K COP (utilidad bruta deja de estar sobreestimada para ese SKU). Los productos restantes sin BOM son legítimamente custom/personalizados (Carts + custom blend, Blend Hongos, tinturas one-off, etc.) — esos quedan en COGS 0 pendientes de costo manual y aparecen en la alerta `real-missing-bom`. La alerta y el `dataQualityNote` ahora dicen explícitamente que las líneas sin BOM incluyen productos custom y que **no se les asigna COGS automático**.
 
 ### Conocidos, NO resueltos en este round (requieren decisión de producto o cambio mayor)
 

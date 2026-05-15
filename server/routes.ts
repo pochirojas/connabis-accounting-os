@@ -259,6 +259,25 @@ function normalizeProductMatchKey(value: string) {
     .trim();
 }
 
+// Historical Shopify line-item titles whose canonical Material Manager BOM
+// lives under a different product name. Keyed by the normalized Shopify title
+// (post-normalizeProductMatchKey) and mapped to the normalized MM product key.
+//
+// Use sparingly: only for confirmed-by-business equivalences where the historical
+// SKU is gone from Shopify but the BOM still matches an existing MM product.
+// Custom/generic products (custom line items without a stable equivalent) should
+// NOT be aliased here \u2014 they remain hasBom=false so they show up in alerts as
+// pending manual COGS.
+//
+// Format: [shopify_title_normalized, mm_product_name_normalized, note]
+const HISTORICAL_PRODUCT_ALIASES: ReadonlyArray<readonly [string, string, string]> = [
+  // 'Delta-8-THC-O Destilado' (historical Shopify line, not present in current
+  // Shopify catalog) is the same product as MM 'THC-O Destilado en Jeringa'.
+  // Confirmed by user 2026-05-15: "Delta-8-thco es igual que THCO destilado en
+  // jeringa btw, y no lo veo en shopify".
+  ['delta 8 thco destilado', 'thco destilado en jeringa', 'user-confirmed 2026-05-15'],
+];
+
 function getBomUnitCostByVariantId(variantGid?: string | null, productTitle?: string) {
   const variantId = parseShopifyLegacyId(variantGid);
   const { bomByVariantId } = getMaterialManagerData();
@@ -279,6 +298,16 @@ function getBomUnitCostByVariantId(variantGid?: string | null, productTitle?: st
     const fuzzyMatch = Array.from(bomAverageCostByProductKey.entries())
       .find(([productKey]) => titleKey.includes(productKey) || productKey.includes(titleKey));
     if (fuzzyMatch) return { unitCost: fuzzyMatch[1], hasBom: true, matchType: 'product_name' as const };
+
+    // Last resort: explicit historical alias (see HISTORICAL_PRODUCT_ALIASES).
+    // Only triggers when Variant ID, exact-name and fuzzy substring all fail.
+    for (const [shopifyKey, mmKey] of HISTORICAL_PRODUCT_ALIASES) {
+      if (titleKey !== shopifyKey) continue;
+      const aliasCost = bomAverageCostByProductKey.get(mmKey);
+      if (aliasCost !== undefined) {
+        return { unitCost: aliasCost, hasBom: true, matchType: 'alias' as const };
+      }
+    }
   }
 
   return { unitCost: 0, hasBom: false, matchType: 'missing' as const };
@@ -798,7 +827,7 @@ type AccountingLine = {
   cogsUnit: number;
   cogsSold: number;
   hasBom: boolean;
-  bomMatchType: 'variant' | 'product_name' | 'missing';
+  bomMatchType: 'variant' | 'product_name' | 'alias' | 'missing';
   paymentStatus: 'paid' | 'pending' | 'refunded' | 'partially_refunded';
   fulfillmentStatus: 'fulfilled' | 'unfulfilled' | 'partial';
 };
@@ -1263,7 +1292,7 @@ function buildDashboardKpis(orders: LiveIncomeOrder[], expenses: Array<Record<st
     topProductFamily,
     alertasActivas: buildRealAlerts(lines, expenses).length,
     asOf: new Date().toISOString().slice(0, 10),
-    dataQualityNote: `${qualityPrefix}: ingresos = ShopifyQL total_sales Analytics (${REPORT_TIME_ZONE}); productos/unidades desde órdenes Shopify; MM BOM/COGS + gastos sheet/manual. Cobertura BOM en líneas vendidas: ${coverageText}; líneas sin BOM quedan en COGS 0 hasta corregir MM/matching. Compras inventario/capex excluidas de gastos operativos: ${Math.round(inventoryPurchases + capex).toLocaleString('es-CO')} COP. Gastos sin categoría incluidos como operativos y alertados: ${Math.round(uncategorized).toLocaleString('es-CO')} COP.`,
+    dataQualityNote: `${qualityPrefix}: ingresos = ShopifyQL total_sales Analytics (${REPORT_TIME_ZONE}); productos/unidades desde órdenes Shopify; MM BOM/COGS + gastos sheet/manual. Cobertura BOM en líneas vendidas: ${coverageText}; líneas sin BOM (incluye productos custom/personalizados sin BOM definido) quedan en COGS 0 — pendiente costo manual o corregir matching MM. Compras inventario/capex excluidas de gastos operativos: ${Math.round(inventoryPurchases + capex).toLocaleString('es-CO')} COP. Gastos sin categoría incluidos como operativos y alertados: ${Math.round(uncategorized).toLocaleString('es-CO')} COP.`,
   };
 }
 
@@ -1287,8 +1316,8 @@ function buildRealAlerts(lines: AccountingLine[], expenses: Array<Record<string,
       id: 'real-missing-bom',
       level: coverage.coverage < 0.9 ? 'critical' : 'warn',
       title: `${coverage.missingSkus.length} SKU/líneas vendidas sin BOM`,
-      description: `Cobertura BOM vendida ${(coverage.coverage * 100).toFixed(1)}%. Ingresos sin COGS reconocido: ${Math.round(coverage.missingRevenue).toLocaleString('es-CO')} COP.`,
-      recommendation: 'Abrir Productos & Márgenes y corregir matching Variant ID/SKU/handle en Material Manager. No inventar costo; cargar BOM real.',
+      description: `Cobertura BOM vendida ${(coverage.coverage * 100).toFixed(1)}%. Ingresos sin COGS reconocido: ${Math.round(coverage.missingRevenue).toLocaleString('es-CO')} COP. Incluye productos custom/personalizados sin BOM definido — esos quedan pendientes de costo manual y NO se les asigna COGS automático.`,
+      recommendation: 'Abrir Productos & Márgenes: corregir Variant ID/SKU/handle en Material Manager para productos catálogo; cargar costo real manual para custom/personalizados. No inventar costo; cargar BOM real.',
       area: 'productos',
       href: '/productos',
       source: 'real',
