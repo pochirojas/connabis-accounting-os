@@ -1,6 +1,14 @@
 # Phase 2 — Reemplazo controlado de Material Manager
 
-Phase 2 reemplaza **Material Manager dentro del OS**, no Dataico. Dataico es Phase 3 separada. Phase 2 no sincroniza ni escribe inventario en Shopify al inicio: el objetivo es replicar Material Manager dentro de Connabis Accounting OS, validar que los números coinciden, y solo después activar sincronización en modo preview.
+> **Overlay de prioridad (2026-05-20)** · ver `ROADMAP.md` § *Modelo de prioridades*.
+>
+> - **P0** dentro de Phase 2: core MM replacement — crear/editar materiales locales, PO receiving → stock movements, adjustment history real, batch costing / landed cost básico, promote drafts.
+> - **P1** dentro de Phase 2: Phase 2.6 Terpene Rotation Manager y Phase 2.2 catálogo metaobject. **No abrir scope nuevo en terpenos hasta cerrar el core P0.** Mantener lo ya entregado en producción y resolver bugs si aparecen.
+> - **P2** dentro de Phase 2: paridad UI total (drag/drop, atajos, micro-UX), test-store embedded Shopify app, inventory sync write a Shopify.
+>
+> Las sub-fases históricas (Phase 2.1 .. Phase 2.6) describen el linaje de código; el overlay decide en qué orden se trabaja a partir de ahora.
+
+Phase 2 reemplaza **Material Manager dentro del OS**, no Dataico. Dataico es Phase 3 separada (con su propia P0 foundation que avanza en paralelo). Phase 2 no sincroniza ni escribe inventario en Shopify al inicio: el objetivo es replicar Material Manager dentro de Connabis Accounting OS, validar que los números coinciden, y solo después activar sincronización en modo preview.
 
 Principio operativo: el cambio debe ser reversible. El OS debe poder importar y exportar exactamente los mismos formatos CSV que Material Manager para que, si algo falla, se pueda volver a Material Manager sin downtime ni pérdida de inventario.
 
@@ -609,7 +617,9 @@ Toda cantidad de material es float en CSV parser → DB → API → UI. Cambios 
 - En cliente, se introduce `formatQty()` (Intl con `maximumFractionDigits: 6, minimumFractionDigits: 0`, trim de ceros). `formatNumber()` queda para conteos enteros (órdenes, líneas, materiales). Inputs `<input type="number">` para cantidades llevan `step="any"`.
 - El bug visible en el screenshot (productos usando un material mostraban `0` para cantidades decimales) queda resuelto: los valores `0.88`, `0.12`, `0.5`, etc., ahora se renderizan literales.
 
-## Phase 2.6 — Terpene Rotation Manager (parte requerida de Phase 2)
+## Phase 2.6 — Terpene Rotation Manager · **P1 (después de P0 MM core)**
+
+> Reclasificado el 2026-05-20: aunque Terpene Rotation Manager sigue siendo necesario para considerar el switch desde MM como seamless, en el modelo de prioridades vigente queda como **P1**. **No abrir scope nuevo aquí hasta cerrar el core P0** (crear/editar materiales locales, PO receiving, adjustment history, batch/landed cost, promote drafts). Lo ya entregado (catálogo metaobject 33, baseline `CURRENT_ROTATION_BASELINE`, payload preview) se mantiene en producción.
 
 Phase 2 no cierra sin un módulo de **Terpene Rotation Manager** que herede el modelo SEO/terpenos previo y consolide en el OS lo que hoy vive disperso entre Shopify metaobjects, Material Manager y planillas externas. Hasta que este módulo exista, el equipo seguirá tocando MM/Shopify a mano para rotar terpenos — eso no es un reemplazo seamless.
 

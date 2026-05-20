@@ -1,5 +1,25 @@
 # Connabis Accounting OS — ROADMAP
 
+## Modelo de prioridades (2026-05-20)
+
+Las fases históricas (Phase 1, Phase 2.x, Phase 3, Phase 4) se conservan como **etiquetas de implementación / linaje de código**, pero la priorización operativa del producto se rige a partir de ahora por el siguiente overlay:
+
+- **P0 — Bloqueante, en curso ahora**
+  - **Phase 1 accounting / data truth**: cerrar gaps de cobertura BOM, normalización histórica de categorías, validación timezone vs Shopify Analytics, y **COGS al 100% con editor manual de override** para SKUs sin BOM.
+  - **Material Manager replacement · core**: crear/editar materiales locales (no solo override del mirror), **PO receiving → stock movements log**, adjustment history real, **batch costing / landed cost básico**, y promote drafts a oficial. Es lo mínimo para dejar de tocar MM en el día a día.
+  - **Dataico · foundation**: mapeo base de catálogo contable (cuentas, impuestos, tipos de documento), modelo de exportación fiscal periódica, planificación de integración (sandbox + credenciales + endpoints). No requiere envío en vivo todavía, sí dejar la base lista para Phase 3.
+- **P1 — Importante, después de cerrar el core P0**
+  - **Terpene Rotation System** (Phase 2.6 / 2.2 catálogo metaobject): completar sync Shopify metaobjects, retirar el baseline hardcoded, y consumir la rotación desde BOM/Calculadora.
+  - **Blend Editor + bulk BOM replace** (Phase 4 histórico): editor de blends draft con doble confirmación para bulk replace de ingredientes cannabinoides en BOM.
+- **P2 — Backlog / oportunista**
+  - UI parity total con MM (atajos, micro-interacciones, drag/drop), notifications email/Slack reales, user auth / permissions multi-usuario, backups cifrados off-site, sync write a Shopify Inventory.
+
+Reglas de aplicación:
+
+- **No se arranca un P1 sin que el P0 correspondiente esté cerrado o explícitamente descongelado.** Terpenes y Blend Editor son P1 — quedan en pausa de scope nuevo mientras P0 esté abierto, salvo bugfix sobre lo ya entregado.
+- Las secciones siguientes (Phase 1 / Phase 2 / Phase 3 / Phase 4) describen el **qué** y el **cómo** por linaje de código; este overlay describe el **cuándo y en qué orden**.
+- Próximos pasos inmediatos viven en [Próximos pasos inmediatos (P0)](#próximos-pasos-inmediatos-p0) al final del documento.
+
 ## Estado actual (2026-05-13)
 
 Lo que ya está cerrado y vivo en producción:
@@ -13,9 +33,9 @@ Lo que ya está cerrado y vivo en producción:
 - **Calculadora de Carts** con 13 recetas, packaging Jeringa 1mL incluido, fuente MM vs seed etiquetada.
 - **Producto BOM agrupado** por producto base/variante con COGS estimado.
 
-## Phase 1 — OS interno con métricas reales
+## Phase 1 — OS interno con métricas reales · **P0 (cerrar data truth)**
 
-Estado: cerrado funcionalmente para decisiones operativas, con caveat de cobertura BOM.
+Estado: cerrado funcionalmente para decisiones operativas, con caveat de cobertura BOM. Los pendientes menores listados más abajo son **P0** porque bloquean confiar 100% en los KPIs/COGS.
 
 Incluye:
 
@@ -28,17 +48,23 @@ Incluye:
 - Alertas de BOM, gastos sin categoría y presión de utilidad.
 - Diccionario y documentación mínima.
 
-Pendientes menores:
+Pendientes (P0 — bloquea declarar Phase 1 totalmente cerrada):
 
-- Revisar manualmente SKUs sin BOM.
-- Normalizar categorías históricas restantes.
-- Validar timezone contra Shopify Analytics.
+- Revisar manualmente SKUs sin BOM y, sobre todo, exponer un **editor manual de COGS / override de margen por SKU** para alcanzar **100% de cobertura COGS** aun cuando la BOM oficial siga incompleta. Sin esto, KPIs y P&L siguen teniendo huecos por línea.
+- Normalizar categorías históricas restantes (gastos sin categoría → alertas a cero).
+- Validar timezone contra Shopify Analytics (cierre diario coherente).
 
-## Phase 2 — Reemplazar Material Manager dentro del OS
+## Phase 2 — Reemplazar Material Manager dentro del OS · **P0 core / P1 terpenes**
+
+Overlay de prioridad sobre las sub-fases:
+
+- **P0 (core MM replacement)**: 2.5+ pendientes de materiales editables CRUD, BOM editor robusto MM∪overrides∪drafts, **PO receiving → stock movements**, adjustment history real, batch costing / landed cost básico, promote drafts a oficial.
+- **P1 (post P0)**: Phase 2.6 Terpene Rotation Manager y Phase 2.2 catálogo metaobject — sync Shopify metaobjects, retirar baseline hardcoded, consumir rotación desde BOM.
+- **P2**: paridad UI total (drag/drop, atajos, micro-UX), notifications reales, test-store embedded Shopify app, inventory sync write.
 
 Objetivo:
 
-Convertir Connabis Accounting OS en el sistema que maneja materiales, BOM, inventario, órdenes de compra, costos y producción. **Phase 2 reemplaza Material Manager dentro del OS, no Dataico.** Dataico es Phase 3 y no se toca aquí.
+Convertir Connabis Accounting OS en el sistema que maneja materiales, BOM, inventario, órdenes de compra, costos y producción. **Phase 2 reemplaza Material Manager dentro del OS, no Dataico.** Dataico tiene su foundation P0 en Phase 3 (planeación/base, sin envío en vivo).
 
 ### Qué falta para cerrar Phase 2
 
@@ -101,7 +127,9 @@ Módulos:
 - Calculadora de blends/carts.
 - Calendario de restock + alertas de stock + compras sugeridas.
 
-### Phase 2.6 — Terpene Rotation Manager (parte requerida de Phase 2)
+### Phase 2.6 — Terpene Rotation Manager · **P1 (después de P0 MM core)**
+
+> Reclasificado el 2026-05-20: aunque conceptualmente forma parte del switch seamless desde MM, en el modelo de prioridades vigente Terpenes queda como **P1**. No bloquea P0 (core MM, accounting/data truth, Dataico foundation). Mantener lo ya entregado (catálogo metaobject 33, baseline `CURRENT_ROTATION_BASELINE`, payload preview) pero **no abrir scope nuevo aquí hasta que P0 esté cerrado**.
 
 El reemplazo de Material Manager dentro del OS no se considera completo sin un módulo de **Terpene Rotation Manager** que herede el modelo mental del trabajo previo de SEO/terpenos. Hoy ese ciclo vive parcialmente en Shopify metaobjects + Material Manager + planillas externas y se quiere consolidar en el OS.
 
@@ -139,7 +167,7 @@ Estado actual del baseline (manual, no sync):
 - Hoy `/terpenos` siembra automáticamente la rotación visible en la página pública [`connabis.com.co/pages/aprende-mas-terpenos`](https://connabis.com.co/pages/aprende-mas-terpenos) cuando la tabla local está vacía. La lista canónica vive en `server/terpene-rotation.ts → CURRENT_ROTATION_BASELINE` y se refresca manualmente.
 - **Mejora futura (Phase 2.6 completa)**: sync automático con Shopify metaobjects / Aprende Más metafields para sustituir el baseline hardcoded. Hasta entonces, cualquier cambio público obliga a actualizar el array a mano y redeploy.
 
-#### Phase 2.2 — Catálogo metaobject `terpeno` (33 entradas) · **landed**
+#### Phase 2.2 — Catálogo metaobject `terpeno` (33 entradas) · **landed · P1 going forward**
 
 Implementado en este branch (ver `TERPENE_ROTATION_SYSTEM.md` para detalle completo):
 
@@ -176,11 +204,26 @@ Entrada necesaria:
 - Reglas de producción y merma.
 - Lead times por proveedor.
 
-## Phase 3 — Dataico / capa fiscal futura
+## Phase 3 — Dataico / capa fiscal · **P0 foundation, integración en vivo diferida**
+
+> Reclasificado el 2026-05-20: la **foundation/base de Dataico es P0** y arranca **en paralelo** con el core P0 de MM y el cierre de data truth de Phase 1. Lo que sigue siendo posterior es el envío en vivo / declaraciones automáticas — eso se mantiene como Phase 3 "vivo" y queda condicionado a tener Phase 2 core cerrada.
 
 Objetivo:
 
-Evaluar integración contable/fiscal formal **solo después** de que Phase 2 cierre (MM completamente reemplazado dentro del OS, incluyendo Terpene Rotation Manager). Phase 3 es exclusivamente la capa fiscal/Dataico — no incluye trabajo de MM, BOM, inventario ni terpenos.
+Dejar lista la capa fiscal/Dataico para que, una vez Phase 2 core esté entregada, conectar Dataico sea un toggle y no un proyecto desde cero. Phase 3 es exclusivamente la capa fiscal/Dataico — no incluye trabajo de MM, BOM, inventario ni terpenos.
+
+### P0 — Foundation Dataico (en curso ahora)
+
+- **Mapeo base de catálogo contable**: cuentas PUC (o equivalente) usadas para ventas, COGS, gastos operativos, capex, impuestos.
+- **Modelo de exportación fiscal**: estructura de documento (factura, nota crédito, gasto) que Dataico espera, generada a partir de ingresos Shopify + gastos OS + COGS calculado por el motor del OS.
+- **Plan de integración**: credenciales sandbox Dataico, endpoints a usar, contrato de campos, esquema de errores/reintentos, mapeo de impuestos por categoría.
+- **Exportación periódica preview**: poder generar el archivo/JSON fiscal del periodo sin enviarlo, para validación manual lado a lado con el contador.
+
+### P3-live — Integración en vivo (diferida)
+
+- Envío automático a Dataico (gated detrás de la P0 foundation y de Phase 2 core).
+- Declaraciones automáticas y cierre fiscal automatizado.
+- Reconciliación bidireccional Dataico ↔ OS.
 
 No incluido hoy:
 
@@ -191,9 +234,12 @@ No incluido hoy:
 Regla de scope:
 
 - Cualquier trabajo de inventario/BOM/materiales/terpenos pertenece a Phase 2, no a Phase 3.
-- Phase 3 arranca cuando el equipo deje de tocar Material Manager para operar.
+- La P0 foundation de Phase 3 puede avanzar en paralelo con P0 de Phase 2; el switch a Phase 3 "en vivo" sigue requiriendo que el equipo deje de tocar Material Manager para operar.
 
-## Phase 4 — Blend editor + bulk BOM replace (NO implementado)
+## Phase 4 — Blend editor + bulk BOM replace · **P1 (NO implementado)**
+
+> Reclasificado el 2026-05-20: junto con Terpene Rotation Manager, el Blend Editor es **P1**. No arranca implementación nueva hasta que P0 (Phase 1 data truth, Phase 2 core MM, Phase 3 Dataico foundation) esté cerrado.
+
 
 Objetivo:
 
@@ -230,4 +276,36 @@ Pre-requisitos antes de implementar:
 Estado: **NO implementado**. Hoy el Terpene Rotation Manager (Phase 2)
 gestiona los nombres canónicos y borradores de reemplazo de terpenos sin
 tocar BOM. La aplicación masiva a BOM vive aquí en Phase 4.
+
+## Próximos pasos inmediatos (P0)
+
+Orden de ejecución recomendado para los próximos sprints. Cada bullet pertenece a uno de los tres tracks P0 declarados arriba.
+
+### Track P0.A — Phase 1 data truth (COGS 100%)
+
+1. **Editor manual de COGS / margen por SKU** (override) en `/productos` para SKUs sin BOM o con BOM incompleta. Persistencia en una tabla `sku_cogs_overrides` con auditoría (quién/cuándo/por qué). El motor de KPIs/P&L consume el override antes que cualquier estimación.
+2. Normalizar categorías históricas restantes en gastos para llevar la alerta "gastos sin categoría" a cero.
+3. Validar timezone vs Shopify Analytics: cerrar el delta diario y dejar test de no-regresión.
+
+### Track P0.B — Material Manager replacement (core)
+
+1. **Crear/editar materiales locales** dentro del OS (no solo override del mirror): flujo "+ Nuevo material" con ID local estable, validaciones, opt-in a sync MM/Shopify futuro.
+2. **PO receiving → stock movements log**: marcar PO recibida total/parcial, generar `material_stock_movements` reales, soporte de reversión.
+3. **Adjustment history real** (reemplazo del proxy basado en cost history): ajuste manual, recibo PO, consumo BOM, devolución, todo con quién/cuándo/por qué.
+4. **Batch costing / landed cost básico**: costear lotes de producción con materiales reales consumidos + asignar costos accesorios (freight, importación) prorrateados a las POs correspondientes.
+5. **Promote drafts → oficial**: pipeline para empujar drafts BOM/material overrides a la fuente oficial (todavía MM mientras dure la convivencia), con validación previa y log.
+
+### Track P0.C — Dataico foundation (en paralelo)
+
+1. **Mapeo base contable**: definir cuentas PUC / catálogo Dataico para ventas, COGS, gastos operativos, capex, impuestos. Persistir en `accounting_chart_map` o equivalente.
+2. **Modelo de exportación fiscal**: estructura del documento que Dataico espera (factura, nota crédito, gasto) generado a partir de ingresos Shopify + gastos OS + COGS del OS.
+3. **Exportación periódica preview**: endpoint/CLI que genera el dump fiscal del periodo sin enviarlo, comparable lado a lado con el contador.
+4. **Plan de integración formal**: credenciales sandbox, contrato de campos, esquema de errores/reintentos. Documento corto que sirva de prerrequisito al envío en vivo.
+
+### Después del P0 — entrada a P1
+
+Solo cuando A + B + C estén cerrados (o explícitamente descongelados con razón documentada) se reabre scope nuevo en:
+
+1. **Terpene Rotation Manager** (Phase 2.6 / 2.2): sync Shopify metaobjects vía proxy backend, retirar baseline hardcoded, BOM consume rotación.
+2. **Blend Editor + bulk BOM replace** (Phase 4): editor de blends draft con doble confirmación.
 

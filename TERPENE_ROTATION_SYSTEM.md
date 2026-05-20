@@ -2,6 +2,10 @@
 
 Status: **Phase 2.2 implemented · local-only · no Shopify writes yet**
 
+> **Priority overlay (2026-05-20)** · ver `ROADMAP.md` § *Modelo de prioridades*.
+>
+> Terpene Rotation System es **P1**. Está después del P0 vigente (Phase 1 data truth + 100% COGS, Material Manager core replacement, Dataico foundation). Lo entregado hasta ahora — catálogo metaobject de 33 entradas, baseline `CURRENT_ROTATION_BASELINE`, payload preview GraphQL — permanece en producción y se mantiene operativo, pero **no se abre scope nuevo (sync vivo Shopify, dynamic Deepdive, automatic baseline pull) hasta que el P0 esté cerrado**. Bugfixes sobre lo entregado sí proceden.
+
 This document explains how the Connabis terpene rotation system is modelled
 inside the Accounting OS, how the OS maps to the live Shopify surfaces
 documented in *Connabis Terpene Rotation System Technical Documentation*, and
