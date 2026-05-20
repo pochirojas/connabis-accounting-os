@@ -3,7 +3,8 @@ import { Link } from 'wouter';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { apiRequest, queryClient } from '@/lib/queryClient';
 import { ProductBomEditor } from '@/components/product-bom-editor';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -19,7 +20,7 @@ import { Package, ShieldAlert, ShieldCheck, Pencil, Info, Search, Layers3, Alert
 import {
   Tooltip as UiTooltip, TooltipContent, TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, type FormEvent } from 'react';
 import { Input } from '@/components/ui/input';
 
 export default function Productos() {
@@ -101,6 +102,9 @@ export default function Productos() {
         <KpiCard label="Margen contribución" value={formatPct(avgCM, 1)} icon={ShieldCheck} emphasis="gold" testId="kpi-cm-prom" hint="Después de fees, packaging, envío" />
         <KpiCard label="SKUs sin costo" value={`${missingCosts}`} icon={ShieldAlert} testId="kpi-skus-riesgo" hint="Variantes sin unitCost en Shopify" />
       </section>
+
+      <ManualCogsOverridesPanel />
+
 
       <section className="mt-6">
         <Card className="p-5 bg-card border-card-border" data-testid="card-product-selector">
@@ -445,6 +449,236 @@ function MiniMetric({ label, value, testId }: { label: string; value: string; te
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className="mt-1 text-sm font-semibold tabular">{value}</div>
     </div>
+  );
+}
+
+type ManualCogsOverride = {
+  id: string;
+  matchKey: string;
+  displayName: string;
+  unitCostCop: number;
+  note: string | null;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type MissingCogsRow = {
+  product: string;
+  sku: string;
+  variantId: string;
+  units: number;
+  revenue: number;
+  lines: number;
+  orders: number;
+};
+
+type BomCoverageResponse = {
+  coverage: number;
+  missingRevenue: number;
+  missingUnits: number;
+  missingSkus: MissingCogsRow[];
+};
+
+function ManualCogsOverridesPanel() {
+  const overrides = useQuery<ManualCogsOverride[]>({ queryKey: ['/api/cogs-overrides'] });
+  const coverage = useQuery<BomCoverageResponse>({ queryKey: ['/api/bom-coverage'] });
+  const [displayName, setDisplayName] = useState('');
+  const [unitCost, setUnitCost] = useState('');
+  const [note, setNote] = useState('');
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['/api/cogs-overrides'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/products'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/bom-coverage'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/kpis'] });
+  };
+
+  const upsert = useMutation({
+    mutationFn: async (payload: { displayName: string; unitCostCop: number; note?: string }) =>
+      (await apiRequest('POST', '/api/cogs-overrides', payload)).json() as Promise<ManualCogsOverride>,
+    onSuccess: () => {
+      setDisplayName('');
+      setUnitCost('');
+      setNote('');
+      invalidate();
+    },
+  });
+
+  const deactivate = useMutation({
+    mutationFn: async (id: string) =>
+      (await apiRequest('PATCH', `/api/cogs-overrides/${id}/active`, { active: false })).json(),
+    onSuccess: invalidate,
+  });
+
+  const reactivate = useMutation({
+    mutationFn: async (id: string) =>
+      (await apiRequest('PATCH', `/api/cogs-overrides/${id}/active`, { active: true })).json(),
+    onSuccess: invalidate,
+  });
+
+  const remove = useMutation({
+    mutationFn: async (id: string) =>
+      (await apiRequest('DELETE', `/api/cogs-overrides/${id}`)).json(),
+    onSuccess: invalidate,
+  });
+
+  const missingTop = (coverage.data?.missingSkus ?? []).slice(0, 10);
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const cost = Number(unitCost);
+    if (!displayName.trim() || !Number.isFinite(cost) || cost < 0) return;
+    upsert.mutate({ displayName: displayName.trim(), unitCostCop: Math.round(cost), note: note.trim() || undefined });
+  };
+
+  return (
+    <section className="mt-6">
+      <Card className="p-5 bg-card border-card-border" data-testid="card-cogs-overrides">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="text-sm font-semibold tracking-tight">COGS manual override (P0)</h2>
+            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+              Último recurso para productos sin BOM en Material Manager y sin <code>unitCost</code> en Shopify.
+              Se aplica por nombre normalizado y nunca reemplaza una coincidencia real. Tipo de match: <code>manual_override</code>.
+            </p>
+          </div>
+          <Badge variant="outline" className="text-[10.5px]">
+            {(overrides.data ?? []).filter(o => o.active).length} activos
+          </Badge>
+        </div>
+
+        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-[1.5fr_140px_1.2fr_auto] gap-2 mb-4" data-testid="form-cogs-override">
+          <Input
+            value={displayName}
+            onChange={e => setDisplayName(e.target.value)}
+            placeholder="Nombre/título del producto (ej. Delta-8-THC-O Destilado)"
+            data-testid="input-cogs-override-name"
+          />
+          <Input
+            value={unitCost}
+            type="number"
+            min={0}
+            onChange={e => setUnitCost(e.target.value)}
+            placeholder="COP por unidad"
+            data-testid="input-cogs-override-cost"
+          />
+          <Input
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder="Nota (origen del costo, fecha, etc.)"
+            data-testid="input-cogs-override-note"
+          />
+          <Button type="submit" size="sm" disabled={!displayName.trim() || !unitCost} data-testid="button-cogs-override-save">
+            {upsert.isPending ? 'Guardando…' : 'Guardar override'}
+          </Button>
+        </form>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div>
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Overrides existentes</div>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Producto</TableHead>
+                    <TableHead className="text-right">COGS COP</TableHead>
+                    <TableHead>Nota</TableHead>
+                    <TableHead className="text-right">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(overrides.data ?? []).length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-xs text-muted-foreground py-3">
+                        Aún no hay overrides manuales. Usa el formulario para agregar uno.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {(overrides.data ?? []).map(o => (
+                    <TableRow key={o.id} data-testid={`row-cogs-override-${o.id}`}>
+                      <TableCell className="text-[12.5px]">
+                        <div className="font-medium">{o.displayName}</div>
+                        <div className="text-[10.5px] text-muted-foreground">match: {o.matchKey}</div>
+                      </TableCell>
+                      <TableCell className="text-right tabular">{formatCOP(o.unitCostCop)}</TableCell>
+                      <TableCell className="text-[11.5px] text-muted-foreground max-w-[220px]">{o.note ?? '—'}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1.5">
+                          {o.active ? (
+                            <Button size="sm" variant="outline" onClick={() => deactivate.mutate(o.id)} data-testid={`button-cogs-override-deactivate-${o.id}`}>
+                              Desactivar
+                            </Button>
+                          ) : (
+                            <Button size="sm" variant="outline" onClick={() => reactivate.mutate(o.id)} data-testid={`button-cogs-override-reactivate-${o.id}`}>
+                              Reactivar
+                            </Button>
+                          )}
+                          <Button size="sm" variant="ghost" onClick={() => remove.mutate(o.id)} data-testid={`button-cogs-override-delete-${o.id}`}>
+                            Eliminar
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
+              Top productos sin COGS (ventas reales)
+            </div>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Producto</TableHead>
+                    <TableHead className="text-right">Ingresos</TableHead>
+                    <TableHead className="text-right">Unidades</TableHead>
+                    <TableHead className="text-right">Acción</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {missingTop.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-xs text-muted-foreground py-3">
+                        No hay productos sin COGS detectados.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {missingTop.map((row, idx) => (
+                    <TableRow key={`${row.product}-${idx}`} data-testid={`row-missing-cogs-${idx}`}>
+                      <TableCell className="text-[12.5px]">
+                        <div className="font-medium">{row.product || row.sku || row.variantId || 'sin nombre'}</div>
+                        <div className="text-[10.5px] text-muted-foreground">{row.sku || row.variantId || '—'}</div>
+                      </TableCell>
+                      <TableCell className="text-right tabular">{formatCOP(row.revenue)}</TableCell>
+                      <TableCell className="text-right tabular">{formatNumber(row.units)}</TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setDisplayName(row.product || row.sku || '');
+                            setUnitCost('');
+                            setNote('');
+                          }}
+                          data-testid={`button-fill-override-${idx}`}
+                        >
+                          Llenar
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </div>
+      </Card>
+    </section>
   );
 }
 

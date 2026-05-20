@@ -82,6 +82,10 @@ Supuestos Phase 1:
 - El costo usado viene del export actual de Material Manager, no de costo histórico por lote.
 - No hay FIFO, promedio ponderado ni batch costing histórico en Phase 1.
 
+### Manual COGS override (P0, último recurso)
+
+Para productos vendidos sin BOM en Material Manager y sin `unitCost` en Shopify, el OS permite registrar un costo unitario manual desde Productos & Márgenes. El override se aplica únicamente cuando la búsqueda real falla: el orden de resolución es BOM por `variantId` → BOM por nombre/fuzzy → alias histórico → override manual (`matchType: 'manual_override'`) → `missing`. Nunca desplaza una coincidencia real de Material Manager ni un `unitCost` de Shopify. Cada override guarda `displayName`, costo unitario en COP, nota opcional y se identifica por el título normalizado del producto (misma normalización que el matcher BOM, `normalizeProductMatchKey`). Es un mecanismo puente para que las métricas de COGS y margen reflejen casos puntuales mientras se completa el BOM correspondiente en MM; un override activo se reporta en P&L y KPIs como COGS real, así que debe documentarse en la nota y revisarse al cargar el BOM definitivo.
+
 ## Gastos operativos
 
 Fuente oficial: sheet `Expenses` + gastos manuales OS.

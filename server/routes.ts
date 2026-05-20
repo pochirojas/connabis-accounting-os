@@ -71,6 +71,13 @@ import {
   ceoMetrics, pnlRows, cashFlowSnapshots, inventoryAccountingRows, closeChecklist,
 } from './seed';
 import { cached, cachedSync, cacheInvalidate } from './cache';
+import {
+  deleteManualCogsOverride,
+  getManualCogsOverrideByMatchKey,
+  listManualCogsOverrides,
+  setManualCogsOverrideActive,
+  upsertManualCogsOverride,
+} from './manual-cogs-overrides';
 
 // TTLs (ms) — short enough to keep numbers fresh, long enough to make screen
 // navigation feel instant. Mutation handlers invalidate the relevant prefixes.
@@ -354,6 +361,16 @@ function getBomUnitCostByVariantId(variantGid?: string | null, productTitle?: st
       if (alias.target.kind === 'fixed') {
         return { unitCost: alias.target.unitCost, hasBom: true, matchType: 'alias' as const };
       }
+    }
+  }
+
+  // Last-resort manual override (P0): when no real BOM/alias matches, allow
+  // an operator-entered COP/unit cost keyed by normalized product title. Does
+  // not affect any real BOM match — only fills in 'missing' rows.
+  if (productTitle) {
+    const override = getManualCogsOverrideByMatchKey(productTitle);
+    if (override) {
+      return { unitCost: override.unitCostCop, hasBom: true, matchType: 'manual_override' as const };
     }
   }
 
@@ -1592,7 +1609,12 @@ async function loadLiveShopifyProductsUncached() {
     const price = Number(variant.price) || 0;
     const shopifyCost = variant.inventoryItem.unitCost ? Number(variant.inventoryItem.unitCost.amount) : null;
     const bom = buildGroupedBomBreakdown(group.variants.map(item => String(item.legacyResourceId)));
-    const cogsUsed = bom?.total ?? shopifyCost ?? 0;
+    // Manual override is consulted only when BOM and Shopify cost are both
+    // missing — it never displaces a real BOM or Shopify unitCost.
+    const manualOverride = !bom && shopifyCost === null
+      ? getManualCogsOverrideByMatchKey(product.title)
+      : null;
+    const cogsUsed = bom?.total ?? shopifyCost ?? manualOverride?.unitCostCop ?? 0;
     const packaging = defaultPackaging(product.title);
     const fees = 0.035;
     const shippingSubsidy = 0;
@@ -1617,7 +1639,14 @@ async function loadLiveShopifyProductsUncached() {
       revenue: 0,
       cogsShopify: shopifyCost,
       cogsFallback: 0,
-      cogsBreakdown: bom?.breakdown ?? [
+      cogsBreakdown: bom?.breakdown ?? (manualOverride ? [
+        {
+          label: 'Costo unitario (override manual)',
+          amount: manualOverride.unitCostCop,
+          source: 'manual' as const,
+          note: manualOverride.note ? `Manual COGS override · ${manualOverride.note}` : 'Manual COGS override (sin BOM ni unitCost Shopify).',
+        },
+      ] : [
         {
           label: 'Costo unitario Shopify',
           amount: cogsUsed,
@@ -1626,14 +1655,14 @@ async function loadLiveShopifyProductsUncached() {
             ? 'Sin unitCost en Shopify; cargar costo para margen real.'
             : `Costo base tomado de Shopify. ${flavorOptions.length || group.variants.length} variantes agrupadas en esta fila.`,
         },
-      ],
+      ]),
       packaging,
       fees,
       shippingSubsidy,
       cogsUsed,
-      cogsSource: bom ? 'material_manager' : cogsUsed === 0 ? 'fallback' : 'shopify',
-      marginSource: bom ? 'material_manager' : 'shopify',
-      dataCompleteness: bom || shopifyCost !== null ? 'real' : 'partial',
+      cogsSource: bom ? 'material_manager' : manualOverride ? 'manual_override' : cogsUsed === 0 ? 'fallback' : 'shopify',
+      marginSource: bom ? 'material_manager' : manualOverride ? 'manual_override' : 'shopify',
+      dataCompleteness: bom || shopifyCost !== null || manualOverride ? 'real' : 'partial',
       idealPrice,
       competitorPrice: price,
       maxProfitableDiscount,
@@ -1938,6 +1967,69 @@ export async function registerRoutes(
       res.status(502).json({ error: error instanceof Error ? error.message : 'bom_coverage_failed' });
     }
   });
+
+  // ---------- Manual COGS overrides (P0) ----------
+  // Last-resort COGS fallback for products with no MM BOM and no Shopify
+  // unitCost. Keyed by normalized product title. Real BOM matches are never
+  // displaced — the override only fills in 'missing' lookups.
+  function invalidateProductCaches() {
+    cacheInvalidate('shopify-products-live');
+  }
+
+  app.get('/api/cogs-overrides', (_req, res) => {
+    res.json(listManualCogsOverrides());
+  });
+
+  app.post('/api/cogs-overrides', (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const created = upsertManualCogsOverride({
+        displayName: String(body.displayName ?? body.title ?? '').slice(0, 200),
+        unitCostCop: Number(body.unitCostCop ?? body.unitCost ?? 0),
+        note: body.note ? String(body.note).slice(0, 500) : null,
+        active: body.active === false ? false : true,
+      });
+      invalidateProductCaches();
+      res.json(created);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'cogs_override_create_failed';
+      res.status(400).json({ error: message });
+    }
+  });
+
+  app.put('/api/cogs-overrides/:id', (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const updated = upsertManualCogsOverride({
+        id: req.params.id,
+        displayName: String(body.displayName ?? body.title ?? '').slice(0, 200),
+        unitCostCop: Number(body.unitCostCop ?? body.unitCost ?? 0),
+        note: body.note ? String(body.note).slice(0, 500) : null,
+        active: body.active === false ? false : true,
+      });
+      invalidateProductCaches();
+      res.json(updated);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'cogs_override_update_failed';
+      res.status(400).json({ error: message });
+    }
+  });
+
+  app.patch('/api/cogs-overrides/:id/active', (req, res) => {
+    const active = req.body?.active !== false;
+    const ok = setManualCogsOverrideActive(req.params.id, active);
+    if (!ok) return res.status(404).json({ error: 'override_not_found' });
+    invalidateProductCaches();
+    res.json({ id: req.params.id, active });
+  });
+
+  app.delete('/api/cogs-overrides/:id', (req, res) => {
+    const ok = deleteManualCogsOverride(req.params.id);
+    if (!ok) return res.status(404).json({ error: 'override_not_found' });
+    invalidateProductCaches();
+    res.json({ id: req.params.id, deleted: true });
+  });
+
   app.get('/api/alerts', async (_req, res) => {
     try {
       const orders = await loadLiveShopifyIncomeOrders();

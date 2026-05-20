@@ -56,6 +56,19 @@ CREATE TABLE IF NOT EXISTS cash_accounts (
   amount INTEGER NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS manual_cogs_overrides (
+  id TEXT PRIMARY KEY,
+  match_key TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
+  unit_cost_cop INTEGER NOT NULL,
+  note TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_manual_cogs_overrides_active
+  ON manual_cogs_overrides(active);
 `);
 
 const manualExpenseColumns = sqlite.prepare(`PRAGMA table_info(manual_expenses)`).all() as Array<{ name: string }>;

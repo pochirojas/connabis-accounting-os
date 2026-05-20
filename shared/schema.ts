@@ -92,8 +92,8 @@ export type Product = {
   shippingSubsidy: number;  // COP
   // computed
   cogsUsed: number;
-  cogsSource: 'shopify' | 'material_manager' | 'fallback';
-  marginSource: 'shopify' | 'material_manager' | 'seed';
+  cogsSource: 'shopify' | 'material_manager' | 'fallback' | 'manual_override';
+  marginSource: 'shopify' | 'material_manager' | 'seed' | 'manual_override';
   dataCompleteness: 'real' | 'partial' | 'placeholder';
   idealPrice: number;
   competitorPrice: number;
