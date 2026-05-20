@@ -3,8 +3,8 @@
  *
  * Talks to the running Connabis Accounting OS API (default http://localhost:5000)
  * and prints a month-by-month reconciliation table:
- *   - Shopify total_sales (ShopifyQL Analytics, source of truth for revenue)
- *   - COGS vendido (from MM BOM)
+ *   - Shopify income (fulfilled-only orders, source of truth since 2026-05-20)
+ *   - COGS vendido (from MM BOM, same fulfilled-only population)
  *   - Utilidad bruta
  *   - Gastos operativos reales (excluye inventario/capex)
  *   - Utilidad neta
@@ -52,6 +52,16 @@ type BomCoverage = {
     lines: number;
     orders: number;
   }>;
+};
+
+type OrderInclusion = {
+  total: number;
+  included: number;
+  excludedTest: number;
+  excludedCancelled: number;
+  excludedNotFulfilled: number;
+  excludedPendingOrRefunded: number;
+  closedButIncluded: number;
 };
 
 type ExpenseRow = {
@@ -149,7 +159,7 @@ async function main() {
     process.exit(2);
   }
 
-  console.log('## Monthly P&L (Shopify total_sales vs COGS MM vs gastos reales)\n');
+  console.log('## Monthly P&L (Shopify fulfilled-only orders vs COGS MM vs gastos reales)\n');
   console.log(
     table(
       monthsThisYear.map(m => ({
@@ -177,7 +187,7 @@ async function main() {
     0,
   );
   console.log('\n## Year totals');
-  console.log(`Ingresos (ShopifyQL total_sales): ${fmtCop(totalIncome)} COP`);
+  console.log(`Ingresos (fulfilled-only orders): ${fmtCop(totalIncome)} COP`);
   console.log(`COGS vendido (BOM MM):            ${fmtCop(totalCogs)} COP`);
   console.log(`Utilidad bruta:                   ${fmtCop(totalGross)} COP`);
   console.log(
@@ -199,6 +209,32 @@ async function main() {
         'Treat the table above as untrustworthy and re-run once Shopify is reachable.',
     );
     process.exit(2);
+  }
+
+  console.log('\n## Order inclusion (fulfilled-only filter)');
+  try {
+    const incl = await getJson<OrderInclusion>(`/api/order-inclusion?year=${YEAR}`);
+    const excludedTotal =
+      incl.excludedTest +
+      incl.excludedCancelled +
+      incl.excludedNotFulfilled +
+      incl.excludedPendingOrRefunded;
+    console.log(
+      table([
+        { metric: 'total Shopify en período', valor: incl.total },
+        { metric: 'incluidas (fulfilled+ok)', valor: incl.included },
+        { metric: 'excluidas test', valor: incl.excludedTest },
+        { metric: 'excluidas cancelladas', valor: incl.excludedCancelled },
+        { metric: 'excluidas no-fulfilled', valor: incl.excludedNotFulfilled },
+        { metric: 'excluidas pending/refunded', valor: incl.excludedPendingOrRefunded },
+        { metric: 'total excluidas', valor: excludedTotal },
+        { metric: 'incluidas que están closed (info)', valor: incl.closedButIncluded },
+      ]),
+    );
+  } catch (err) {
+    console.error(
+      `! Order inclusion endpoint unavailable (${err instanceof Error ? err.message : String(err)}).`,
+    );
   }
 
   console.log('\n## BOM coverage (líneas vendidas con BOM real)');

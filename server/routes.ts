@@ -840,10 +840,31 @@ function expenseInPeriod(expense: Record<string, unknown>, params: PeriodParams)
   return true;
 }
 
-function orderInPeriod(order: LiveIncomeOrder, params: PeriodParams) {
+// Accounting rule (2026-05-20): only fulfilled, non-cancelled, non-draft,
+// non-test orders contribute to revenue/COGS.
+//
+// Notes on Shopify semantics:
+//   - Drafts: live in a separate `draftOrders` connection. The backend never
+//     queries that connection for accounting, so drafts are excluded by design.
+//   - Cancelled: `cancelledAt !== null`. Excluded.
+//   - "Archived" in Shopify Admin sets `closedAt`. In this shop's workflow
+//     fulfilled orders are routinely auto-closed once shipped, so closed
+//     orders are still legitimate fulfilled sales — we do NOT exclude on
+//     `closedAt`. The fulfillment + cancelled + test checks below already
+//     remove the order populations the user wanted out (drafts, cancelled,
+//     unfulfilled). `closedAt` is read into the type for diagnostics only.
+function isAccountingIncludedOrder(order: LiveIncomeOrder): boolean {
+  if (order.test) return false;
+  if (order.cancelledAt) return false;
+  const fulfillment = normalizeFulfillmentStatus(order.displayFulfillmentStatus);
+  if (fulfillment !== 'fulfilled') return false;
   const paymentStatus = normalizePaymentStatus(order.displayFinancialStatus);
   if (paymentStatus === 'pending' || paymentStatus === 'refunded') return false;
-  if (order.cancelledAt || order.test) return false;
+  return true;
+}
+
+function orderInPeriod(order: LiveIncomeOrder, params: PeriodParams) {
+  if (!isAccountingIncludedOrder(order)) return false;
   const date = reportDateFromIso(order.createdAt);
   const month = date.slice(0, 7);
   if (params.month) return month === params.month;
@@ -865,6 +886,7 @@ type LiveIncomeOrder = {
   displayFulfillmentStatus: string;
   sourceName: string | null;
   cancelledAt: string | null;
+  closedAt: string | null;
   test: boolean;
   totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
   currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } } | null;
@@ -918,7 +940,7 @@ async function loadLiveShopifyIncomeOrders(params: PeriodParams = {}) {
   return cached(cacheKey, SHOPIFY_ORDERS_TTL, () => loadLiveShopifyIncomeOrdersUncached(params));
 }
 
-async function loadLiveShopifyIncomeOrdersUncached(params: PeriodParams = {}) {
+async function fetchAllShopifyOrdersInPeriod(params: PeriodParams = {}): Promise<LiveIncomeOrder[]> {
   const query = `
     query LiveIncomeOrders($cursor: String, $query: String!) {
       orders(first: 100, after: $cursor, sortKey: CREATED_AT, reverse: false, query: $query) {
@@ -932,6 +954,7 @@ async function loadLiveShopifyIncomeOrdersUncached(params: PeriodParams = {}) {
             displayFulfillmentStatus
             sourceName
             cancelledAt
+            closedAt
             test
             totalPriceSet { shopMoney { amount currencyCode } }
             currentTotalPriceSet { shopMoney { amount currencyCode } }
@@ -971,7 +994,46 @@ async function loadLiveShopifyIncomeOrdersUncached(params: PeriodParams = {}) {
     hasNextPage = data.orders.pageInfo.hasNextPage;
     cursor = data.orders.pageInfo.endCursor;
   }
+  return allOrders;
+}
+
+async function loadLiveShopifyIncomeOrdersUncached(params: PeriodParams = {}) {
+  const allOrders = await fetchAllShopifyOrdersInPeriod(params);
   return allOrders.filter(order => orderInPeriod(order, params));
+}
+
+async function loadShopifyOrderInclusionBreakdown(params: PeriodParams = {}) {
+  const all = await fetchAllShopifyOrdersInPeriod(params);
+  const inPeriod = all.filter(order => {
+    const date = reportDateFromIso(order.createdAt);
+    const month = date.slice(0, 7);
+    if (params.month) return month === params.month;
+    if (params.year) return month.startsWith(`${params.year}-`);
+    if (params.start && date < params.start) return false;
+    if (params.end && date > params.end) return false;
+    return true;
+  });
+  const reasons = {
+    total: inPeriod.length,
+    included: 0,
+    excludedTest: 0,
+    excludedCancelled: 0,
+    excludedNotFulfilled: 0,
+    excludedPendingOrRefunded: 0,
+    // informational only (closed/archived are NOT excluded from accounting):
+    closedButIncluded: 0,
+  };
+  for (const order of inPeriod) {
+    if (order.test) { reasons.excludedTest += 1; continue; }
+    if (order.cancelledAt) { reasons.excludedCancelled += 1; continue; }
+    const fulfillment = normalizeFulfillmentStatus(order.displayFulfillmentStatus);
+    if (fulfillment !== 'fulfilled') { reasons.excludedNotFulfilled += 1; continue; }
+    const paymentStatus = normalizePaymentStatus(order.displayFinancialStatus);
+    if (paymentStatus === 'pending' || paymentStatus === 'refunded') { reasons.excludedPendingOrRefunded += 1; continue; }
+    reasons.included += 1;
+    if (order.closedAt) reasons.closedButIncluded += 1;
+  }
+  return reasons;
 }
 
 function mapOrdersToAccountingLines(orders: LiveIncomeOrder[]): AccountingLine[] {
@@ -1046,10 +1108,10 @@ function listDatesInMonth(month: string) {
 }
 
 async function buildDailyPerformanceRows(): Promise<DailyPerformance[]> {
-  const [incomeRows, salesRows] = await Promise.all([
-    loadLiveShopifyIncomeOrders().then(mapOrdersToAccountingLines),
-    loadShopifySalesRows('day'),
-  ]);
+  // Revenue/orders come from fulfilled-only live orders (same population as
+  // COGS). ShopifyQL `FROM sales` is not used here because it cannot be
+  // filtered by fulfillment status and would mismatch the COGS population.
+  const incomeRows = await loadLiveShopifyIncomeOrders().then(mapOrdersToAccountingLines);
   const expenseRows = (await loadAllExpenses()).map(withExpenseClassification) as Array<{
     date: string;
     month: string;
@@ -1060,8 +1122,6 @@ async function buildDailyPerformanceRows(): Promise<DailyPerformance[]> {
   const monthsWithData = new Set<string>();
   incomeRows.forEach(row => monthsWithData.add(row.month));
   expenseRows.forEach(row => monthsWithData.add(row.month));
-  salesRows.forEach(row => monthsWithData.add(row.period.slice(0, 7)));
-  const salesByDay = new Map(salesRows.map(row => [row.period, row]));
 
   const byDate = new Map<string, {
     orders: Set<string>;
@@ -1109,11 +1169,10 @@ async function buildDailyPerformanceRows(): Promise<DailyPerformance[]> {
       const day = byDate.get(date);
       const productEntries = day ? Array.from(day.products.entries()) : [];
       const topProduct = productEntries.sort((a, b) => b[1].revenue - a[1].revenue)[0];
-      const sales = salesByDay.get(date);
-      const revenue = sales?.totalSales ?? day?.revenue ?? 0;
+      const revenue = day?.revenue ?? 0;
       const cogs = day?.cogs ?? 0;
       const expenses = day?.expenses ?? 0;
-      const orders = sales?.orders ?? day?.orders.size ?? 0;
+      const orders = day?.orders.size ?? 0;
       const grossProfit = revenue - cogs;
       const profit = grossProfit - expenses;
       return {
@@ -1135,7 +1194,7 @@ async function buildDailyPerformanceRows(): Promise<DailyPerformance[]> {
     });
 }
 
-function summarizeYears(orders: LiveIncomeOrder[], salesRows: ShopifySalesRow[] = []) {
+function summarizeYears(orders: LiveIncomeOrder[], _salesRows: ShopifySalesRow[] = []) {
   const lines = mapOrdersToAccountingLines(orders);
   const grouped = new Map<number, { orders: Set<string>; revenue: number }>();
   for (const line of lines) {
@@ -1145,23 +1204,21 @@ function summarizeYears(orders: LiveIncomeOrder[], salesRows: ShopifySalesRow[] 
     current.revenue += line.netRevenue;
     grouped.set(year, current);
   }
-  const salesByYear = new Map(salesRows.map(row => [Number(row.period.slice(0, 4)), row]));
   return Array.from(grouped.entries()).map(([year, row]) => {
-    const sales = salesByYear.get(year);
-    const revenue = sales?.totalSales ?? row.revenue;
-    const ordersCount = sales?.orders ?? row.orders.size;
+    const revenue = row.revenue;
+    const ordersCount = row.orders.size;
     return {
-    year,
-    orders: ordersCount,
-    revenue,
-    aov: ordersCount ? revenue / ordersCount : 0,
-    projected: year === 2026 ? Math.round((revenue / Math.max(new Date().getMonth() + 1, 1)) * 12) : undefined,
-    note: 'ShopifyQL total_sales: ventas totales Analytics',
+      year,
+      orders: ordersCount,
+      revenue,
+      aov: ordersCount ? revenue / ordersCount : 0,
+      projected: year === 2026 ? Math.round((revenue / Math.max(new Date().getMonth() + 1, 1)) * 12) : undefined,
+      note: 'Órdenes Shopify fulfilled-only (excluye canceladas/draft/test/pending/refunded)',
     };
   }).sort((a, b) => a.year - b.year);
 }
 
-function summarizeMonths(orders: LiveIncomeOrder[], expenses: Array<Record<string, unknown>>, salesRows: ShopifySalesRow[] = []) {
+function summarizeMonths(orders: LiveIncomeOrder[], expenses: Array<Record<string, unknown>>, _salesRows: ShopifySalesRow[] = []) {
   const lines = mapOrdersToAccountingLines(orders);
   const grouped = new Map<string, {
     orders: Set<string>;
@@ -1204,15 +1261,9 @@ function summarizeMonths(orders: LiveIncomeOrder[], expenses: Array<Record<strin
       current.operatingExpenses += amount;
     }
   }
-  for (const row of salesRows) {
-    const month = row.period.slice(0, 7);
-    if (month) ensureMonth(month);
-  }
-  const salesByMonth = new Map(salesRows.map(row => [row.period.slice(0, 7), row]));
   return Array.from(grouped.entries()).map(([month, row]) => {
-    const sales = salesByMonth.get(month);
-    const income = sales?.totalSales ?? row.income;
-    const orderCount = sales?.orders ?? row.orders.size;
+    const income = row.income;
+    const orderCount = row.orders.size;
     return {
     month,
     label: monthLabel(month),
@@ -1225,7 +1276,7 @@ function summarizeMonths(orders: LiveIncomeOrder[], expenses: Array<Record<strin
     netMargin: income ? (income - row.cogs - row.operatingExpenses) / income : 0,
     inventoryPurchasesExcluded: row.inventoryPurchasesExcluded,
     partial: month === todayInReportTimeZone().slice(0, 7),
-    note: `${orderCount} órdenes ShopifyQL; ingreso = total_sales Analytics; COGS vendido por BOM MM; gastos operativos reales. Compras de inventario/capex excluidas: ${Math.round(row.inventoryPurchasesExcluded).toLocaleString('es-CO')} COP.`,
+    note: `${orderCount} órdenes fulfilled-only (excluye canceladas/draft/test/pending/refunded); ingreso y COGS comparten la misma población. Compras de inventario/capex excluidas: ${Math.round(row.inventoryPurchasesExcluded).toLocaleString('es-CO')} COP.`,
     };
   }).sort((a, b) => a.month.localeCompare(b.month));
 }
@@ -1343,10 +1394,15 @@ function addSalesToProducts(productRows: Product[], lines: AccountingLine[]): Pr
   });
 }
 
-function buildDashboardKpis(orders: LiveIncomeOrder[], expenses: Array<Record<string, unknown>>, salesSummary?: ShopifySalesSummary) {
+function buildDashboardKpis(orders: LiveIncomeOrder[], expenses: Array<Record<string, unknown>>, _salesSummary?: ShopifySalesSummary) {
+  // Revenue and COGS share the same fulfilled-order population so the P&L
+  // never mixes ShopifyQL all-sales with fulfilled-only COGS. ShopifyQL
+  // `FROM sales` cannot be filtered by fulfillment status, so we sum live
+  // fulfilled-order net revenue (totalSales preferring currentTotalPriceSet,
+  // matching getOrderAccountingRevenue) instead.
   const lines = mapOrdersToAccountingLines(orders);
   const orderIds = new Set(lines.map(line => line.orderId));
-  const ingresos = salesSummary?.totalSales ?? lines.reduce((sum, line) => sum + line.netRevenue, 0);
+  const ingresos = lines.reduce((sum, line) => sum + line.netRevenue, 0);
   const cogsVendido = lines.reduce((sum, line) => sum + line.cogsSold, 0);
   const { operatingExpenses, inventoryPurchases, capex, uncategorized } = splitOperatingAndInventoryExpenses(expenses);
   const utilidadBruta = ingresos - cogsVendido;
@@ -1371,14 +1427,14 @@ function buildDashboardKpis(orders: LiveIncomeOrder[], expenses: Array<Record<st
     comprasInventarioExcluidas: inventoryPurchases + capex,
     utilidadNeta,
     margenEstimado: ingresos ? utilidadNeta / ingresos : 0,
-    aov: (salesSummary?.orders ?? orderIds.size) ? ingresos / (salesSummary?.orders ?? orderIds.size) : 0,
-    ordenes: salesSummary?.orders ?? orderIds.size,
+    aov: orderIds.size ? ingresos / orderIds.size : 0,
+    ordenes: orderIds.size,
     clientesRecurrentes: recurrentOrderIds.size,
     clientesRecurrentesPct: orderIds.size ? recurrentOrderIds.size / orderIds.size : 0,
     topProductFamily,
     alertasActivas: buildRealAlerts(lines, expenses).length,
     asOf: new Date().toISOString().slice(0, 10),
-    dataQualityNote: `${qualityPrefix}: ingresos = ShopifyQL total_sales Analytics (${REPORT_TIME_ZONE}); productos/unidades desde órdenes Shopify; MM BOM/COGS + gastos sheet/manual. Cobertura BOM en líneas vendidas: ${coverageText}; líneas sin BOM (incluye productos custom/personalizados sin BOM definido) quedan en COGS 0 — pendiente costo manual o corregir matching MM. Compras inventario/capex excluidas de gastos operativos: ${Math.round(inventoryPurchases + capex).toLocaleString('es-CO')} COP. Gastos sin categoría incluidos como operativos y alertados: ${Math.round(uncategorized).toLocaleString('es-CO')} COP.`,
+    dataQualityNote: `${qualityPrefix}: ingresos = órdenes Shopify fulfilled-only (excluye canceladas/draft/test/pending/refunded; archivadas/closed sí se incluyen porque son cumplidas) en ${REPORT_TIME_ZONE}; misma población que COGS para mantener consistencia P&L. MM BOM/COGS + gastos sheet/manual. Cobertura BOM en líneas vendidas: ${coverageText}; líneas sin BOM (incluye productos custom/personalizados sin BOM definido) quedan en COGS 0 — pendiente costo manual o corregir matching MM. Compras inventario/capex excluidas de gastos operativos: ${Math.round(inventoryPurchases + capex).toLocaleString('es-CO')} COP. Gastos sin categoría incluidos como operativos y alertados: ${Math.round(uncategorized).toLocaleString('es-CO')} COP.`,
   };
 }
 
@@ -1702,12 +1758,11 @@ export async function registerRoutes(
   app.get('/api/kpis', async (req, res) => {
     try {
       const period = getPeriodParams(req.query);
-      const [orders, salesSummary, allExpenses] = await Promise.all([
+      const [orders, allExpenses] = await Promise.all([
         loadLiveShopifyIncomeOrders(period),
-        loadShopifySalesSummary(period),
         loadAllExpenses().then(expenses => expenses.filter(expense => expenseInPeriod(expense, period))),
       ]);
-      res.json(buildDashboardKpis(orders, allExpenses, salesSummary));
+      res.json(buildDashboardKpis(orders, allExpenses));
     } catch (error) {
       console.error('[kpis] failed to calculate real dashboard metrics', error);
       res.json({
@@ -1727,11 +1782,8 @@ export async function registerRoutes(
   });
   app.get('/api/years', async (_req, res) => {
     try {
-      const [orders, salesRows] = await Promise.all([
-        loadLiveShopifyIncomeOrders(),
-        loadShopifySalesRows('year'),
-      ]);
-      res.json(summarizeYears(orders, salesRows));
+      const orders = await loadLiveShopifyIncomeOrders();
+      res.json(summarizeYears(orders));
     } catch {
       res.json([]);
     }
@@ -1739,12 +1791,11 @@ export async function registerRoutes(
   app.get('/api/months', async (req, res) => {
     try {
       const period = getPeriodParams(req.query);
-      const [orders, salesRows, allExpenses] = await Promise.all([
+      const [orders, allExpenses] = await Promise.all([
         loadLiveShopifyIncomeOrders(period),
-        loadShopifySalesRows('month', period),
         loadAllExpenses().then(expenses => expenses.filter(expense => expenseInPeriod(expense, period))),
       ]);
-      res.json(summarizeMonths(orders, allExpenses, salesRows));
+      res.json(summarizeMonths(orders, allExpenses));
     } catch {
       res.json([]);
     }
@@ -1969,6 +2020,17 @@ export async function registerRoutes(
       res.json({ date, income, expenses });
     } catch (error) {
       res.status(502).json({ error: error instanceof Error ? error.message : 'day_details_failed' });
+    }
+  });
+  // Diagnostic: shows how many Shopify orders in the requested period were
+  // included vs. excluded by the fulfilled-only accounting rule, grouped by
+  // exclusion reason. Used for QA + reconciliation.
+  app.get('/api/order-inclusion', async (req, res) => {
+    try {
+      const period = getPeriodParams(req.query);
+      res.json(await loadShopifyOrderInclusionBreakdown(period));
+    } catch (error) {
+      res.status(502).json({ error: error instanceof Error ? error.message : 'order_inclusion_failed' });
     }
   });
   app.get('/api/bom-coverage', async (_req, res) => {

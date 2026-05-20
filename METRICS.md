@@ -1,6 +1,6 @@
 # Connabis Accounting OS — METRICS
 
-Última actualización: 2026-05-12
+Última actualización: 2026-05-20
 
 ## Fuentes oficiales
 
@@ -11,25 +11,25 @@
 
 ## Ingresos
 
-### Base oficial: ventas totales Shopify
+### Base oficial: órdenes fulfilled (Shopify Admin)
 
-Connabis usa siempre `ventas totales` de Shopify como base de ingresos. En KPIs, P&L mensual/anual y performance diaria, el backend consulta ShopifyQL `FROM sales SHOW ... total_sales`, que es el mismo motor de Analytics de Shopify.
+Desde 2026-05-20 los ingresos del P&L (KPIs, meses, años, performance diaria) se calculan sumando las **órdenes Shopify fulfilled** del período, **no** ShopifyQL `total_sales`. Razón: ShopifyQL `FROM sales` no se puede filtrar por estado de fulfillment, así que mezclarlo con un COGS fulfilled-only producía un P&L con dos poblaciones distintas para ingresos vs COGS.
 
 Regla práctica:
 
-`ingreso base período = ShopifyQL total_sales del período`
+`ingreso período = Σ currentTotalPriceSet (preferred) ó totalPriceSet de cada orden incluida en el período`
 
-Esto incluye lo que Shopify Analytics considera ventas totales del período: ventas brutas, descuentos, returns/refunds registrados por Analytics, net sales y shipping cobrado. El timezone operativo del OS para cortes diarios es `America/Bogota`.
+Los criterios de inclusión están definidos en `isAccountingIncludedOrder` (`server/routes.ts`) y se aplican consistentemente a `/api/kpis`, `/api/months`, `/api/years`, `/api/daily-performance`, `/api/channels`, `/api/products`, `/api/bom-coverage`, `/api/income-details`, `/api/day-details` y los exports CSV.
+
+El timezone operativo del OS para cortes diarios es `America/Bogota`.
 
 ### Asignación por línea/SKU
 
-Para poder calcular margen por producto/SKU, COGS y drilldowns de órdenes, el OS sigue leyendo órdenes y líneas del Admin API. En esos detalles, la venta total de cada orden se asigna a sus líneas proporcionalmente al valor descontado de cada línea:
+Para poder calcular margen por producto/SKU, COGS y drilldowns de órdenes, el OS lee órdenes y líneas del Admin API. La venta total de cada orden se asigna a sus líneas proporcionalmente al valor descontado de cada línea:
 
 `ingreso línea = currentTotalPriceSet orden × (discountedTotalSet línea / suma(discountedTotalSet líneas de la orden))`
 
-Si una orden no tiene base de líneas usable, se reparte en partes iguales entre líneas.
-
-Importante: el P&L usa ShopifyQL `total_sales` como total oficial del período. Los drilldowns por producto/línea son explicativos y pueden no sumar exactamente al total oficial cuando Shopify Analytics registra returns/refunds en una fecha distinta a la fecha de creación de la orden.
+Si una orden no tiene base de líneas usable, se reparte en partes iguales entre líneas. Como ingresos y COGS comparten la misma población fulfilled-only, los drilldowns por producto/línea **sí suman exactamente** al total del período en KPIs y P&L mensual.
 
 ### Campos informativos
 
@@ -42,18 +42,32 @@ Estos campos ayudan a explicar diferencias, pero el KPI principal de ingresos us
 
 ## Órdenes incluidas y excluidas
 
-Incluidas:
+Regla contable (2026-05-20): **solo cuentan las órdenes fulfilled**. Definido en `isAccountingIncludedOrder` (`server/routes.ts`). Aplica a ingresos, COGS y todos los drilldowns derivados.
 
-- Órdenes Shopify con fecha operacional Colombia (`createdAt` convertido a `America/Bogota`) dentro del período seleccionado.
-- Líneas de orden con cantidad vendida.
-- Órdenes con estado financiero reconocido como venta pagada o parcialmente ajustada.
+Una orden Shopify entra al P&L si y solo si TODAS estas condiciones se cumplen:
 
-Exclusiones/pendientes:
+| Campo Shopify (GraphQL) | Condición para incluir |
+| --- | --- |
+| `test` | `false` |
+| `cancelledAt` | `null` (orden no cancelada) |
+| `displayFulfillmentStatus` | normaliza a `fulfilled` (excluye `UNFULFILLED`, `PARTIALLY_FULFILLED`, etc.) |
+| `displayFinancialStatus` | NO es `pending` ni `refunded` (acepta `paid`, `partially_refunded`) |
 
-- Órdenes `pending` o `refunded` se excluyen del detalle por líneas.
-- Órdenes `test` y órdenes canceladas se excluyen del detalle por líneas.
-- Para totales oficiales de ingreso, prevalece ShopifyQL `total_sales`, no la suma manual de órdenes.
-- Refunds/returns se tratan según Shopify Analytics. Esto corrige casos donde un refund de una orden anterior cae dentro del período actual.
+Drafts no aparecen porque Shopify Admin API los expone en una conexión separada (`draftOrders`), no en `orders`. El backend nunca consulta `draftOrders` para contabilidad.
+
+Sobre `closedAt` (archivada): en Shopify, archivar una orden es un flag de housekeeping (`closedAt`) que el equipo rutinariamente activa para órdenes ya cumplidas y enviadas. En esta tienda, una orden fulfilled puede estar `closedAt !== null` y sigue siendo una venta legítima. Por eso **no excluimos** órdenes por `closedAt`; los filtros de fulfillment + cancelled + test ya remueven las poblaciones que el usuario quería sacar (drafts, cancelladas, no fulfilled). El conteo de incluidas que tienen `closedAt` se devuelve en `closedButIncluded` para diagnóstico.
+
+Filtro de período: `createdAt` se convierte a `America/Bogota` antes de comparar contra mes/año/rango.
+
+Ingresos y COGS comparten esta misma población — nunca se mezcla ShopifyQL all-sales con COGS fulfilled-only.
+
+### Diagnóstico
+
+`GET /api/order-inclusion?year=2026` (o `?month=2026-04`) devuelve el desglose:
+
+```
+{ total, included, excludedTest, excludedCancelled, excludedNotFulfilled, excludedPendingOrRefunded, closedButIncluded }
+```
 
 ## COGS vendido
 

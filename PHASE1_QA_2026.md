@@ -1,6 +1,6 @@
 # Phase 1 QA — 2026
 
-Última actualización: 2026-05-15
+Última actualización: 2026-05-20
 
 Este documento es la fuente única de verdad del estado de calidad de datos de Phase 1 en 2026. Si una pantalla del OS difiere de lo descrito aquí, gana este reporte.
 
@@ -8,7 +8,7 @@ Este documento es la fuente única de verdad del estado de calidad de datos de P
 
 | Capa | Fuente oficial | Estado |
 | --- | --- | --- |
-| Ingresos / órdenes | Shopify (ShopifyQL `FROM sales SHOW total_sales, ... GROUP BY month`) | Real |
+| Ingresos / órdenes | Shopify Admin (órdenes fulfilled-only, ver §2) | Real |
 | Productos / variantes | Shopify Admin API | Real |
 | COGS vendido | Material Manager CSV (BOM por variante) | Real con cobertura parcial — ver §4 |
 | Gastos operativos | Sheet contable histórico + gastos manuales OS | Real, clasificado por `classifyExpense` |
@@ -19,10 +19,32 @@ Timezone operativo: `America/Bogota`. Fechas se convierten con `Intl.DateTimeFor
 
 ## 2. Lógica de ingresos validada
 
-- `/api/months?year=2026` y `/api/kpis` usan **ShopifyQL `total_sales`** como ingreso oficial del período. Es el mismo motor de Shopify Analytics; incluye ventas brutas, descuentos, returns/refunds atribuidos por Analytics, net sales y shipping cobrado al cliente.
-- La lectura de órdenes (`loadLiveShopifyIncomeOrders`) sigue alimentando el detalle por línea/SKU para drilldown, BOM y `summarizeBomCoverage`, pero **no reemplaza** la cifra de ingresos.
-- `summarizeMonths` ahora marca como `partial: true` el mes corriente usando `todayInReportTimeZone()` (timezone Bogotá) en lugar de UTC, evitando que durante las primeras 5 horas del día UTC un mes nuevo apareciera marcado como cerrado.
-- Allocación por línea: `netRevenue = currentTotalPrice × (discountedTotalLine / Σ discountedTotalLines)`; si una orden no tiene base válida se reparte uniformemente. **Esto es solo para drilldowns**: el P&L oficial sigue siendo `total_sales` ShopifyQL.
+**Cambio 2026-05-20**: ingresos del P&L pasaron de ShopifyQL `total_sales` a **órdenes Shopify fulfilled-only** sumadas en el backend. Razón: ShopifyQL `FROM sales` no se puede filtrar por estado de fulfillment, por lo que mezclarlo con un COGS fulfilled-only mostraba dos poblaciones distintas (revenue all-sales vs COGS fulfilled). Ahora ingresos y COGS comparten la misma población.
+
+Criterios de inclusión (regla aplicada por `isAccountingIncludedOrder` en `server/routes.ts`):
+
+- `test: false`
+- `cancelledAt: null` (no cancelada)
+- `displayFulfillmentStatus` ∈ {`FULFILLED`} — excluye `UNFULFILLED`, `PARTIALLY_FULFILLED`, etc.
+- `displayFinancialStatus` no es `pending` ni `refunded`
+- Drafts no participan: Shopify los expone en `draftOrders`, no en `orders`; el OS nunca consulta drafts para contabilidad.
+
+`closedAt` (orden archivada) **no** es criterio de exclusión: en esta tienda las órdenes fulfilled rutinariamente se archivan después de cumplirse, así que excluirlas removería ventas legítimas (en 2026 hasta 2026-05-20, 266 de 294 órdenes fulfilled estaban `closedAt !== null`). El conteo informativo se devuelve en `closedButIncluded` del diagnóstico.
+
+Ingreso por orden:
+
+```
+ingreso_orden = currentTotalPriceSet (si existe) ó totalPriceSet
+ingreso_período = Σ ingreso_orden de órdenes incluidas con createdAt(Bogotá) en período
+```
+
+Allocación por línea (sólo drilldowns): `netRevenue_line = ingreso_orden × (discountedTotalLine / Σ discountedTotalLines)`. Como la población es la misma, los drilldowns por producto/línea suman exactamente al total del período.
+
+Endpoints afectados (consistentes): `/api/kpis`, `/api/months`, `/api/years`, `/api/channels`, `/api/products`, `/api/daily-performance`, `/api/day-details`, `/api/income-details`, `/api/bom-coverage`, `/api/export/income.csv`, `/api/alerts`, `/api/accounting-suggestions`.
+
+Diagnóstico de exclusiones — usar `GET /api/order-inclusion?year=2026` para ver el desglose `{ total, included, excludedTest, excludedCancelled, excludedClosed, excludedNotFulfilled, excludedPendingOrRefunded }` por período.
+
+`summarizeMonths` marca `partial: true` el mes corriente usando `todayInReportTimeZone()` (timezone Bogotá).
 
 ### Reconciliación mes-a-mes 2026
 
@@ -34,7 +56,7 @@ tsx script/qa-reconcile-2026.ts   # imprime tabla mes-a-mes contra ShopifyQL
 ```
 
 El script:
-- Llama `/api/months?year=2026` (Shopify total_sales).
+- Llama `/api/months?year=2026` (órdenes Shopify fulfilled-only sumadas).
 - Llama `/api/bom-coverage` (líneas vendidas con/sin BOM MM).
 - Llama `/api/expenses` (clasificación operating/inventory/capex/uncategorized).
 - Recalcula `utilidad_bruta = income − cogs` y `utilidad_neta = utilidad_bruta − expenses` y compara contra los campos devueltos por la API. Cualquier desviación >1 COP se imprime con `!`.
@@ -46,8 +68,8 @@ No se incluyen totales fijos aquí porque cambian cada vez que Shopify cierra un
 Definiciones validadas (ver `METRICS.md` y `server/routes.ts:summarizeMonths`):
 
 ```
-ingreso_mes        = ShopifyQL total_sales del mes (mismo motor que Shopify Analytics)
-cogs_mes           = Σ líneas vendidas del mes × costo BOM unitario MM
+ingreso_mes        = Σ órdenes fulfilled-only del mes (currentTotalPriceSet preferido sobre totalPriceSet)
+cogs_mes           = Σ líneas vendidas del mes × costo BOM unitario MM (misma población fulfilled-only)
 utilidad_bruta     = ingreso_mes − cogs_mes
 gastos_operativos  = Σ gastos clasificados operating/uncategorized del mes
 utilidad_neta      = utilidad_bruta − gastos_operativos
