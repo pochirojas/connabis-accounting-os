@@ -312,17 +312,29 @@ type HistoricalAlias = {
 };
 
 const HISTORICAL_PRODUCT_ALIASES: ReadonlyArray<HistoricalAlias> = [
-  // 'Delta-8-THC-O Destilado' \u2014 pending: user confirmed (2026-05-15) it is the
-  // same physical product as MM 'THC-O Destilado en Jeringa', but the MM product
-  // has 5 variants (Jeringa 1ml/5ml/10ml, Tarro 5ml/10ml) with per-variant cost
-  // spanning 13.474 \u2192 131.665 COP. Aliasing to the multi-variant average
-  // overstated COGS materially (all-time ~8.35M COP, 2026 ~946K COP) without a
-  // confirmed size. Disabled until business confirms the historical size or
-  // unit cost. To re-enable, add an entry like:
-  //   { shopifyKey: 'delta 8 thco destilado',
-  //     target: { kind: 'variant', variantId: '42845811507277',
-  //               note: 'historical Delta-8-THC-O = THCO Jeringa 1ml, confirmed YYYY-MM-DD' } }
-  // or with { kind: 'fixed', unitCost: <COP> } if a manual cost is preferred.
+  // 'Delta-8-THC-O Destilado' (historical Shopify title, SKU retired) \u2192 MM
+  // 'THC-O Destilado en Jeringa' Variant `42845811507277` (Jeringa 1ml).
+  //
+  // Confirmed by business 2026-05-20: this historical line is the same physical
+  // product as the current MM 'THC-O Destilado en Jeringa'. The 2026 sales data
+  // shows 145 units / 6.179.054 COP gross revenue \u2192 ~42.614 COP/unit avg, which
+  // is consistent with the Jeringa 1ml retail SKU (the other variants \u2014 5ml/10ml
+  // jeringa, 5ml/10ml tarro \u2014 retail well above this band). We deliberately
+  // resolve to this single variantId rather than the product-name average that
+  // caused the 2026-05-15 regression (~8.35M COP all-time COGS overstatement).
+  //
+  // Resolves at runtime via `bomByVariantId` \u2192 exact per-variant BOM (THCO
+  // Destilado 1mL + Caja THCO Puro + Jeringa 1ml + Mano de Obra + Shopify Costs
+  // + Stickers + Clear Bubble Bag = 13.474 COP/unit at current MM prices).
+  // matchType surfaced to UI is 'alias' (never 'product_name').
+  {
+    shopifyKey: 'delta 8 thco destilado',
+    target: {
+      kind: 'variant',
+      variantId: '42845811507277',
+      note: 'historical Delta-8-THC-O = THCO Jeringa 1ml, confirmed 2026-05-20 (avg revenue 42.614 COP/unit matches 1ml retail band)',
+    },
+  },
 ];
 
 function getBomUnitCostByVariantId(variantGid?: string | null, productTitle?: string) {
@@ -895,7 +907,7 @@ type AccountingLine = {
   cogsUnit: number;
   cogsSold: number;
   hasBom: boolean;
-  bomMatchType: 'variant' | 'product_name' | 'alias' | 'missing';
+  bomMatchType: 'variant' | 'product_name' | 'alias' | 'manual_override' | 'missing';
   paymentStatus: 'paid' | 'pending' | 'refunded' | 'partially_refunded';
   fulfillmentStatus: 'fulfilled' | 'unfulfilled' | 'partial';
 };

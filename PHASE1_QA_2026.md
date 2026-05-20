@@ -86,7 +86,11 @@ Heurística de matching (`getBomUnitCostByVariantId`):
 
 ### Aliases históricos vigentes
 
-Actualmente **no hay aliases activos** (lista vacía). Ver §5 "Auditoría 2026-05-15 — alias `Delta-8-THC-O Destilado` desactivado por tamaño ambiguo" para el caso histórico, su impacto medido y cómo re-activarlo correctamente.
+| Shopify key (normalizado) | Variante MM destino | Costo BOM | Confirmado | Fuente |
+| --- | --- | --- | --- | --- |
+| `delta 8 thco destilado` | `42845811507277` — THC-O Destilado en Jeringa **Jeringa 1ml** | 13.474 COP/unidad | 2026-05-20 | Usuario confirmó que el SKU histórico `Delta-8-THC-O Destilado` es el mismo producto físico que `THC-O Destilado en Jeringa` (Jeringa 1ml). Ingreso promedio histórico 6.179.054 / 145 unidades = 42.614 COP/unidad → consistente con la banda retail de 1ml. |
+
+El alias resuelve contra `bomByVariantId` (no contra `bomAverageCostByProductKey`), por lo que el costo aplicado es el BOM exacto del variante 1ml y nunca el promedio multi-variante que causó el incidente del 2026-05-15. El `matchType` que llega a la UI es `'alias'` (no `'product_name'` ni `'variant'`), así queda transparente en alertas y exports.
 
 Política de aliases (para evitar abuso del mecanismo):
 
@@ -211,3 +215,35 @@ Resumen del estado tras la auditoría de `HISTORICAL_PRODUCT_ALIASES` (commits a
 | **YTD** | **38.731.061** | **15.249.400** | **23.481.661** | **60.6%** | **15.159.151** | **8.322.510** |
 
 *Mayo parcial. Cobertura BOM líneas vendidas: 91.4% (962/1052); ingreso sin COGS reconocido: 8.645.260 COP (Delta-8 sin tamaño + productos custom).
+
+## 9. Reactivación segura del alias `Delta-8-THC-O Destilado` (2026-05-20)
+
+**Decisión**: tras nueva confirmación del usuario (2026-05-20) de que el SKU histórico `Delta-8-THC-O Destilado` corresponde exactamente al producto MM `THC-O Destilado en Jeringa`, se reactivó el alias **únicamente contra la variante Jeringa 1ml** (Variant ID `42845811507277`). Se eligió esa variante porque el ingreso promedio histórico (6.179.054 COP / 145 unidades = **42.614 COP/unidad**) coincide con la banda retail típica del SKU de 1ml; las otras variantes (5ml/10ml jeringa, 5ml/10ml tarro) tienen tickets retail mucho más altos.
+
+**Por qué esta vez no reproduce el bug del 2026-05-15**:
+
+- El alias usa `kind: 'variant'`, por lo que la resolución pasa por `bomByVariantId.get('42845811507277')` y devuelve la suma exacta del BOM de esa variante: **13.474,17 COP/unidad**. No se toca `bomAverageCostByProductKey`, que es lo que promediaba 5 variantes (55.661 COP) y causó la sobreestimación de ~8.35M COP all-time.
+- El `matchType` que llega a la UI es `'alias'` (estampado en `getBomUnitCostByVariantId`), no `'product_name'`. Auditable en `accounting lines`, alertas, exports.
+- La estructura `HISTORICAL_PRODUCT_ALIASES` (`variant | fixed`) impide tipo-safe agregar alias contra promedios; cualquier reintento futuro tendría que ser un Variant ID o un costo fijo. Ese guard no se relajó.
+
+**Composición del BOM 1ml (recomputado contra los CSV MM actuales)**:
+
+| Material | Cantidad | Costo unitario (COP) | Subtotal (COP) |
+| --- | ---:| ---:| ---:|
+| THCO Destilado | 1 mL | 3.096,74 | 3.096,74 |
+| Caja THCO Puro | 1 | 1.736,00 | 1.736,00 |
+| Jeringa 1ml | 1 | 2.824,82 | 2.824,82 |
+| Mano de Obra | 1 | 624,98 | 624,98 |
+| Shopify Costs | 1 | 4.495,80 | 4.495,80 |
+| Stickers de Seguridad | 1 | 256,36 | 256,36 |
+| Clear Bubble Bags | 1 | 439,47 | 439,47 |
+| **Total BOM Jeringa 1ml** |  |  | **13.474,17** |
+
+**Impacto esperado en cobertura 2026 YTD** (vs §8, última corrida confiable):
+
+- Cobertura BOM 2026: ~91.4% (962/1052) → **~97.5%** (≈1010/1052) al recuperar las 64 órdenes / 145 líneas del histórico.
+- Ingresos sin COGS reconocido 2026: 8.645.260 COP → **≈2.466.206 COP** (caen las 6.179.054 COP de Delta-8; quedan los productos custom legítimos).
+- COGS vendido 2026 YTD: **+1.953.755 COP** (= 145 × 13.474,17), todo apuntando a la variante 1ml.
+- Cifras finales sujetas a confirmación con la próxima corrida de `script/qa-reconcile-2026.ts` contra la API en vivo (este sandbox no tiene credenciales Shopify para reproducirla).
+
+**Cómo revertir si negocio cambia de criterio**: borrar el único entry de `HISTORICAL_PRODUCT_ALIASES` en `server/routes.ts` (o moverlo a `kind: 'fixed'` con un costo distinto). La lógica fallback ya cae a `manual_override` antes de `missing`, así que el operador puede capturar un costo distinto sin tocar código.

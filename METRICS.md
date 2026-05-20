@@ -82,6 +82,21 @@ Supuestos Phase 1:
 - El costo usado viene del export actual de Material Manager, no de costo histórico por lote.
 - No hay FIFO, promedio ponderado ni batch costing histórico en Phase 1.
 
+### Aliases históricos (paso 4 del matcher)
+
+Un alias mapea un título histórico de Shopify (cuyo SKU ya no existe) a una variante MM concreta o a un costo fijo. Definidos en `HISTORICAL_PRODUCT_ALIASES` (`server/routes.ts`). Reglas duras (tipo-safe):
+
+- `kind: 'variant'` → resuelve contra `bomByVariantId.get(variantId)`. Usa el **costo BOM exacto de esa variante**, no un promedio.
+- `kind: 'fixed'` → usa el `unitCost` confirmado por negocio.
+- **Prohibido** aliasear contra un nombre de producto MM cuyas variantes tengan costos distintos (la unión `variant | fixed` lo bloquea en compile time). Esa fue la causa raíz del bug del 2026-05-15 (promedio de 5 variantes Jeringa 1ml→Tarro 10ml inflando COGS ~8.35M COP all-time).
+- Se sirven con `matchType: 'alias'`, separable de `'variant'`, `'product_name'` y `'manual_override'` en alertas y exports.
+
+Alias actualmente activo:
+
+| Shopify key | MM Variant ID | Tamaño | Costo BOM | Confirmado |
+| --- | --- | --- | ---:| --- |
+| `delta 8 thco destilado` | `42845811507277` | Jeringa 1ml | 13.474,17 COP | 2026-05-20 |
+
 ### Manual COGS override (P0, último recurso)
 
 Para productos vendidos sin BOM en Material Manager y sin `unitCost` en Shopify, el OS permite registrar un costo unitario manual desde Productos & Márgenes. El override se aplica únicamente cuando la búsqueda real falla: el orden de resolución es BOM por `variantId` → BOM por nombre/fuzzy → alias histórico → override manual (`matchType: 'manual_override'`) → `missing`. Nunca desplaza una coincidencia real de Material Manager ni un `unitCost` de Shopify. Cada override guarda `displayName`, costo unitario en COP, nota opcional y se identifica por el título normalizado del producto (misma normalización que el matcher BOM, `normalizeProductMatchKey`). Es un mecanismo puente para que las métricas de COGS y margen reflejen casos puntuales mientras se completa el BOM correspondiente en MM; un override activo se reporta en P&L y KPIs como COGS real, así que debe documentarse en la nota y revisarse al cargar el BOM definitivo.
