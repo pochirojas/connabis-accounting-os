@@ -62,6 +62,15 @@ import {
   incomeDetails, restockRecommendations,
   ceoMetrics, pnlRows, cashFlowSnapshots, inventoryAccountingRows, closeChecklist,
 } from './seed';
+import { cached, cachedSync, cacheInvalidate } from './cache';
+
+// TTLs (ms) — short enough to keep numbers fresh, long enough to make screen
+// navigation feel instant. Mutation handlers invalidate the relevant prefixes.
+const SHOPIFY_ORDERS_TTL = 60_000;     // 1 min — paginated Shopify orders
+const SHOPIFY_SALES_TTL = 60_000;      // 1 min — ShopifyQL aggregations
+const SHOPIFY_PRODUCTS_TTL = 120_000;  // 2 min — products catalog
+const EXPENSES_TTL = 30_000;           // 30 s — manual+historical expenses
+const HISTORICAL_EXPENSES_FILE_TTL = 5 * 60_000; // 5 min — JSON file rarely changes
 
 const SHOPIFY_API_VERSION = '2026-04';
 const MATERIAL_MANAGER_BOM_PATH = '/home/user/workspace/material-manager-export-material-product.csv';
@@ -103,11 +112,13 @@ function mmPoToLegacy(po: MmPurchaseOrder): PurchaseOrder {
 }
 
 function loadHistoricalExpenses() {
-  if (!fs.existsSync(HISTORICAL_EXPENSES_PATH)) return [];
-  const payload = JSON.parse(fs.readFileSync(HISTORICAL_EXPENSES_PATH, 'utf-8')) as {
-    expenses?: Array<Record<string, unknown>>;
-  };
-  return payload.expenses ?? [];
+  return cachedSync('historical-expenses-file', HISTORICAL_EXPENSES_FILE_TTL, () => {
+    if (!fs.existsSync(HISTORICAL_EXPENSES_PATH)) return [];
+    const payload = JSON.parse(fs.readFileSync(HISTORICAL_EXPENSES_PATH, 'utf-8')) as {
+      expenses?: Array<Record<string, unknown>>;
+    };
+    return payload.expenses ?? [];
+  });
 }
 
 // Effective-field fallback: when paidTo is blank/null, surface description as paidTo
@@ -123,14 +134,16 @@ function applyPaidToFallback<T extends { paidTo?: string | null; description?: s
 }
 
 async function loadAllExpenses() {
-  const manualExpenses = await storage.listManualExpenses();
-  const overrides = await storage.listExpenseOverrides();
-  return [...loadHistoricalExpenses(), ...manualExpenses]
-    .map(expense => ({
-      ...expense,
-      ...(overrides[String(expense.id)] ?? {}),
-    }))
-    .map(applyPaidToFallback);
+  return cached('expenses-all', EXPENSES_TTL, async () => {
+    const manualExpenses = await storage.listManualExpenses();
+    const overrides = await storage.listExpenseOverrides();
+    return [...loadHistoricalExpenses(), ...manualExpenses]
+      .map(expense => ({
+        ...expense,
+        ...(overrides[String(expense.id)] ?? {}),
+      }))
+      .map(applyPaidToFallback);
+  });
 }
 
 function parseCsvLine(line: string) {
@@ -449,21 +462,25 @@ async function shopifyqlRows(query: string): Promise<Array<Record<string, unknow
 
 async function loadShopifySalesSummary(params: PeriodParams = {}): Promise<ShopifySalesSummary> {
   const { start, end } = getPeriodDateBounds(params);
-  const rows = await shopifyqlRows(
-    `FROM sales SHOW gross_sales, discounts, returns, net_sales, shipping_charges, total_sales, orders SINCE ${start} UNTIL ${end}`
-  );
-  return parseShopifySalesRow(rows[0] ?? {});
+  return cached(`shopify-sales-summary:${start}:${end}`, SHOPIFY_SALES_TTL, async () => {
+    const rows = await shopifyqlRows(
+      `FROM sales SHOW gross_sales, discounts, returns, net_sales, shipping_charges, total_sales, orders SINCE ${start} UNTIL ${end}`
+    );
+    return parseShopifySalesRow(rows[0] ?? {});
+  });
 }
 
 async function loadShopifySalesRows(groupBy: 'day' | 'month' | 'year', params: PeriodParams = {}): Promise<ShopifySalesRow[]> {
   const { start, end } = getPeriodDateBounds(params);
-  const rows = await shopifyqlRows(
-    `FROM sales SHOW gross_sales, discounts, returns, net_sales, shipping_charges, total_sales, orders GROUP BY ${groupBy} SINCE ${start} UNTIL ${end}`
-  );
-  return rows.map(row => ({
-    period: String(row[groupBy] ?? '').slice(0, 10),
-    ...parseShopifySalesRow(row),
-  }));
+  return cached(`shopify-sales-rows:${groupBy}:${start}:${end}`, SHOPIFY_SALES_TTL, async () => {
+    const rows = await shopifyqlRows(
+      `FROM sales SHOW gross_sales, discounts, returns, net_sales, shipping_charges, total_sales, orders GROUP BY ${groupBy} SINCE ${start} UNTIL ${end}`
+    );
+    return rows.map(row => ({
+      period: String(row[groupBy] ?? '').slice(0, 10),
+      ...parseShopifySalesRow(row),
+    }));
+  });
 }
 
 function inferProductFamily(title: string) {
@@ -859,6 +876,12 @@ type AccountingLine = {
 };
 
 async function loadLiveShopifyIncomeOrders(params: PeriodParams = {}) {
+  const { start, end } = getPeriodDateBounds(params);
+  const cacheKey = `shopify-orders:${start}:${end}:${params.month ?? ''}:${params.year ?? ''}`;
+  return cached(cacheKey, SHOPIFY_ORDERS_TTL, () => loadLiveShopifyIncomeOrdersUncached(params));
+}
+
+async function loadLiveShopifyIncomeOrdersUncached(params: PeriodParams = {}) {
   const query = `
     query LiveIncomeOrders($cursor: String, $query: String!) {
       orders(first: 100, after: $cursor, sortKey: CREATED_AT, reverse: false, query: $query) {
@@ -1477,6 +1500,10 @@ function sendCsv(res: Response, filename: string, rows: Array<Record<string, unk
 }
 
 async function loadLiveShopifyProducts() {
+  return cached('shopify-products-live', SHOPIFY_PRODUCTS_TTL, loadLiveShopifyProductsUncached);
+}
+
+async function loadLiveShopifyProductsUncached() {
   type LiveVariant = {
     id: string;
     legacyResourceId: string;
@@ -1842,6 +1869,7 @@ export async function registerRoutes(
     }
     try {
       const created = await storage.createManualExpense(parsed.data);
+      cacheInvalidate('expenses-all');
       res.status(201).json(created);
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : 'expense_create_failed' });
@@ -1859,6 +1887,7 @@ export async function registerRoutes(
         ? await storage.updateManualExpense(req.params.id, parsed.data)
         : await storage.upsertExpenseOverride(req.params.id, parsed.data, existing.source);
       if (!updated) return res.status(404).json({ error: 'expense_not_found' });
+      cacheInvalidate('expenses-all');
       res.json(withExpenseClassification(updated));
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : 'expense_update_failed' });
@@ -1869,6 +1898,7 @@ export async function registerRoutes(
       return res.status(400).json({ error: 'Solo se pueden eliminar gastos manuales antes de conectar contabilidad.' });
     }
     const deleted = await storage.deleteManualExpense(req.params.id);
+    cacheInvalidate('expenses-all');
     res.json({ deleted });
   });
   app.get('/api/daily-performance', async (_req, res) => {

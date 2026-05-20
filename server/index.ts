@@ -35,26 +35,19 @@ export function log(message: string, source = "express") {
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
+// Route timing — log every /api request with its duration. Slow requests
+// (>=500ms) are highlighted so they stand out in the firehose. Response bodies
+// are intentionally NOT serialised here: capturing+JSON.stringifying every
+// payload was itself a measurable per-request cost.
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
 
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      log(logLine);
+      const marker = duration >= 500 ? " SLOW" : "";
+      log(`${req.method} ${path} ${res.statusCode} in ${duration}ms${marker}`);
     }
   });
 

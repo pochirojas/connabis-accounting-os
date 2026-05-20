@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'wouter';
-import { useQuery } from '@tanstack/react-query';
+import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   LayoutDashboard, TrendingUp, Receipt, PackageSearch,
   Boxes, AlertTriangle, Settings, Moon, Sun, RefreshCw,
@@ -33,6 +33,11 @@ export function Layout({ children, title, subtitle }: { children: ReactNode; tit
   const [location] = useLocation();
   const { theme, toggle } = useTheme();
   const { data: status } = useQuery<{ connected: boolean; mode: string }>({ queryKey: ['/api/shopify/status'] });
+  const queryClient = useQueryClient();
+  // Global fetching count — non-zero means at least one query is fetching in
+  // the background. Used to subtly animate the refresh icon while cached data
+  // is already on screen, so the user knows new numbers are on the way.
+  const fetchingCount = useIsFetching();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // Close the mobile drawer whenever the route changes.
@@ -143,8 +148,15 @@ export function Layout({ children, title, subtitle }: { children: ReactNode; tit
         </div>
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           <Badge variant="outline" className="hidden sm:inline-flex font-mono text-[11px]" data-testid="badge-currency">COP</Badge>
-          <Button variant="ghost" size="icon" data-testid="button-refresh" aria-label="Refrescar">
-            <RefreshCw className="h-4 w-4" />
+          <Button
+            variant="ghost"
+            size="icon"
+            data-testid="button-refresh"
+            aria-label={fetchingCount > 0 ? 'Refrescando datos…' : 'Refrescar'}
+            title={fetchingCount > 0 ? 'Refrescando datos…' : 'Refrescar'}
+            onClick={() => queryClient.invalidateQueries()}
+          >
+            <RefreshCw className={cn('h-4 w-4', fetchingCount > 0 && 'animate-spin')} />
           </Button>
           <Button variant="ghost" size="icon" onClick={toggle} data-testid="button-theme-toggle" aria-label="Cambiar tema">
             {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
