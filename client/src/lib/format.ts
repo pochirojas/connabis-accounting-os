@@ -59,9 +59,18 @@ export function formatPct(value: number, digits = 1): string {
   return `${(value * 100).toFixed(digits)}%`;
 }
 
+// Format a date for display. Accepts either a date-only string ("YYYY-MM-DD") or
+// a full ISO timestamp. Date-only strings are parsed as LOCAL dates to avoid the
+// classic off-by-one bug: `new Date("2026-05-20")` is parsed as UTC midnight and
+// then displayed in the user's timezone, which rolls back a day for any negative
+// UTC offset (e.g. Colombia / America/Bogota = UTC-5). For expense dates the user
+// typed "2026-05-20" they should see "20 may 2026", not "19 may".
 export function formatDate(iso: string): string {
   try {
-    const d = new Date(iso);
+    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    const d = dateOnly
+      ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+      : new Date(iso);
     return new Intl.DateTimeFormat('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }).format(d);
   } catch { return iso; }
 }

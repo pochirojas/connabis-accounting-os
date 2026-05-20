@@ -386,6 +386,49 @@ export default function Gastos() {
       </section>
 
       <section className="mt-6">
+        <Card className="p-5 bg-card border-card-border" data-testid="card-monthly-pl">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-sm font-semibold tracking-tight">P&L mensual</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Ingresos Shopify live contra Expenses sheet + manuales</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={monthlySort}
+                onChange={e => setMonthlySort(e.target.value as ChartSortOrder)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-xs"
+                data-testid="select-expense-chart-sort"
+              >
+                <option value="oldest">Viejo → nuevo</option>
+                <option value="newest">Nuevo → viejo</option>
+              </select>
+              <Badge variant="outline" className="text-[11px]">Expenses sheet</Badge>
+            </div>
+          </div>
+          <div className="h-[300px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={monthlyChartRows} margin={{ left: -8, right: 8, top: 8 }}>
+                <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false}
+                  tickFormatter={(v) => formatCOPCompact(Number(v))} />
+                <Tooltip
+                  cursor={{ fill: 'hsl(var(--muted) / 0.4)' }}
+                  contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
+                  formatter={(v: number) => formatCOP(v)}
+                />
+                <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+                <Bar dataKey="income" name="Ingresos" fill="hsl(var(--chart-1))" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="expenses" name="Gastos operativos" fill="hsl(var(--chart-2))" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="inventoryPurchasesExcluded" name="Inventario/Capex excluido" fill="hsl(var(--chart-4))" radius={[3, 3, 0, 0]} />
+                <Line type="monotone" dataKey="profit" name="Utilidad" stroke="hsl(var(--chart-3))" strokeWidth={2.5} dot={{ r: 3 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+      </section>
+
+      <section className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         <Card className="p-5 bg-card border-card-border" data-testid="card-add-expense">
           <div className="flex items-start justify-between gap-4 mb-4">
             <div>
@@ -396,7 +439,7 @@ export default function Gastos() {
             </div>
             <Badge variant="outline" className="text-[11px]">Manual nuevo</Badge>
           </div>
-          <form onSubmit={addExpense} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[140px_150px_180px_1fr_150px_120px_170px_auto] gap-3 items-end">
+          <form onSubmit={addExpense} className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
             <label className="space-y-1.5">
               <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Fecha</span>
               <Input
@@ -534,47 +577,205 @@ export default function Gastos() {
             </p>
           )}
         </Card>
-      </section>
 
-      <section className="mt-6">
-        <Card className="p-5 bg-card border-card-border" data-testid="card-monthly-pl">
+        <Card className="p-5 bg-card border-card-border" data-testid="card-expense-detail">
           <div className="flex items-center justify-between gap-3 mb-4">
             <div>
-              <h2 className="text-sm font-semibold tracking-tight">P&L mensual</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Ingresos Shopify live contra Expenses sheet + manuales</p>
+              <h2 className="text-sm font-semibold tracking-tight">Detalle de gastos</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Origen actual: Expenses sheet histórico + gastos manuales nuevos. Seed queda fuera de totales.</p>
             </div>
-            <div className="flex items-center gap-2">
-              <select
-                value={monthlySort}
-                onChange={e => setMonthlySort(e.target.value as ChartSortOrder)}
-                className="h-9 rounded-md border border-input bg-background px-3 text-xs"
-                data-testid="select-expense-chart-sort"
-              >
-                <option value="oldest">Viejo → nuevo</option>
-                <option value="newest">Nuevo → viejo</option>
-              </select>
-              <Badge variant="outline" className="text-[11px]">Expenses sheet</Badge>
-            </div>
+            <select
+              value={expenseDetailSort}
+              onChange={e => setExpenseDetailSort(e.target.value as ChartSortOrder)}
+              className="h-9 rounded-md border border-input bg-background px-3 text-xs"
+              data-testid="select-expense-detail-sort"
+            >
+              <option value="newest">Nuevo → viejo</option>
+              <option value="oldest">Viejo → nuevo</option>
+            </select>
           </div>
-          <div className="h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={monthlyChartRows} margin={{ left: -8, right: 8, top: 8 }}>
-                <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false}
-                  tickFormatter={(v) => formatCOPCompact(Number(v))} />
-                <Tooltip
-                  cursor={{ fill: 'hsl(var(--muted) / 0.4)' }}
-                  contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
-                  formatter={(v: number) => formatCOP(v)}
-                />
-                <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="income" name="Ingresos" fill="hsl(var(--chart-1))" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="expenses" name="Gastos operativos" fill="hsl(var(--chart-2))" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="inventoryPurchasesExcluded" name="Inventario/Capex excluido" fill="hsl(var(--chart-4))" radius={[3, 3, 0, 0]} />
-                <Line type="monotone" dataKey="profit" name="Utilidad" stroke="hsl(var(--chart-3))" strokeWidth={2.5} dot={{ r: 3 }} />
-              </ComposedChart>
-            </ResponsiveContainer>
+          <Dialog
+            open={editDraft !== null}
+            onOpenChange={(open) => { if (!open) { setEditingId(null); setEditDraft(null); } }}
+          >
+            <DialogContent
+              className="max-w-3xl max-h-[90vh] overflow-y-auto"
+              data-testid="dialog-edit-expense"
+            >
+              <DialogHeader>
+                <DialogTitle className="text-emerald-200">Editando gasto existente</DialogTitle>
+                <DialogDescription>
+                  Se guarda sobre el mismo ID, sin duplicar. Si es manual, ajusta caja revirtiendo el valor anterior.
+                </DialogDescription>
+              </DialogHeader>
+              {editDraft && (
+                <form onSubmit={saveEdit} data-testid="form-edit-expense">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                    <label className="space-y-1.5">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Fecha</span>
+                      <Input type="date" value={editDraft.date} onChange={e => setEditDraft(prev => prev ? { ...prev, date: e.target.value } : prev)} data-testid="input-edit-expense-date" />
+                    </label>
+                    <label className="space-y-1.5">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Categoría</span>
+                      <select value={editDraft.category} onChange={e => setEditDraft(prev => prev ? { ...prev, category: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-category">
+                        {CATEGORY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </label>
+                    <label className="space-y-1.5">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Pagado a</span>
+                      <select value={editDraft.paidTo} onChange={e => setEditDraft(prev => prev ? { ...prev, paidTo: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-paid-to">
+                        {sellerOptions.map(seller => <option key={seller} value={seller}>{seller}</option>)}
+                      </select>
+                    </label>
+                    {editDraft.paidTo === 'Otro' && (
+                      <label className="space-y-1.5">
+                        <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Nuevo seller</span>
+                        <Input value={editDraft.paidToOther} onChange={e => setEditDraft(prev => prev ? { ...prev, paidToOther: e.target.value } : prev)} data-testid="input-edit-expense-paid-to-other" />
+                      </label>
+                    )}
+                    <label className="space-y-1.5 sm:col-span-2 xl:col-span-3">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Descripción</span>
+                      <Input value={editDraft.description} onChange={e => setEditDraft(prev => prev ? { ...prev, description: e.target.value } : prev)} data-testid="input-edit-expense-description" />
+                    </label>
+                    <label className="space-y-1.5">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Pagado con</span>
+                      <select value={editDraft.paidWith} onChange={e => setEditDraft(prev => prev ? { ...prev, paidWith: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-paid-with">
+                        {(PAID_WITH_OPTIONS.includes(editDraft.paidWith) ? PAID_WITH_OPTIONS : [editDraft.paidWith, ...PAID_WITH_OPTIONS]).map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </label>
+                    <label className="space-y-1.5">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Moneda</span>
+                      <select value={editDraft.currency} onChange={e => setEditDraft(prev => prev ? { ...prev, currency: e.target.value as 'COP' | 'USD' } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-currency">
+                        <option value="COP">COP</option>
+                        <option value="USD">USD</option>
+                      </select>
+                    </label>
+                    <label className="space-y-1.5">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{editDraft.currency === 'USD' ? 'Monto COP calculado' : 'Monto COP'}</span>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        value={editDraft.currency === 'USD' && editDraft.originalAmount && editDraft.fxRate ? formatAmountInput(String(parseAmountInput(editDraft.originalAmount) * parseAmountInput(editDraft.fxRate))) : editDraft.amount}
+                        onChange={e => setEditDraft(prev => prev ? { ...prev, amount: formatAmountInput(e.target.value) } : prev)}
+                        className="text-right tabular pr-4"
+                        disabled={editDraft.currency === 'USD'}
+                        data-testid="input-edit-expense-amount"
+                      />
+                    </label>
+                    {editDraft.currency === 'USD' && (
+                      <>
+                        <label className="space-y-1.5">
+                          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Monto USD</span>
+                          <Input type="text" inputMode="decimal" value={editDraft.originalAmount} onChange={e => setEditDraft(prev => prev ? { ...prev, originalAmount: formatAmountInput(e.target.value) } : prev)} className="text-right tabular pr-4" data-testid="input-edit-expense-original-amount" />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">TRM</span>
+                          <Input type="text" inputMode="decimal" value={editDraft.fxRate} onChange={e => setEditDraft(prev => prev ? { ...prev, fxRate: formatAmountInput(e.target.value) } : prev)} className="text-right tabular pr-4" data-testid="input-edit-expense-fx-rate" />
+                        </label>
+                      </>
+                    )}
+                    <label className="space-y-1.5 sm:col-span-2 xl:col-span-3">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Notas</span>
+                      <Input value={editDraft.notes} onChange={e => setEditDraft(prev => prev ? { ...prev, notes: e.target.value } : prev)} data-testid="input-edit-expense-notes" />
+                    </label>
+                  </div>
+                  <div className="mt-5 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+                    <Button type="button" variant="ghost" onClick={() => { setEditingId(null); setEditDraft(null); }} data-testid="button-cancel-edit-expense">
+                      <X className="h-4 w-4 mr-1" />
+                      Cancelar
+                    </Button>
+                    <Button type="submit" className="gap-2" disabled={updateExpense.isPending} data-testid="button-save-edit-expense">
+                      <Save className="h-4 w-4" />
+                      {updateExpense.isPending ? 'Guardando' : 'Guardar cambios'}
+                    </Button>
+                  </div>
+                </form>
+              )}
+            </DialogContent>
+          </Dialog>
+          <div className="overflow-x-auto max-h-[520px]">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Fecha</TableHead>
+                  <TableHead>Categoría</TableHead>
+                  <TableHead>Descripción</TableHead>
+                  <TableHead>Pagado a</TableHead>
+                  <TableHead>Pagado con</TableHead>
+                  <TableHead>Pagado por</TableHead>
+                  <TableHead>Origen</TableHead>
+                  <TableHead>Tipo P&L</TableHead>
+                  <TableHead>Moneda</TableHead>
+                  <TableHead className="text-right">Monto</TableHead>
+                  <TableHead className="text-right">Acción</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {expenseDetailRows.map(e => (
+                  <TableRow key={e.id} data-testid={`row-expense-${e.id}`}>
+                    <TableCell className="text-sm tabular">{formatDate(e.date)}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="text-[10.5px]">{e.category}</Badge>
+                    </TableCell>
+                    <TableCell className="text-sm">{e.description}</TableCell>
+                    <TableCell className="text-sm">{e.paidTo ?? '—'}</TableCell>
+                    <TableCell className="text-sm">{displayPaidWith(e.paidWith)}</TableCell>
+                    <TableCell className="text-sm">{e.paidBy ?? '—'}</TableCell>
+                    <TableCell>
+                      <Badge variant={e.source === 'shopify' ? 'default' : e.source === 'manual' ? 'outline' : 'secondary'} className="text-[10px] uppercase tracking-wide">
+                        {e.source}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={`text-[10px] uppercase tracking-wide ${
+                          e.classification === 'inventory' || e.classification === 'capex'
+                            ? 'border-sky-500/40 text-sky-300'
+                            : e.classification === 'uncategorized'
+                            ? 'border-amber-500/40 text-amber-300'
+                            : 'border-emerald-500/40 text-emerald-300'
+                        }`}
+                      >
+                        {e.classification ?? 'operating'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs tabular">
+                      {e.currency ?? 'COP'}
+                      {e.currency === 'USD' && e.fxRate ? <span className="text-muted-foreground"> · TRM {e.fxRate}</span> : null}
+                    </TableCell>
+                    <TableCell className="text-right tabular">{formatCOP(e.amount)}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => startEdit(e)}
+                          aria-label={`Editar ${e.description}`}
+                          data-testid={`button-edit-expense-${e.id}`}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      {e.source === 'manual' ? (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => deleteExpense.mutate(e.id)}
+                          disabled={deleteExpense.isPending}
+                          aria-label={`Eliminar ${e.description}`}
+                          data-testid={`button-delete-expense-${e.id}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      ) : (
+                        null
+                      )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
         </Card>
       </section>
@@ -861,207 +1062,6 @@ export default function Gastos() {
               </Table>
             </div>
           </div>
-        </Card>
-      </section>
-
-      <section className="mt-6">
-        <Card className="p-5 bg-card border-card-border" data-testid="card-expense-detail">
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <div>
-              <h2 className="text-sm font-semibold tracking-tight">Detalle de gastos</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Origen actual: Expenses sheet histórico + gastos manuales nuevos. Seed queda fuera de totales.</p>
-            </div>
-            <select
-              value={expenseDetailSort}
-              onChange={e => setExpenseDetailSort(e.target.value as ChartSortOrder)}
-              className="h-9 rounded-md border border-input bg-background px-3 text-xs"
-              data-testid="select-expense-detail-sort"
-            >
-              <option value="newest">Nuevo → viejo</option>
-              <option value="oldest">Viejo → nuevo</option>
-            </select>
-          </div>
-          <Dialog
-            open={editDraft !== null}
-            onOpenChange={(open) => { if (!open) { setEditingId(null); setEditDraft(null); } }}
-          >
-            <DialogContent
-              className="max-w-3xl max-h-[90vh] overflow-y-auto"
-              data-testid="dialog-edit-expense"
-            >
-              <DialogHeader>
-                <DialogTitle className="text-emerald-200">Editando gasto existente</DialogTitle>
-                <DialogDescription>
-                  Se guarda sobre el mismo ID, sin duplicar. Si es manual, ajusta caja revirtiendo el valor anterior.
-                </DialogDescription>
-              </DialogHeader>
-              {editDraft && (
-                <form onSubmit={saveEdit} data-testid="form-edit-expense">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                    <label className="space-y-1.5">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Fecha</span>
-                      <Input type="date" value={editDraft.date} onChange={e => setEditDraft(prev => prev ? { ...prev, date: e.target.value } : prev)} data-testid="input-edit-expense-date" />
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Categoría</span>
-                      <select value={editDraft.category} onChange={e => setEditDraft(prev => prev ? { ...prev, category: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-category">
-                        {CATEGORY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Pagado a</span>
-                      <select value={editDraft.paidTo} onChange={e => setEditDraft(prev => prev ? { ...prev, paidTo: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-paid-to">
-                        {sellerOptions.map(seller => <option key={seller} value={seller}>{seller}</option>)}
-                      </select>
-                    </label>
-                    {editDraft.paidTo === 'Otro' && (
-                      <label className="space-y-1.5">
-                        <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Nuevo seller</span>
-                        <Input value={editDraft.paidToOther} onChange={e => setEditDraft(prev => prev ? { ...prev, paidToOther: e.target.value } : prev)} data-testid="input-edit-expense-paid-to-other" />
-                      </label>
-                    )}
-                    <label className="space-y-1.5 sm:col-span-2 xl:col-span-3">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Descripción</span>
-                      <Input value={editDraft.description} onChange={e => setEditDraft(prev => prev ? { ...prev, description: e.target.value } : prev)} data-testid="input-edit-expense-description" />
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Pagado con</span>
-                      <select value={editDraft.paidWith} onChange={e => setEditDraft(prev => prev ? { ...prev, paidWith: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-paid-with">
-                        {(PAID_WITH_OPTIONS.includes(editDraft.paidWith) ? PAID_WITH_OPTIONS : [editDraft.paidWith, ...PAID_WITH_OPTIONS]).map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Moneda</span>
-                      <select value={editDraft.currency} onChange={e => setEditDraft(prev => prev ? { ...prev, currency: e.target.value as 'COP' | 'USD' } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-currency">
-                        <option value="COP">COP</option>
-                        <option value="USD">USD</option>
-                      </select>
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{editDraft.currency === 'USD' ? 'Monto COP calculado' : 'Monto COP'}</span>
-                      <Input
-                        type="text"
-                        inputMode="decimal"
-                        value={editDraft.currency === 'USD' && editDraft.originalAmount && editDraft.fxRate ? formatAmountInput(String(parseAmountInput(editDraft.originalAmount) * parseAmountInput(editDraft.fxRate))) : editDraft.amount}
-                        onChange={e => setEditDraft(prev => prev ? { ...prev, amount: formatAmountInput(e.target.value) } : prev)}
-                        className="text-right tabular pr-4"
-                        disabled={editDraft.currency === 'USD'}
-                        data-testid="input-edit-expense-amount"
-                      />
-                    </label>
-                    {editDraft.currency === 'USD' && (
-                      <>
-                        <label className="space-y-1.5">
-                          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Monto USD</span>
-                          <Input type="text" inputMode="decimal" value={editDraft.originalAmount} onChange={e => setEditDraft(prev => prev ? { ...prev, originalAmount: formatAmountInput(e.target.value) } : prev)} className="text-right tabular pr-4" data-testid="input-edit-expense-original-amount" />
-                        </label>
-                        <label className="space-y-1.5">
-                          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">TRM</span>
-                          <Input type="text" inputMode="decimal" value={editDraft.fxRate} onChange={e => setEditDraft(prev => prev ? { ...prev, fxRate: formatAmountInput(e.target.value) } : prev)} className="text-right tabular pr-4" data-testid="input-edit-expense-fx-rate" />
-                        </label>
-                      </>
-                    )}
-                    <label className="space-y-1.5 sm:col-span-2 xl:col-span-3">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Notas</span>
-                      <Input value={editDraft.notes} onChange={e => setEditDraft(prev => prev ? { ...prev, notes: e.target.value } : prev)} data-testid="input-edit-expense-notes" />
-                    </label>
-                  </div>
-                  <div className="mt-5 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
-                    <Button type="button" variant="ghost" onClick={() => { setEditingId(null); setEditDraft(null); }} data-testid="button-cancel-edit-expense">
-                      <X className="h-4 w-4 mr-1" />
-                      Cancelar
-                    </Button>
-                    <Button type="submit" className="gap-2" disabled={updateExpense.isPending} data-testid="button-save-edit-expense">
-                      <Save className="h-4 w-4" />
-                      {updateExpense.isPending ? 'Guardando' : 'Guardar cambios'}
-                    </Button>
-                  </div>
-                </form>
-              )}
-            </DialogContent>
-          </Dialog>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Fecha</TableHead>
-                <TableHead>Categoría</TableHead>
-                <TableHead>Descripción</TableHead>
-                <TableHead>Pagado a</TableHead>
-                <TableHead>Pagado con</TableHead>
-                <TableHead>Pagado por</TableHead>
-                <TableHead>Origen</TableHead>
-                <TableHead>Tipo P&L</TableHead>
-                <TableHead>Moneda</TableHead>
-                <TableHead className="text-right">Monto</TableHead>
-                <TableHead className="text-right">Acción</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {expenseDetailRows.map(e => (
-                <TableRow key={e.id} data-testid={`row-expense-${e.id}`}>
-                  <TableCell className="text-sm tabular">{formatDate(e.date)}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className="text-[10.5px]">{e.category}</Badge>
-                  </TableCell>
-                  <TableCell className="text-sm">{e.description}</TableCell>
-                  <TableCell className="text-sm">{e.paidTo ?? '—'}</TableCell>
-                  <TableCell className="text-sm">{displayPaidWith(e.paidWith)}</TableCell>
-                  <TableCell className="text-sm">{e.paidBy ?? '—'}</TableCell>
-                  <TableCell>
-                    <Badge variant={e.source === 'shopify' ? 'default' : e.source === 'manual' ? 'outline' : 'secondary'} className="text-[10px] uppercase tracking-wide">
-                      {e.source}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant="outline"
-                      className={`text-[10px] uppercase tracking-wide ${
-                        e.classification === 'inventory' || e.classification === 'capex'
-                          ? 'border-sky-500/40 text-sky-300'
-                          : e.classification === 'uncategorized'
-                          ? 'border-amber-500/40 text-amber-300'
-                          : 'border-emerald-500/40 text-emerald-300'
-                      }`}
-                    >
-                      {e.classification ?? 'operating'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-xs tabular">
-                    {e.currency ?? 'COP'}
-                    {e.currency === 'USD' && e.fxRate ? <span className="text-muted-foreground"> · TRM {e.fxRate}</span> : null}
-                  </TableCell>
-                  <TableCell className="text-right tabular">{formatCOP(e.amount)}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => startEdit(e)}
-                        aria-label={`Editar ${e.description}`}
-                        data-testid={`button-edit-expense-${e.id}`}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                    {e.source === 'manual' ? (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => deleteExpense.mutate(e.id)}
-                        disabled={deleteExpense.isPending}
-                        aria-label={`Eliminar ${e.description}`}
-                        data-testid={`button-delete-expense-${e.id}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    ) : (
-                      null
-                    )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
         </Card>
       </section>
     </Layout>
