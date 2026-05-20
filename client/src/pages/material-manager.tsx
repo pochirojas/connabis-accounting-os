@@ -17,8 +17,9 @@ import { useToast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
 import { formatCOP, formatDate, formatNumber, formatQty } from '@/lib/format';
 import type {
+  CostBreakdownBucketSummary, CostBreakdownRow,
   MaterialCost, MmBomRow, MmCostHistoryRow, MmMaterialRow, MmMirrorStatus,
-  MmPurchaseOrder, MmPurchaseOrdersStatus,
+  MmPurchaseOrder, MmPurchaseOrdersStatus, ReceivePoResult,
 } from '@shared/schema';
 import { MaterialDetailView } from '@/components/material-detail';
 import { ProductBomEditor } from '@/components/product-bom-editor';
@@ -50,7 +51,7 @@ export default function MaterialManagerPage() {
   const [bomFilter, setBomFilter] = useState('');
   const [selectedMaterialId, setSelectedMaterialId] = useState<string | null>(null);
   const [bomEditorVariantId, setBomEditorVariantId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'materials' | 'bom' | 'purchase' | 'calculator' | 'admin'>('materials');
+  const [activeTab, setActiveTab] = useState<'materials' | 'bom' | 'purchase' | 'costs' | 'calculator' | 'admin'>('materials');
   const [expandedProducts, setExpandedProducts] = useState<Record<string, boolean>>({});
   const [expandedVariants, setExpandedVariants] = useState<Record<string, boolean>>({});
 
@@ -84,6 +85,34 @@ export default function MaterialManagerPage() {
       queryClient.invalidateQueries({ queryKey: ['/api/material-manager/purchase-orders/status'] });
     },
     onError: (error) => toast({ title: 'No se pudieron reimportar las POs', description: String(error), variant: 'destructive' }),
+  });
+
+  const receivePoMutation = useMutation({
+    mutationFn: async (poNumber: string) => {
+      const response = await apiRequest('POST', `/api/material-manager/purchase-orders/${poNumber}/receive`);
+      return response.json() as Promise<ReceivePoResult>;
+    },
+    onSuccess: (result) => {
+      toast({
+        title: `PO recibida · ${result.poNumber}`,
+        description: `Movimientos creados: ${result.movementsCreated} · saltados (ya recibidos): ${result.movementsSkipped} · sin material: ${result.unmatchedLines}`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/material-manager/purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/material-manager/purchase-orders/status'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/material-manager/inventory-movements'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/material-manager/cost-breakdown'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/material-manager/materials'] });
+    },
+    onError: (error) => toast({ title: 'No se pudo recibir la PO', description: String(error), variant: 'destructive' }),
+  });
+
+  const costBreakdown = useQuery<CostBreakdownBucketSummary[]>({
+    queryKey: ['/api/material-manager/cost-breakdown'],
+    enabled: activeTab === 'costs',
+  });
+  const latestPriceDash = useQuery<CostBreakdownRow[]>({
+    queryKey: ['/api/material-manager/cost-breakdown/dash'],
+    enabled: activeTab === 'costs',
   });
 
   const importMutation = useMutation({
@@ -298,6 +327,7 @@ export default function MaterialManagerPage() {
           <TabsTrigger value="materials" data-testid="tab-materials">Materiales</TabsTrigger>
           <TabsTrigger value="bom" data-testid="tab-bom">BOM / Productos</TabsTrigger>
           <TabsTrigger value="purchase" data-testid="tab-purchase">Órdenes de compra</TabsTrigger>
+          <TabsTrigger value="costs" data-testid="tab-costs">Costos (dashes)</TabsTrigger>
           <TabsTrigger value="calculator" data-testid="tab-calculator">Calculadora de Carts</TabsTrigger>
           <TabsTrigger value="admin" data-testid="tab-admin">Admin · QA · costos</TabsTrigger>
         </TabsList>
@@ -629,7 +659,21 @@ export default function MaterialManagerPage() {
                   </p>
                   {selectedPO.notes ? <p className="text-[11px] text-amber-300 mt-1">{selectedPO.notes}</p> : null}
                 </div>
-                <Badge variant="outline" className="text-[11px]">{(selectedPO.lines ?? []).length} líneas</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-[11px]">{(selectedPO.lines ?? []).length} líneas</Badge>
+                  {selectedPO.status !== 'cancelled' ? (
+                    <Button
+                      size="sm"
+                      variant={selectedPO.status === 'received' ? 'outline' : 'default'}
+                      onClick={() => receivePoMutation.mutate(selectedPO.poNumber)}
+                      disabled={receivePoMutation.isPending}
+                      data-testid={`button-receive-po-${selectedPO.poNumber}`}
+                    >
+                      <Truck className="h-3.5 w-3.5 mr-1.5" />
+                      {selectedPO.status === 'received' ? 'Re-recibir (idempotente)' : 'Recibir PO'}
+                    </Button>
+                  ) : null}
+                </div>
               </div>
               {selectedPO.status === 'cancelled' ? (
                 <p className="text-[11.5px] text-muted-foreground">
@@ -641,6 +685,7 @@ export default function MaterialManagerPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Producto</TableHead>
+                        <TableHead>Material MM</TableHead>
                         <TableHead>SKU</TableHead>
                         <TableHead className="text-right">Cant.</TableHead>
                         <TableHead className="text-right">Costo unit.</TableHead>
@@ -651,6 +696,16 @@ export default function MaterialManagerPage() {
                       {(selectedPO.lines ?? []).map((line) => (
                         <TableRow key={line.id} data-testid={`row-po-line-${selectedPO.poNumber}-${line.lineIndex}`}>
                           <TableCell className="text-[13px] font-medium">{line.product}</TableCell>
+                          <TableCell className="text-[11px]">
+                            {line.materialId ? (
+                              <Badge variant="outline" className="text-[10px] border-emerald-500/40 text-emerald-300">matched</Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-300">unmatched/manual</Badge>
+                            )}
+                            {line.batchId ? (
+                              <span className="ml-1.5 text-[10px] text-muted-foreground font-mono">{line.batchId}</span>
+                            ) : null}
+                          </TableCell>
                           <TableCell className="text-[11.5px] font-mono text-muted-foreground">{line.sku || '—'}</TableCell>
                           <TableCell className="text-right tabular">{formatQty(line.quantity)}</TableCell>
                           <TableCell className="text-right tabular">{formatCOP(line.unitCost)}</TableCell>
@@ -669,6 +724,98 @@ export default function MaterialManagerPage() {
               )}
             </Card>
           ) : null}
+        </TabsContent>
+
+        <TabsContent value="costs" className="mt-4 space-y-4">
+          <Card className="p-5" data-testid="card-cost-dash">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-sm font-semibold tracking-tight">Latest price dash — todos los materiales</h3>
+                <p className="text-xs text-muted-foreground">
+                  Costo unitario más reciente por material, priorizando PO recibida &gt; historial de costos &gt; mirror MM.
+                </p>
+              </div>
+              <Badge variant="outline" className="text-[11px]">{latestPriceDash.data?.length ?? 0} materiales</Badge>
+            </div>
+            <div className="overflow-x-auto max-h-[420px]">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Material</TableHead>
+                    <TableHead>Bucket</TableHead>
+                    <TableHead>Unidad</TableHead>
+                    <TableHead className="text-right">Último costo (COP)</TableHead>
+                    <TableHead>Proveedor</TableHead>
+                    <TableHead>Fecha</TableHead>
+                    <TableHead>PO</TableHead>
+                    <TableHead>Fuente</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(latestPriceDash.data ?? []).map(r => (
+                    <TableRow key={r.materialId} data-testid={`row-cost-dash-${r.materialId}`}>
+                      <TableCell className="text-[13px] font-medium">{r.material}</TableCell>
+                      <TableCell className="text-[11px]"><Badge variant="outline" className="text-[10px]">{r.bucket}</Badge></TableCell>
+                      <TableCell className="text-[11.5px]">{r.unit || '—'}</TableCell>
+                      <TableCell className="text-right tabular font-semibold">{formatCOP(r.latestUnitCostCop)}</TableCell>
+                      <TableCell className="text-[12px]">{r.latestSupplier || '—'}</TableCell>
+                      <TableCell className="text-[11.5px] tabular">{r.latestDate ? formatDate(r.latestDate) : '—'}</TableCell>
+                      <TableCell className="text-[11.5px] font-mono">{r.latestPoNumber ?? '—'}</TableCell>
+                      <TableCell className="text-[10.5px] uppercase tracking-wider text-muted-foreground">{r.latestSource}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </Card>
+
+          {(costBreakdown.data ?? []).map(bucket => (
+            <Card key={bucket.bucket} className="p-5" data-testid={`card-bucket-${bucket.bucket}`}>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h3 className="text-sm font-semibold tracking-tight">{bucket.label}</h3>
+                  <p className="text-xs text-muted-foreground">
+                    {bucket.materialCount} materiales · valor inventario estimado {formatCOP(bucket.totalInventoryValue)}
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-[11px]">{bucket.bucket}</Badge>
+              </div>
+              {bucket.rows.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-3">Sin materiales en este bucket.</p>
+              ) : (
+                <div className="overflow-x-auto max-h-[320px]">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Material</TableHead>
+                        <TableHead>Categoría MM</TableHead>
+                        <TableHead className="text-right">Stock</TableHead>
+                        <TableHead className="text-right">Último costo</TableHead>
+                        <TableHead>Proveedor</TableHead>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead>PO origen</TableHead>
+                        <TableHead>Moneda/TRM</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {bucket.rows.map(r => (
+                        <TableRow key={r.materialId} data-testid={`row-bucket-${bucket.bucket}-${r.materialId}`}>
+                          <TableCell className="text-[13px] font-medium">{r.material}</TableCell>
+                          <TableCell className="text-[11.5px]">{r.category || '—'}</TableCell>
+                          <TableCell className="text-right tabular">{formatQty(r.stock)}</TableCell>
+                          <TableCell className="text-right tabular font-semibold">{formatCOP(r.latestUnitCostCop)}</TableCell>
+                          <TableCell className="text-[12px]">{r.latestSupplier || '—'}</TableCell>
+                          <TableCell className="text-[11.5px] tabular">{r.latestDate ? formatDate(r.latestDate) : '—'}</TableCell>
+                          <TableCell className="text-[11.5px] font-mono">{r.latestPoNumber ?? '—'}</TableCell>
+                          <TableCell className="text-[11px]">{r.currency}{r.fxRate ? ` · TRM ${r.fxRate}` : ''}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </Card>
+          ))}
         </TabsContent>
 
         <TabsContent value="calculator" className="mt-4">

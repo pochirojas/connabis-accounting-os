@@ -647,7 +647,7 @@ export type MmMaterialEffective = MmMaterialRow & {
 // seed PO list under `seed.ts` is no longer rendered. PO10 is intentionally
 // missing from the CSV set (cancelled) and is represented here with status
 // `cancelled` so totals/stock are not affected but the gap is visible.
-export type MmPoStatus = 'received' | 'cancelled';
+export type MmPoStatus = 'received' | 'cancelled' | 'draft';
 
 export type MmPurchaseOrderLine = {
   id: number;
@@ -660,6 +660,14 @@ export type MmPurchaseOrderLine = {
   taxPct: number;
   totalCop: number;
   lineIndex: number;
+  // Phase 2.2 P0: link each line to the canonical Material Manager material so
+  // receiving the PO updates the right stock + price. NULL = unmatched/legacy
+  // CSV line (rendered with an "unmatched" badge in the UI).
+  materialId?: string | null;
+  // Optional batch/lot id captured at receive time. Schema is in place for the
+  // upcoming production batch costing work — receive flow auto-generates one
+  // when not supplied.
+  batchId?: string | null;
 };
 
 export type MmPurchaseOrder = {
@@ -686,8 +694,67 @@ export type MmPurchaseOrdersStatus = {
   totalPos: number;
   cancelledPos: number;
   receivedPos: number;
+  draftPos?: number;
   totalAmount: number;       // sum of received POs only
   totalLines: number;
   suppliers: number;
   lastImportedAt: string | null;
+};
+
+// ---------- Inventory movements (Phase 2.2 P0) ----------
+// Append-only ledger of stock changes triggered by receiving a purchase order.
+// Each movement points back to its source PO/line so the receive flow is
+// idempotent (cannot insert twice for the same line) and reversible by
+// inserting a compensating negative-qty movement.
+export type InventoryMovement = {
+  id: number;
+  materialKey: string;       // canonical MM material ID
+  materialName: string;
+  poId: number | null;
+  poNumber: string | null;
+  poLineId: number | null;
+  qtyDelta: number;
+  unitCostCop: number;
+  date: string;              // ISO date (PO date or now())
+  supplier: string;
+  currency: string;
+  fxRate: number | null;
+  batchId: string | null;
+  note: string | null;
+  createdAt: string;
+};
+
+export type ReceivePoResult = {
+  poNumber: string;
+  status: MmPoStatus;
+  movementsCreated: number;
+  movementsSkipped: number;
+  matchedLines: number;
+  unmatchedLines: number;
+};
+
+// Cost breakdown dash row — one per material in a class/category bucket. Used
+// to render Noids / Materials / Supplements / Insumos costos dashboards.
+export type CostBreakdownRow = {
+  materialId: string;
+  material: string;
+  category: string;
+  bucket: 'noids' | 'materials' | 'supplements' | 'insumos' | 'uncategorized';
+  unit: string;
+  latestUnitCostCop: number;
+  latestSource: 'po' | 'cost_history' | 'material' | 'none';
+  latestSupplier: string;
+  latestDate: string | null;
+  latestPoNumber: string | null;
+  currency: string;
+  fxRate: number | null;
+  stock: number;
+};
+
+export type CostBreakdownBucketSummary = {
+  bucket: 'noids' | 'materials' | 'supplements' | 'insumos' | 'uncategorized';
+  label: string;
+  materialCount: number;
+  totalInventoryValue: number;
+  rows: CostBreakdownRow[];
 };

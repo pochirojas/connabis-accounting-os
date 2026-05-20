@@ -34,7 +34,15 @@ import {
   getMmPurchaseOrder,
   getMmPurchaseOrdersStatus,
   createMmPurchaseOrder,
+  receivePurchaseOrder,
+  reversePurchaseOrderReceipt,
+  listInventoryMovements,
 } from './material-manager-purchase-orders';
+import {
+  getCostBreakdownByBucket,
+  getLatestPriceDash,
+  buildCostBreakdownRows,
+} from './cost-breakdown';
 import {
   listTerpeneSlots,
   upsertTerpeneSlot,
@@ -1853,6 +1861,7 @@ export async function registerRoutes(
   app.post('/api/material-manager/purchase-orders', (req, res) => {
     try {
       const body = req.body ?? {};
+      const rawStatus = typeof body.status === 'string' ? body.status : 'received';
       const created = createMmPurchaseOrder(sqlite, {
         poNumber: typeof body.poNumber === 'string' ? body.poNumber : undefined,
         date: String(body.date ?? ''),
@@ -1863,12 +1872,14 @@ export async function registerRoutes(
         notes: typeof body.notes === 'string' && body.notes ? body.notes : null,
         shipping: typeof body.shipping === 'number' ? body.shipping : 0,
         taxes: typeof body.taxes === 'number' ? body.taxes : 0,
+        status: rawStatus === 'draft' ? 'draft' : 'received',
         lines: Array.isArray(body.lines) ? body.lines.map((line: Record<string, unknown>) => ({
           product: String(line.product ?? ''),
           sku: typeof line.sku === 'string' ? line.sku : '',
           quantity: Number(line.quantity ?? 0),
           unitCost: Number(line.unitCost ?? 0),
           taxPct: typeof line.taxPct === 'number' ? line.taxPct : 0,
+          materialId: typeof line.materialId === 'string' && line.materialId.trim() ? line.materialId.trim() : null,
         })) : [],
       });
       res.json(created);
@@ -1876,6 +1887,45 @@ export async function registerRoutes(
       const message = error instanceof Error ? error.message : 'create_failed';
       res.status(400).json({ error: message });
     }
+  });
+
+  // Receive flow — idempotent. Posts inventory movements per matched line and
+  // bumps PO status to 'received'. Unmatched lines are reported but never
+  // silently affect stock.
+  app.post('/api/material-manager/purchase-orders/:idOrNumber/receive', (req, res) => {
+    try {
+      const result = receivePurchaseOrder(sqlite, req.params.idOrNumber);
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'receive_failed' });
+    }
+  });
+
+  app.post('/api/material-manager/purchase-orders/:idOrNumber/reverse', (req, res) => {
+    try {
+      const result = reversePurchaseOrderReceipt(sqlite, req.params.idOrNumber);
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'reverse_failed' });
+    }
+  });
+
+  app.get('/api/material-manager/inventory-movements', (req, res) => {
+    const materialKey = typeof req.query.materialKey === 'string' ? req.query.materialKey : undefined;
+    const poNumber = typeof req.query.poNumber === 'string' ? req.query.poNumber : undefined;
+    res.json(listInventoryMovements(sqlite, { materialKey, poNumber }));
+  });
+
+  // Cost-breakdown dashes — Noids / Materials / Supplements / Insumos.
+  app.get('/api/material-manager/cost-breakdown', (_req, res) => {
+    res.json(getCostBreakdownByBucket(sqlite));
+  });
+  app.get('/api/material-manager/cost-breakdown/dash', (req, res) => {
+    const limit = Math.min(Math.max(Number(req.query.limit ?? 200) || 200, 1), 2000);
+    res.json(getLatestPriceDash(sqlite, limit));
+  });
+  app.get('/api/material-manager/cost-breakdown/all', (_req, res) => {
+    res.json(buildCostBreakdownRows(sqlite));
   });
   app.get('/api/income-details', async (req, res) => {
     try {

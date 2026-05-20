@@ -290,10 +290,13 @@ Orden de ejecución recomendado para los próximos sprints. Cada bullet pertenec
 ### Track P0.B — Material Manager replacement (core)
 
 1. **Crear/editar materiales locales** dentro del OS (no solo override del mirror): flujo "+ Nuevo material" con ID local estable, validaciones, opt-in a sync MM/Shopify futuro.
-2. **PO receiving → stock movements log**: marcar PO recibida total/parcial, generar `material_stock_movements` reales, soporte de reversión.
+2. **PO receiving → stock movements log** ✅ *landed (P0 slice)*: cada línea de PO referencia un `material_id` real del catálogo MM (dropdown obligatorio en `/inventario`), las POs soportan estado `draft | received | cancelled`, y `POST /api/material-manager/purchase-orders/:id/receive` genera un `inventory_movements` por línea (idempotente vía `UNIQUE(po_line_id)`), aplica `batch_id` opcional y actualiza el último costo del material vía override (sin tocar el mirror MM, round-trip CSV intacto). Reversión vía `/reverse` escribe movimientos compensatorios. POs CSV-importadas existentes se preservan; sus líneas quedan marcadas como `unmatched/manual` y receive no las cuenta.
 3. **Adjustment history real** (reemplazo del proxy basado en cost history): ajuste manual, recibo PO, consumo BOM, devolución, todo con quién/cuándo/por qué.
-4. **Batch costing / landed cost básico**: costear lotes de producción con materiales reales consumidos + asignar costos accesorios (freight, importación) prorrateados a las POs correspondientes.
+4. **Batch costing / landed cost básico**: costear lotes de producción con materiales reales consumidos + asignar costos accesorios (freight, importación) prorrateados a las POs correspondientes. *Schema `batch_id` ya está en `po_lines` + `inventory_movements`; falta el motor de consumo FIFO/weighted y el rollup a producción.*
 5. **Promote drafts → oficial**: pipeline para empujar drafts BOM/material overrides a la fuente oficial (todavía MM mientras dure la convivencia), con validación previa y log.
+6. **Cost-breakdown dashes** ✅ *landed (P0 slice)*: tab `Costos (dashes)` en `/inventario` con Noids costos, Materials costos, Supplements costos, Insumos costos + dash flat ordenado por última actualización. Endpoints `/api/material-manager/cost-breakdown[/dash|/all]`. Buckets derivados de las flags MM existentes (`is_noid`, `is_insumo`, category hints) — sin nueva fuente de datos.
+
+**Próximo P0 step:** auto-suggest `material_id` para las líneas `unmatched/manual` de las POs CSV-importadas (matching por SKU + nombre fuzzy) para poder re-recibir el histórico de POs reales sin re-tipear cada línea.
 
 ### Track P0.C — Dataico foundation (en paralelo)
 

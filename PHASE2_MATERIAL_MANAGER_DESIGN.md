@@ -721,3 +721,79 @@ El módulo se considera listo cuando:
 - **Baseline sembrado**: cuando `terpene_rotation_slots` está vacía, el servidor siembra los 10 terpenos visibles hoy en la página pública [`connabis.com.co/pages/aprende-mas-terpenos`](https://connabis.com.co/pages/aprende-mas-terpenos) (Gelato AMP, Pineapple OG AMP CDT, White Widow, Skywalker OG, Mango Tango, Sour Diesel, Forbidden Fruit AMP, Banana Mimosa, Razz Berry AMP, Pink Champagne AMP). La lista vive en `server/terpene-rotation.ts → CURRENT_ROTATION_BASELINE` y debe refrescarse a mano hasta que exista el sync con Shopify/metaobjects.
 - **Pendiente (Phase 2.6 completa)**: catálogo canónico con `canonical_id` global, historial de rotaciones, `terpene_product_variants` por contenedor, mapeos a `material_id`, alertas de salida de rotación, integración con Calculadora de Carts, **sync automático con Shopify/metaobjects** (reemplaza el baseline manual).
 - **Aplicación bulk a BOM**: movida a **Phase 4** (ver `ROADMAP.md`). El módulo actual nunca destruye BOM — solo enumera el plan.
+
+## Phase 2.2 P0 — PO ↔ Material identity + Inventory movements
+
+Replaces the legacy "free-text product per PO line" with first-class links to MM materials so PO receipts can update inventory and latest cost in a single, idempotent flow. Existing CSV-imported POs are preserved untouched (their lines stay marked as `unmatched/manual`).
+
+### Data model
+
+PO line additions (backwards-compatible — both columns nullable on the legacy CSV import):
+
+- `material_id TEXT` — canonical MM material ID. NULL ⇒ unmatched/manual (visible in the UI with a warning, never silently moves stock).
+- `batch_id TEXT` — assigned by the receive flow (`<PO>-L<lineId>-<base36 timestamp>`) or user-provided. Stored on the line and on the resulting movement.
+
+New table `inventory_movements`:
+
+| column          | notes |
+| --------------- | ----- |
+| `material_key`  | MM material id |
+| `po_id` / `po_number` / `po_line_id` | source pointer; `po_line_id` is `UNIQUE WHERE NOT NULL` to enforce idempotent receive |
+| `qty_delta`     | positive on receive; reversal posts a compensating negative row |
+| `unit_cost_cop` | per-unit price at receive time |
+| `date`          | PO date (or `now()` fallback) |
+| `supplier`, `currency`, `fx_rate`, `batch_id`, `note` | metadata |
+| `created_at`    | when the movement was inserted |
+
+PO status extends from `received | cancelled` to `received | cancelled | draft`. `draftPos` is exposed in `MmPurchaseOrdersStatus`.
+
+### Receive flow (`POST /api/material-manager/purchase-orders/:id/receive`)
+
+1. Loads the PO. Cancelled POs are rejected.
+2. For each line with a `material_id`:
+   - Skip if `inventory_movements.po_line_id` already exists (idempotency).
+   - Otherwise insert a positive `qty_delta` movement and stamp `batch_id` on the PO line.
+   - Upsert `material_manager_material_overrides.cost` + `.supplier` so the latest unit cost surfaces in the Materials view (the pristine mirror is never mutated → round-trip export still matches MM byte-for-byte).
+3. Bump the PO status to `received`.
+4. Return `{ movementsCreated, movementsSkipped, matchedLines, unmatchedLines }`.
+
+Unmatched lines (no `material_id`) are reported in `unmatchedLines` and never affect stock or cost. The UI tags them with an `unmatched/manual` badge.
+
+Reverse: `POST .../reverse` writes compensating `-qty_delta` rows (one per still-positive movement of the PO) and flips status back to `draft`. Safe to call once; subsequent calls do nothing.
+
+### Cost-breakdown dashes (`/costos` tab + `/api/material-manager/cost-breakdown*`)
+
+Buckets are derived from existing MM signals — no new category data required:
+
+| bucket          | rule |
+| --------------- | ---- |
+| `noids`         | `is_noid` flag (already derived from MM category hints) |
+| `insumos`       | `is_insumo` flag |
+| `supplements`   | category matches `supplement`/`suplemento`/`vitamin`/`mineral`/`amino` |
+| `materials`     | everything else with a non-empty category |
+| `uncategorized` | no category |
+
+Latest unit cost per material picks the most recent of:
+
+1. `inventory_movements` (received PO line) — wins when present.
+2. `material_cost_history` (Excel sheet).
+3. `material_manager_materials.cost` (mirror) — last-resort fallback.
+
+Endpoints:
+
+- `GET /api/material-manager/cost-breakdown` — buckets with rows + inventory value rollup.
+- `GET /api/material-manager/cost-breakdown/dash?limit=N` — flat list sorted by most-recent update (Noids costos dash equivalent).
+- `GET /api/material-manager/cost-breakdown/all` — raw rows for export.
+
+### Costing parity guarantee
+
+- Existing CSV-imported POs are never deleted by the new flow; they continue to render as before with `unmatched/manual` line badges.
+- COGS / accounting formulas are **not** recomputed — receive only writes to the inventory ledger + material overrides. The accounting P&L only changes when a PO is explicitly received and its delta flows through the existing cost-history-based cost rollups.
+- Round-trip MM CSV export keeps reading from the pristine `material_manager_materials` table — receive flow writes to the overrides table, not the mirror.
+
+### What remains for Phase 2.3+
+
+- Production batch costing (FIFO/weighted) that consumes inventory movements per BOM.
+- Auto-suggest `material_id` for the legacy CSV PO lines by SKU/name fuzzy match (currently manual via the override + re-receive).
+- Tie inventory movements to the existing restock recommendations so stock-on-hand reflects received POs in real time.
+- USD POs: capture `fxRate` on the line at receive time (schema is already in place; UI captures currency but not per-line TRM yet).

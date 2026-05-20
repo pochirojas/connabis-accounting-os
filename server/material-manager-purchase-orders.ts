@@ -8,9 +8,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import type {
+  InventoryMovement,
   MmPurchaseOrder,
   MmPurchaseOrderLine,
   MmPurchaseOrdersStatus,
+  ReceivePoResult,
 } from '@shared/schema';
 
 const PO_CSV_DIR = '/home/user/workspace';
@@ -57,7 +59,44 @@ export function ensureMmPurchaseOrderSchema(sqlite: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_mm_po_lines_po ON material_manager_purchase_order_lines(purchase_order_id);
     CREATE INDEX IF NOT EXISTS idx_mm_po_lines_sku ON material_manager_purchase_order_lines(sku);
+
+    -- Append-only inventory ledger. Idempotency is enforced by the unique
+    -- index on (po_line_id) for non-null PO lines: a given PO line can
+    -- contribute at most one positive movement; reversals are inserted as
+    -- separate compensating rows with po_line_id=NULL and a note.
+    CREATE TABLE IF NOT EXISTS inventory_movements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      material_key TEXT NOT NULL,
+      material_name TEXT NOT NULL DEFAULT '',
+      po_id INTEGER,
+      po_number TEXT,
+      po_line_id INTEGER,
+      qty_delta REAL NOT NULL,
+      unit_cost_cop REAL NOT NULL DEFAULT 0,
+      date TEXT NOT NULL,
+      supplier TEXT NOT NULL DEFAULT '',
+      currency TEXT NOT NULL DEFAULT 'COP',
+      fx_rate REAL,
+      batch_id TEXT,
+      note TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_inv_mv_material ON inventory_movements(material_key, date);
+    CREATE INDEX IF NOT EXISTS idx_inv_mv_po ON inventory_movements(po_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_inv_mv_line ON inventory_movements(po_line_id) WHERE po_line_id IS NOT NULL;
   `);
+
+  // Migration: older builds did not have material_id / batch_id columns on PO
+  // lines. Add them best-effort (idempotent).
+  const lineCols = sqlite.prepare(`PRAGMA table_info(material_manager_purchase_order_lines)`).all() as Array<{ name: string }>;
+  const haveCol = (name: string) => lineCols.some(c => c.name === name);
+  if (!haveCol('material_id')) {
+    try { sqlite.exec(`ALTER TABLE material_manager_purchase_order_lines ADD COLUMN material_id TEXT`); } catch { /* noop */ }
+  }
+  if (!haveCol('batch_id')) {
+    try { sqlite.exec(`ALTER TABLE material_manager_purchase_order_lines ADD COLUMN batch_id TEXT`); } catch { /* noop */ }
+  }
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_mm_po_lines_material ON material_manager_purchase_order_lines(material_id);`);
 }
 
 // ---------- CSV parser ----------
@@ -470,7 +509,7 @@ function mapPoRow(row: Record<string, unknown>, lineCount: number): MmPurchaseOr
     taxes: Number(row.taxes ?? 0),
     shipping: Number(row.shipping ?? 0),
     total: Number(row.total ?? 0),
-    status: (row.status === 'cancelled' ? 'cancelled' : 'received') as MmPurchaseOrder['status'],
+    status: (row.status === 'cancelled' ? 'cancelled' : row.status === 'draft' ? 'draft' : 'received') as MmPurchaseOrder['status'],
     sourceFile: row.source_file === null || row.source_file === undefined ? null : String(row.source_file),
     importedAt: String(row.imported_at ?? ''),
     lineCount,
@@ -489,6 +528,8 @@ function mapPoLineRow(row: Record<string, unknown>): MmPurchaseOrderLine {
     taxPct: Number(row.tax_pct ?? 0),
     totalCop: Number(row.total_cop ?? 0),
     lineIndex: Number(row.line_index ?? 0),
+    materialId: row.material_id === null || row.material_id === undefined ? null : String(row.material_id),
+    batchId: row.batch_id === null || row.batch_id === undefined ? null : String(row.batch_id),
   };
 }
 
@@ -548,7 +589,8 @@ export function getMmPurchaseOrder(sqlite: Database.Database, idOrNumber: string
   if (!row) return null;
   const poId = Number(row.id);
   const lines = (sqlite.prepare(`
-    SELECT id, purchase_order_id, po_number, product, sku, quantity, unit_cost, tax_pct, total_cop, line_index
+    SELECT id, purchase_order_id, po_number, product, sku, quantity, unit_cost, tax_pct, total_cop, line_index,
+           material_id, batch_id
     FROM material_manager_purchase_order_lines
     WHERE purchase_order_id = ?
     ORDER BY line_index ASC, id ASC
@@ -565,9 +607,10 @@ export function getMmPurchaseOrdersStatus(sqlite: Database.Database): MmPurchase
       COUNT(*) AS total,
       SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
       SUM(CASE WHEN status = 'received'  THEN 1 ELSE 0 END) AS received,
+      SUM(CASE WHEN status = 'draft'     THEN 1 ELSE 0 END) AS drafts,
       COALESCE(SUM(CASE WHEN status = 'received' THEN total ELSE 0 END), 0) AS totalAmount
     FROM material_manager_purchase_orders
-  `).get() as { total: number; cancelled: number; received: number; totalAmount: number };
+  `).get() as { total: number; cancelled: number; received: number; drafts: number; totalAmount: number };
   const linesRow = sqlite.prepare('SELECT COUNT(*) AS c FROM material_manager_purchase_order_lines').get() as { c: number };
   const suppliersRow = sqlite.prepare(`
     SELECT COUNT(DISTINCT supplier) AS c
@@ -581,6 +624,7 @@ export function getMmPurchaseOrdersStatus(sqlite: Database.Database): MmPurchase
     totalPos: Number(totals.total ?? 0),
     cancelledPos: Number(totals.cancelled ?? 0),
     receivedPos: Number(totals.received ?? 0),
+    draftPos: Number(totals.drafts ?? 0),
     totalAmount: Number(totals.totalAmount ?? 0),
     totalLines: Number(linesRow.c ?? 0),
     suppliers: Number(suppliersRow.c ?? 0),
@@ -602,12 +646,19 @@ export type CreateManualPoInput = {
   notes?: string | null;
   shipping?: number;
   taxes?: number;
+  // Phase 2.2 P0: 'draft' = created but not received (no inventory effect).
+  // 'received' = legacy behavior, also auto-creates inventory movements.
+  status?: 'draft' | 'received';
   lines: Array<{
     product: string;
     sku?: string;
     quantity: number;
     unitCost: number;
     taxPct?: number;
+    // Canonical Material Manager material id. If omitted/null, the line is
+    // treated as "unmatched/manual" — visible in the UI with a warning so the
+    // user can match it before receiving. Receive flow skips unmatched lines.
+    materialId?: string | null;
   }>;
 };
 
@@ -653,11 +704,13 @@ export function createMmPurchaseOrder(sqlite: Database.Database, input: CreateMa
       taxPct,
       totalCop: lineSubtotal + lineTax,
       lineIndex: idx,
+      materialId: line.materialId && String(line.materialId).trim() ? String(line.materialId).trim() : null,
     };
   });
   if (taxesOverride > 0) taxes = taxesOverride;
   const total = subtotal + taxes + shipping;
 
+  const initialStatus: 'draft' | 'received' = input.status === 'draft' ? 'draft' : 'received';
   const tx = sqlite.transaction(() => {
     const info = sqlite.prepare(`
       INSERT INTO material_manager_purchase_orders (
@@ -665,7 +718,7 @@ export function createMmPurchaseOrder(sqlite: Database.Database, input: CreateMa
         subtotal, taxes, shipping, total, status, source_file, imported_at
       ) VALUES (
         @po_number, @date, @supplier, @ship_to, @currency, @reference_number, @notes,
-        @subtotal, @taxes, @shipping, @total, 'received', 'manual', @imported_at
+        @subtotal, @taxes, @shipping, @total, @status, 'manual', @imported_at
       )
     `).run({
       po_number: poNumber,
@@ -679,23 +732,205 @@ export function createMmPurchaseOrder(sqlite: Database.Database, input: CreateMa
       taxes,
       shipping,
       total,
+      status: initialStatus,
       imported_at: importedAt,
     });
     const poId = Number(info.lastInsertRowid);
     const insertLine = sqlite.prepare(`
       INSERT INTO material_manager_purchase_order_lines (
-        purchase_order_id, po_number, product, sku, quantity, unit_cost, tax_pct, total_cop, line_index
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        purchase_order_id, po_number, product, sku, quantity, unit_cost, tax_pct, total_cop, line_index, material_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     linesPrepared.forEach(line => {
-      insertLine.run(poId, poNumber, line.product, line.sku, line.quantity, line.unitCost, line.taxPct, line.totalCop, line.lineIndex);
+      insertLine.run(poId, poNumber, line.product, line.sku, line.quantity, line.unitCost, line.taxPct, line.totalCop, line.lineIndex, line.materialId);
     });
     return poId;
   });
   tx();
+  // For backward compatibility, when a 'received' manual PO is created we also
+  // post inventory movements for matched lines so stock + latest cost update
+  // immediately. Drafts wait for an explicit receive call.
+  if (initialStatus === 'received') {
+    try { receivePurchaseOrder(sqlite, poNumber); } catch { /* best-effort */ }
+  }
   const created = getMmPurchaseOrder(sqlite, poNumber);
   if (!created) throw new Error('po_create_failed');
   return created;
+}
+
+// ---------- Inventory movements + receive flow (Phase 2.2 P0) ----------
+
+function mapMovementRow(row: Record<string, unknown>): InventoryMovement {
+  return {
+    id: Number(row.id),
+    materialKey: String(row.material_key),
+    materialName: String(row.material_name ?? ''),
+    poId: row.po_id === null || row.po_id === undefined ? null : Number(row.po_id),
+    poNumber: row.po_number === null || row.po_number === undefined ? null : String(row.po_number),
+    poLineId: row.po_line_id === null || row.po_line_id === undefined ? null : Number(row.po_line_id),
+    qtyDelta: Number(row.qty_delta ?? 0),
+    unitCostCop: Number(row.unit_cost_cop ?? 0),
+    date: String(row.date ?? ''),
+    supplier: String(row.supplier ?? ''),
+    currency: String(row.currency ?? 'COP'),
+    fxRate: row.fx_rate === null || row.fx_rate === undefined ? null : Number(row.fx_rate),
+    batchId: row.batch_id === null || row.batch_id === undefined ? null : String(row.batch_id),
+    note: row.note === null || row.note === undefined ? null : String(row.note),
+    createdAt: String(row.created_at ?? ''),
+  };
+}
+
+export function listInventoryMovements(
+  sqlite: Database.Database,
+  filter?: { materialKey?: string; poNumber?: string; limit?: number },
+): InventoryMovement[] {
+  ensureMmPurchaseOrderSchema(sqlite);
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (filter?.materialKey) { where.push('material_key = ?'); params.push(filter.materialKey); }
+  if (filter?.poNumber) { where.push('po_number = ?'); params.push(filter.poNumber); }
+  const limit = Math.min(Math.max(filter?.limit ?? 500, 1), 5000);
+  const sql = `
+    SELECT id, material_key, material_name, po_id, po_number, po_line_id, qty_delta, unit_cost_cop,
+           date, supplier, currency, fx_rate, batch_id, note, created_at
+    FROM inventory_movements
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY date DESC, id DESC
+    LIMIT ${limit}
+  `;
+  return (sqlite.prepare(sql).all(...params) as Array<Record<string, unknown>>).map(mapMovementRow);
+}
+
+function generateBatchId(poNumber: string, lineId: number): string {
+  return `${poNumber}-L${lineId}-${Date.now().toString(36)}`;
+}
+
+// Idempotent: inserts a positive movement per matched (materialId != null) PO
+// line that does NOT already have one. Unmatched lines are reported in the
+// `unmatchedLines` count and never silently update stock.
+export function receivePurchaseOrder(sqlite: Database.Database, idOrNumber: string | number): ReceivePoResult {
+  ensureMmPurchaseOrderSchema(sqlite);
+  const po = getMmPurchaseOrder(sqlite, idOrNumber);
+  if (!po) throw new Error('po_not_found');
+  if (po.status === 'cancelled') throw new Error('po_cancelled_cannot_receive');
+
+  const createdAt = new Date().toISOString();
+  let movementsCreated = 0;
+  let movementsSkipped = 0;
+  let matchedLines = 0;
+  let unmatchedLines = 0;
+
+  const insertMv = sqlite.prepare(`
+    INSERT INTO inventory_movements (
+      material_key, material_name, po_id, po_number, po_line_id, qty_delta, unit_cost_cop,
+      date, supplier, currency, fx_rate, batch_id, note, created_at
+    ) VALUES (
+      @material_key, @material_name, @po_id, @po_number, @po_line_id, @qty_delta, @unit_cost_cop,
+      @date, @supplier, @currency, @fx_rate, @batch_id, @note, @created_at
+    )
+  `);
+  const updateLineBatch = sqlite.prepare(`UPDATE material_manager_purchase_order_lines SET batch_id = ? WHERE id = ?`);
+  // Latest-price update is applied as a local material override so the
+  // pristine MM mirror is untouched. We import lazily to avoid a circular
+  // require — material-manager-mirror imports this file in some flows.
+  const upsertOverride = sqlite.prepare(`
+    INSERT INTO material_manager_material_overrides (
+      material_id, cost, supplier, updated_at, note
+    ) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(material_id) DO UPDATE SET
+      cost = excluded.cost,
+      supplier = excluded.supplier,
+      updated_at = excluded.updated_at
+  `);
+
+  const tx = sqlite.transaction(() => {
+    for (const line of po.lines ?? []) {
+      if (!line.materialId) { unmatchedLines += 1; continue; }
+      matchedLines += 1;
+      // Idempotency: skip when a movement for this exact line already exists.
+      const existing = sqlite.prepare(`SELECT 1 FROM inventory_movements WHERE po_line_id = ?`).get(line.id);
+      if (existing) { movementsSkipped += 1; continue; }
+      const materialRow = sqlite.prepare(`SELECT name FROM material_manager_materials WHERE id = ?`).get(line.materialId) as { name?: string } | undefined;
+      const batchId = line.batchId && line.batchId.trim() ? line.batchId : generateBatchId(po.poNumber, line.id);
+      insertMv.run({
+        material_key: line.materialId,
+        material_name: materialRow?.name ?? line.product,
+        po_id: po.id,
+        po_number: po.poNumber,
+        po_line_id: line.id,
+        qty_delta: line.quantity,
+        unit_cost_cop: line.unitCost,
+        date: po.date || createdAt.slice(0, 10),
+        supplier: po.supplier,
+        currency: po.currency,
+        fx_rate: null,
+        batch_id: batchId,
+        note: null,
+        created_at: createdAt,
+      });
+      updateLineBatch.run(batchId, line.id);
+      // Push latest unit cost + supplier into the material override (does not
+      // mutate the pristine MM row used for round-trip export).
+      if (line.unitCost > 0) {
+        upsertOverride.run(line.materialId, line.unitCost, po.supplier || '', createdAt, null);
+      }
+      movementsCreated += 1;
+    }
+    // Bump PO status to 'received' once at least one line is in the ledger.
+    if (po.status !== 'received') {
+      sqlite.prepare(`UPDATE material_manager_purchase_orders SET status = 'received' WHERE id = ?`).run(po.id);
+    }
+  });
+  tx();
+
+  return {
+    poNumber: po.poNumber,
+    status: 'received',
+    movementsCreated,
+    movementsSkipped,
+    matchedLines,
+    unmatchedLines,
+  };
+}
+
+// Reverse a previously-received PO: writes compensating negative-qty
+// movements for every existing positive movement of this PO so the ledger
+// nets to zero. Sets status back to 'draft'. Safe to call once per PO.
+export function reversePurchaseOrderReceipt(sqlite: Database.Database, idOrNumber: string | number) {
+  ensureMmPurchaseOrderSchema(sqlite);
+  const po = getMmPurchaseOrder(sqlite, idOrNumber);
+  if (!po) throw new Error('po_not_found');
+  const movements = sqlite.prepare(`
+    SELECT id, material_key, material_name, po_id, po_number, po_line_id, qty_delta, unit_cost_cop,
+           date, supplier, currency, fx_rate, batch_id
+    FROM inventory_movements
+    WHERE po_id = ? AND qty_delta > 0
+      AND id NOT IN (
+        SELECT m2.id FROM inventory_movements m2
+        WHERE m2.po_id = inventory_movements.po_id AND m2.qty_delta < 0
+          AND m2.material_key = inventory_movements.material_key
+      )
+  `).all(po.id) as Array<Record<string, unknown>>;
+  const createdAt = new Date().toISOString();
+  const insertMv = sqlite.prepare(`
+    INSERT INTO inventory_movements (
+      material_key, material_name, po_id, po_number, po_line_id, qty_delta, unit_cost_cop,
+      date, supplier, currency, fx_rate, batch_id, note, created_at
+    ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const tx = sqlite.transaction(() => {
+    for (const m of movements) {
+      insertMv.run(
+        String(m.material_key), String(m.material_name ?? ''), Number(m.po_id), String(m.po_number ?? ''),
+        -Number(m.qty_delta ?? 0), Number(m.unit_cost_cop ?? 0), String(m.date ?? ''),
+        String(m.supplier ?? ''), String(m.currency ?? 'COP'), m.fx_rate ?? null,
+        m.batch_id ?? null, `reversal_of_${m.id}`, createdAt,
+      );
+    }
+    sqlite.prepare(`UPDATE material_manager_purchase_orders SET status = 'draft' WHERE id = ?`).run(po.id);
+  });
+  tx();
+  return { poNumber: po.poNumber, reversedMovements: movements.length };
 }
 
 // Auto-import on startup if the table is empty. Idempotent.
