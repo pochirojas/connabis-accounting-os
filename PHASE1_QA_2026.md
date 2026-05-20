@@ -189,3 +189,25 @@ El script es read-only, no imprime tokens, no toca SQLite, no envía nada a Shop
 4. Phase 2: revisar `/api/channels`, `/api/products` para aceptar filtro de período y dejar de leer all-time.
 
 Hasta entonces, los KPIs de ingresos/órdenes son confiables; COGS y utilidad bruta son confiables **dentro de la cobertura BOM**; gastos operativos son reales con clasificación explícita; inventario/capex permanecen visibles y excluidos del operativo.
+
+## 8. Data trust after alias audit (2026-05-20)
+
+Resumen del estado tras la auditoría de `HISTORICAL_PRODUCT_ALIASES` (commits a851e4a → c91295b) y el endurecimiento del script de QA.
+
+- **KPI all-time vuelven a valores correctos tras c91295b.** El alias amplio `Delta-8-THC-O Destilado → THC-O Destilado en Jeringa` introducido en a851e4a usaba el promedio multi-variante (5 variantes Jeringa 1/5/10 mL + Tarro 5/10 mL, costo unitario 13.474 → 131.665 COP), inflando COGS ~8.35M COP all-time y ~946K COP en 2026 YTD. Al deshabilitarlo, los KPI all-time y mensuales regresaron a sus valores previos al alias.
+- **Delta-8 COGS sigue pendiente manual.** No se puede inferir el tamaño histórico de las 64 órdenes de "Delta-8-THC-O Destilado" (145 unidades, 6.179.054 COP de ingreso). Aparecen en BOM coverage como "missing" y permanecen así hasta que el negocio confirme el tamaño (o un costo fijo) — ver comentario en `HISTORICAL_PRODUCT_ALIASES` con la plantilla para reactivar con `kind: 'variant'` o `kind: 'fixed'`.
+- **Productos custom siguen como COGS pendiente.** Líneas como `Carts + custom blend`, `Custom blends`, `cart 2.25 mL`, `Blend Hongos 50/50 Melena; Cola de Pavo` no tienen BOM porque son configuraciones puntuales; se reportan en `missingSkus` y deben costearse manualmente o ignorarse hasta Phase 2.
+- **El script de QA ya no imprime ceros engañosos.** `script/qa-reconcile-2026.ts` ahora detecta el caso en el que `/api/months` devuelve `[]` mientras `/api/expenses` o `/api/bom-coverage` evidencian que el origen es una caída de Shopify (el endpoint atrapa errores y responde `[]`), aborta con `exit 2` y un mensaje accionable, e igualmente aborta si el año tiene meses pero ingresos+COGS son 0. Mensajes de `fetch` rotos también identifican explícitamente que el API no está corriendo.
+
+Última corrida confiable contra `localhost:5000` (2026-05-20, parcial mayo):
+
+| mes | ingresos | cogs | utilidad bruta | margen | gastos op | utilidad neta |
+|-----|---------:|-----:|---------------:|-------:|----------:|--------------:|
+| 2026-01 | 6.128.490 | 3.039.742 | 3.088.748 | 50.4% | 2.630.040 | 458.708 |
+| 2026-02 | 8.410.795 | 3.576.845 | 4.833.950 | 57.5% | 2.966.005 | 1.867.945 |
+| 2026-03 | 6.978.909 | 2.906.792 | 4.072.117 | 58.3% | 4.209.417 | -137.300 |
+| 2026-04 | 11.704.507 | 4.397.302 | 7.307.205 | 62.4% | 4.349.319 | 2.957.886 |
+| 2026-05* | 5.508.360 | 1.328.718 | 4.179.642 | 75.9% | 1.004.370 | 3.175.272 |
+| **YTD** | **38.731.061** | **15.249.400** | **23.481.661** | **60.6%** | **15.159.151** | **8.322.510** |
+
+*Mayo parcial. Cobertura BOM líneas vendidas: 91.4% (962/1052); ingreso sin COGS reconocido: 8.645.260 COP (Delta-8 sin tamaño + productos custom).

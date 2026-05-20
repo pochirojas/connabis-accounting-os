@@ -70,9 +70,40 @@ const fmtPct = (n: number) =>
 
 async function getJson<T>(path: string): Promise<T> {
   const url = `${API_BASE}${path}`;
-  const res = await fetch(url);
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (err) {
+    throw new Error(
+      `fetch failed on ${url}: ${err instanceof Error ? err.message : String(err)}. ` +
+        `Is the API running? Start it with 'npm run dev' or set API_BASE.`,
+    );
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status} on ${url}`);
   return (await res.json()) as T;
+}
+
+/**
+ * Probe whether /api/months is silently returning [] because the upstream
+ * Shopify call failed inside the endpoint (it catches and returns []).
+ * Signature of a Shopify-down condition: no months at all for any year, AND
+ * expenses are non-empty (so the DB is healthy, only Shopify is unavailable).
+ */
+async function detectShopifyOutage(allMonths: MonthRow[]): Promise<string | null> {
+  if (allMonths.length > 0) return null;
+  try {
+    const expenses = await getJson<ExpenseRow[]>('/api/expenses');
+    if (expenses.length === 0) {
+      return '/api/months and /api/expenses both empty — server may be in a fresh/empty state.';
+    }
+    const bomRes = await fetch(`${API_BASE}/api/bom-coverage`);
+    if (bomRes.status === 502) {
+      return 'Shopify is unavailable: /api/bom-coverage returned 502 and /api/months returned [] (the months endpoint silently swallows the error).';
+    }
+    return '/api/months returned [] for every month even though expenses exist. Likely Shopify outage masked by the endpoint catching errors and returning []; verify SHOPIFY_* env vars and try again.';
+  } catch (err) {
+    return `Could not classify empty /api/months — secondary probe failed: ${err instanceof Error ? err.message : String(err)}`;
+  }
 }
 
 function table(rows: Array<Record<string, string | number>>) {
@@ -99,6 +130,24 @@ async function main() {
   const monthsThisYear = months
     .filter(m => m.month.startsWith(`${YEAR}-`))
     .sort((a, b) => a.month.localeCompare(b.month));
+
+  if (monthsThisYear.length === 0) {
+    const allMonths = await getJson<MonthRow[]>('/api/months');
+    const outage = await detectShopifyOutage(allMonths);
+    if (outage) {
+      console.error(`\n! Aborting reconciliation: ${outage}`);
+      console.error(
+        '! Refusing to print misleading zero totals. Bring Shopify back online (or set SHOPIFY_* env vars) and re-run.',
+      );
+      process.exit(2);
+    }
+    console.log(
+      `\n! No months found for year ${YEAR}. Other years available: ` +
+        Array.from(new Set(allMonths.map(m => m.month.slice(0, 4)))).join(', ') ||
+        '(none)',
+    );
+    process.exit(2);
+  }
 
   console.log('## Monthly P&L (Shopify total_sales vs COGS MM vs gastos reales)\n');
   console.log(
@@ -143,8 +192,26 @@ async function main() {
     `Compras inventario/capex excluidas: ${fmtCop(totalInvCapex)} COP (no entran a gastos operativos; visibles en este renglón)`,
   );
 
+  if (totalIncome === 0 && totalCogs === 0 && monthsThisYear.length > 0) {
+    console.error(
+      '\n! Year totals for ingresos AND cogs are both 0 while months were returned. ' +
+        'This usually means Shopify revenue/orders calls failed but expenses still populated rows. ' +
+        'Treat the table above as untrustworthy and re-run once Shopify is reachable.',
+    );
+    process.exit(2);
+  }
+
   console.log('\n## BOM coverage (líneas vendidas con BOM real)');
-  const bom = await getJson<BomCoverage>('/api/bom-coverage');
+  let bom: BomCoverage;
+  try {
+    bom = await getJson<BomCoverage>('/api/bom-coverage');
+  } catch (err) {
+    console.error(
+      `! BOM coverage unavailable (${err instanceof Error ? err.message : String(err)}). ` +
+        'Likely Shopify outage — monthly table above may still be partial. Skipping coverage section.',
+    );
+    return;
+  }
   console.log(
     `Cobertura BOM líneas vendidas: ${fmtPct(bom.coverage)} (${bom.matchedSoldLines}/${bom.totalSoldLines})`,
   );
