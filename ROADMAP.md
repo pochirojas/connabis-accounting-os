@@ -139,6 +139,17 @@ Estado actual del baseline (manual, no sync):
 - Hoy `/terpenos` siembra automáticamente la rotación visible en la página pública [`connabis.com.co/pages/aprende-mas-terpenos`](https://connabis.com.co/pages/aprende-mas-terpenos) cuando la tabla local está vacía. La lista canónica vive en `server/terpene-rotation.ts → CURRENT_ROTATION_BASELINE` y se refresca manualmente.
 - **Mejora futura (Phase 2.6 completa)**: sync automático con Shopify metaobjects / Aprende Más metafields para sustituir el baseline hardcoded. Hasta entonces, cualquier cambio público obliga a actualizar el array a mano y redeploy.
 
+#### Phase 2.2 — Catálogo metaobject `terpeno` (33 entradas) · **landed**
+
+Implementado en este branch (ver `TERPENE_ROTATION_SYSTEM.md` para detalle completo):
+
+- `server/terpene-catalog.ts` — baseline hardcoded con los 33 handles del PDF *Connabis Terpene Rotation System Technical Documentation* (10 En Rotación + 23 Agotado) y mascotas conocidas. SQLite `terpene_catalog_edits` guarda overlay disperso (`tipo`, `estado`, `orden`, `mascota_url`, `perfil_sabor`).
+- Endpoints `/api/terpene-catalog`, `/api/terpene-catalog/batch` (atómico, valida ≤10 activos y `orden` único 1..10), `/api/terpene-catalog/reset`, `/api/terpene-catalog/shopify-preview` (construye payload `metaobjectUpdateByHandle` Admin API 2024-01 sin enviar nada).
+- UI `/terpenos` reorganizada en 3 tabs: **Catálogo (33)** con En Rotación + Banco/Agotado, ↑/↓ reorder, promover/retirar, edición inline de `tipo` y `mascota`, preview de payloads GraphQL por entrada dirty.
+- Slots Phase 2.0 (anclaje MM) y Reemplazos Phase 4 quedan en sus propios tabs.
+- **Phase 2.3 pendiente**: proxy backend con token Shopify para ejecutar los payloads. Aún no implementado — confirmación explícita requerida antes de enviar.
+- **Phase 2.4 pendiente**: convertir `snippets/deepdive-terpenos-v6.liquid` a loop sobre `shop.metaobjects.terpeno` para que Deepdive deje de ser estático.
+
 ## Qué falta para reemplazar bulletproof a Material Manager / Shopify embedded app
 
 Resumen ejecutivo de gaps abiertos (mantener este checklist actualizado al cerrar cada uno):

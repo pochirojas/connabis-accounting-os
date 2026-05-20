@@ -44,6 +44,14 @@ import {
   deleteTerpeneDraft,
 } from './terpene-rotation';
 import {
+  listTerpeneCatalog,
+  patchTerpeneCatalogBatch,
+  resetTerpeneCatalog,
+  buildShopifyMutationPreview,
+  TERPENE_ACTIVE_LIMIT,
+  TERPENE_BASELINE_COUNT,
+} from './terpene-catalog';
+import {
   CLEAR_BUBBLE_BAG_COST,
   buildRecipesWithMmCosts,
   buildPackagingWithMmCosts,
@@ -2404,6 +2412,53 @@ export async function registerRoutes(
   });
   app.delete('/api/terpene-rotation/drafts/:id', (req, res) => {
     res.json({ deleted: deleteTerpeneDraft(sqlite, Number(req.params.id)) });
+  });
+
+  // ---------- Terpene Metaobject Catalog (Phase 2.2 · local mirror) ----------
+  // Mirrors the Shopify metaobject `terpeno` collection (33 entries) locally
+  // as a baseline + sparse edit overlay. NO Shopify writes here — payload
+  // preview endpoint surfaces what *would* be sent once the backend proxy
+  // exists. See TERPENE_ROTATION_SYSTEM.md for the full data model.
+  app.get('/api/terpene-catalog', (_req, res) => {
+    const entries = listTerpeneCatalog(sqlite);
+    res.json({
+      activeLimit: TERPENE_ACTIVE_LIMIT,
+      totalBaseline: TERPENE_BASELINE_COUNT,
+      entries,
+    });
+  });
+  app.post('/api/terpene-catalog/batch', (req, res) => {
+    const body = req.body ?? {};
+    const patches = Array.isArray(body.patches) ? body.patches : [];
+    const sanitized = patches
+      .filter((p: unknown): p is Record<string, unknown> => Boolean(p) && typeof p === 'object')
+      .map((p: Record<string, unknown>) => ({
+        handle: String(p.handle ?? ''),
+        patch: {
+          tipo: p.tipo === undefined ? undefined : (p.tipo === null ? null : String(p.tipo) as 'Sativa' | 'Hibrido' | 'Indica' | ''),
+          estado: p.estado === undefined ? undefined : (p.estado === null ? null : String(p.estado) as 'En Rotación' | 'Agotado'),
+          orden: p.orden === undefined ? undefined : (p.orden === null ? null : Number(p.orden)),
+          mascotaUrl: p.mascotaUrl === undefined ? undefined : (p.mascotaUrl === null ? null : String(p.mascotaUrl)),
+          perfilSabor: p.perfilSabor === undefined ? undefined : (p.perfilSabor === null ? null : String(p.perfilSabor)),
+        },
+      }));
+    const result = patchTerpeneCatalogBatch(sqlite, sanitized);
+    if (result.errors.length > 0) {
+      res.status(400).json(result);
+      return;
+    }
+    res.json(result);
+  });
+  app.post('/api/terpene-catalog/reset', (_req, res) => {
+    res.json(resetTerpeneCatalog(sqlite));
+  });
+  app.get('/api/terpene-catalog/shopify-preview', (_req, res) => {
+    res.json({
+      adminApiVersion: '2024-01',
+      metaobjectType: 'terpeno',
+      note: 'Preview-only. No network call. Token is intentionally absent — future backend proxy will resolve handle→id and execute via metaobjectUpdate.',
+      payloads: buildShopifyMutationPreview(sqlite),
+    });
   });
 
   return httpServer;

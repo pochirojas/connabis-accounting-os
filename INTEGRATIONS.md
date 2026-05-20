@@ -34,6 +34,7 @@ Regla:
 - No inventar costos cuando MM no tiene BOM/match.
 - Phase 2 será reemplazar Material Manager dentro del OS.
 - Phase 2.1 ya está en código: mirror solo lectura del MM CSV + historial de costos del Excel, expuesto en `/api/material-manager/*` y la página `MM Mirror`. Sin escrituras a Shopify; export con headers MM exactos para rollback. Eventualmente la app correrá como Shopify embedded app; antes se probará en una tienda separada.
+- Phase 2.2 ya está en código: catálogo local del Metaobject Shopify `terpeno` (33 entradas: 10 En Rotación + 23 Agotado), con overlay de ediciones en SQLite y endpoints `/api/terpene-catalog/*`. La UI vive en `/terpenos` (tab "Catálogo"). Las escrituras a Shopify (`metaobjectUpdateByHandle`, Admin API 2024-01) son Phase 2.3 y aún no están implementadas; el endpoint `/api/terpene-catalog/shopify-preview` solo construye los payloads que se enviarían, sin token y sin red. Detalle completo y plan de sync en `TERPENE_ROTATION_SYSTEM.md`.
 
 ## Sheet contable / gastos manuales
 
