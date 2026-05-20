@@ -428,7 +428,7 @@ export default function Gastos() {
         </Card>
       </section>
 
-      <section className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+      <section className="mt-6">
         <Card className="p-5 bg-card border-card-border" data-testid="card-add-expense">
           <div className="flex items-start justify-between gap-4 mb-4">
             <div>
@@ -439,7 +439,7 @@ export default function Gastos() {
             </div>
             <Badge variant="outline" className="text-[11px]">Manual nuevo</Badge>
           </div>
-          <form onSubmit={addExpense} className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+          <form onSubmit={addExpense} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[140px_150px_180px_1fr_150px_120px_170px_auto] gap-3 items-end">
             <label className="space-y-1.5">
               <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Fecha</span>
               <Input
@@ -577,7 +577,9 @@ export default function Gastos() {
             </p>
           )}
         </Card>
+      </section>
 
+      <section className="mt-6">
         <Card className="p-5 bg-card border-card-border" data-testid="card-expense-detail">
           <div className="flex items-center justify-between gap-3 mb-4">
             <div>
@@ -693,7 +695,7 @@ export default function Gastos() {
               )}
             </DialogContent>
           </Dialog>
-          <div className="overflow-x-auto max-h-[520px]">
+          <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
