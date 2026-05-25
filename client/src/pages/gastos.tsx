@@ -17,7 +17,7 @@ import {
 import type { MonthlyRow, Expense } from '@shared/schema';
 import { formatCOP, formatCOPCompact, formatDate } from '@/lib/format';
 import { KpiCard } from '@/components/kpi-card';
-import { Receipt, TrendingDown, TrendingUp, AlertTriangle, Plus, Trash2, Pencil, Save, X } from 'lucide-react';
+import { Receipt, TrendingDown, TrendingUp, AlertTriangle, Plus, Trash2, Pencil, Save, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useMemo, useState, type FormEvent } from 'react';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { sortByDate, sortByMonth, type ChartSortOrder } from '@/lib/chart-sort';
@@ -118,6 +118,12 @@ export default function Gastos() {
   const [monthlySort, setMonthlySort] = useState<ChartSortOrder>('oldest');
   const [monthlyTableSort, setMonthlyTableSort] = useState<ChartSortOrder>('newest');
   const [expenseDetailSort, setExpenseDetailSort] = useState<ChartSortOrder>('newest');
+  // Detalle de gastos: collapsed shows only the latest 5; expanded paginates the full list.
+  const [expenseDetailCollapsed, setExpenseDetailCollapsed] = useState(true);
+  const [expenseDetailPageSize, setExpenseDetailPageSize] = useState<number>(25);
+  const [expenseDetailPage, setExpenseDetailPage] = useState<number>(1);
+  const [expenseDetailFilterYear, setExpenseDetailFilterYear] = useState<string>('all');
+  const [expenseDetailSearch, setExpenseDetailSearch] = useState<string>('');
   const [analyticsScope, setAnalyticsScope] = useState<'operating' | 'all'>('operating');
   const [filterProvider, setFilterProvider] = useState<string>('all');
   const [filterCategory, setFilterCategory] = useState<string>('all');
@@ -185,6 +191,45 @@ export default function Gastos() {
   }, [scopedExpenses, filterProvider, filterCategory, filterMonth, filterYear, searchTerm]);
   const filteredTotal = filteredScoped.reduce((s, e) => s + e.amount, 0);
 
+  // Average operating expense for the active filter. Two interpretations:
+  //   - "promedio por mes con gasto": total / months that actually have an expense in the filter
+  //   - "promedio mensual calendario": total / number of calendar months covered by the filter
+  // We show both so the user can interpret without ambiguity. We force operating scope here
+  // because mixing inventory/capex into an "operating average" would be misleading.
+  const operatingFilteredScoped = useMemo(
+    () => filteredScoped.filter(isOperating),
+    [filteredScoped],
+  );
+  const operatingAverages = useMemo(() => {
+    const total = operatingFilteredScoped.reduce((s, e) => s + e.amount, 0);
+    const monthsWithExpense = new Set(operatingFilteredScoped.map(e => e.month).filter(Boolean));
+    const activeMonths = monthsWithExpense.size;
+    // Calendar-month denominator: if a year/month filter is active, derive from it; otherwise
+    // span first → last month observed (inclusive). Falls back to active months to avoid /0.
+    let calendarMonths = activeMonths;
+    if (filterMonth !== 'all') {
+      calendarMonths = 1;
+    } else if (filterYear !== 'all') {
+      const now = new Date();
+      const currentYear = String(now.getFullYear());
+      calendarMonths = filterYear === currentYear ? now.getMonth() + 1 : 12;
+    } else if (monthsWithExpense.size > 0) {
+      const sorted = Array.from(monthsWithExpense).sort();
+      const first = sorted[0];
+      const last = sorted[sorted.length - 1];
+      const [fy, fm] = first.split('-').map(Number);
+      const [ly, lm] = last.split('-').map(Number);
+      calendarMonths = (ly - fy) * 12 + (lm - fm) + 1;
+    }
+    return {
+      total,
+      activeMonths,
+      calendarMonths: Math.max(1, calendarMonths),
+      perActiveMonth: activeMonths > 0 ? total / activeMonths : 0,
+      perCalendarMonth: Math.max(1, calendarMonths) > 0 ? total / Math.max(1, calendarMonths) : 0,
+    };
+  }, [operatingFilteredScoped, filterMonth, filterYear]);
+
   const byProvider = useMemo(() => {
     const map = new Map<string, number>();
     filteredScoped.forEach(e => {
@@ -225,6 +270,31 @@ export default function Gastos() {
   }, [filteredScoped]);
 
   const expenseDetailRows = useMemo(() => sortByDate(allExpenses, expenseDetailSort), [allExpenses, expenseDetailSort]);
+  const expenseDetailYearOptions = useMemo(
+    () => Array.from(new Set(allExpenses.map(e => (e.date ?? '').slice(0, 4)).filter(Boolean))).sort().reverse(),
+    [allExpenses],
+  );
+  const expenseDetailFiltered = useMemo(() => {
+    const term = expenseDetailSearch.trim().toLowerCase();
+    return expenseDetailRows.filter(e => {
+      if (expenseDetailFilterYear !== 'all' && (e.date ?? '').slice(0, 4) !== expenseDetailFilterYear) return false;
+      if (term) {
+        const blob = `${e.description} ${e.paidTo ?? ''} ${e.category} ${e.paidWith ?? ''} ${e.paidBy ?? ''} ${e.notes ?? ''}`.toLowerCase();
+        if (!blob.includes(term)) return false;
+      }
+      return true;
+    });
+  }, [expenseDetailRows, expenseDetailFilterYear, expenseDetailSearch]);
+  const expenseDetailTotalCount = expenseDetailFiltered.length;
+  const expenseDetailTotalPages = expenseDetailCollapsed
+    ? 1
+    : Math.max(1, Math.ceil(expenseDetailTotalCount / Math.max(1, expenseDetailPageSize)));
+  const expenseDetailCurrentPage = Math.min(expenseDetailPage, expenseDetailTotalPages);
+  const expenseDetailDisplayRows = useMemo(() => {
+    if (expenseDetailCollapsed) return expenseDetailFiltered.slice(0, 5);
+    const start = (expenseDetailCurrentPage - 1) * expenseDetailPageSize;
+    return expenseDetailFiltered.slice(start, start + expenseDetailPageSize);
+  }, [expenseDetailFiltered, expenseDetailCollapsed, expenseDetailCurrentPage, expenseDetailPageSize]);
   const sellerOptions = useMemo(() => {
     const normalizeSeller = (seller: string) => seller.trim();
     const knownLower = new Set(RECURRENT_SELLERS.map(s => s.toLowerCase()));
@@ -581,20 +651,52 @@ export default function Gastos() {
 
       <section className="mt-6">
         <Card className="p-5 bg-card border-card-border" data-testid="card-expense-detail">
-          <div className="flex items-center justify-between gap-3 mb-4">
+          <div className="flex flex-col gap-3 mb-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h2 className="text-sm font-semibold tracking-tight">Detalle de gastos</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Origen actual: Expenses sheet histórico + gastos manuales nuevos. Seed queda fuera de totales.</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Origen actual: Expenses sheet histórico + gastos manuales nuevos. Seed queda fuera de totales.
+                {expenseDetailCollapsed
+                  ? ` Mostrando los últimos 5 de ${expenseDetailTotalCount}.`
+                  : ` ${expenseDetailTotalCount} gastos en el filtro actual.`}
+              </p>
             </div>
-            <select
-              value={expenseDetailSort}
-              onChange={e => setExpenseDetailSort(e.target.value as ChartSortOrder)}
-              className="h-9 rounded-md border border-input bg-background px-3 text-xs"
-              data-testid="select-expense-detail-sort"
-            >
-              <option value="newest">Nuevo → viejo</option>
-              <option value="oldest">Viejo → nuevo</option>
-            </select>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                value={expenseDetailSearch}
+                onChange={e => { setExpenseDetailSearch(e.target.value); setExpenseDetailPage(1); }}
+                placeholder="Buscar…"
+                className="h-9 w-44 text-xs"
+                data-testid="input-expense-detail-search"
+              />
+              <select
+                value={expenseDetailFilterYear}
+                onChange={e => { setExpenseDetailFilterYear(e.target.value); setExpenseDetailPage(1); }}
+                className="h-9 rounded-md border border-input bg-background px-3 text-xs"
+                data-testid="select-expense-detail-year"
+              >
+                <option value="all">Todos los años</option>
+                {expenseDetailYearOptions.map(year => <option key={year} value={year}>{year}</option>)}
+              </select>
+              <select
+                value={expenseDetailSort}
+                onChange={e => setExpenseDetailSort(e.target.value as ChartSortOrder)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-xs"
+                data-testid="select-expense-detail-sort"
+              >
+                <option value="newest">Nuevo → viejo</option>
+                <option value="oldest">Viejo → nuevo</option>
+              </select>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => { setExpenseDetailCollapsed(prev => !prev); setExpenseDetailPage(1); }}
+                data-testid="button-toggle-expense-detail-collapse"
+              >
+                {expenseDetailCollapsed ? 'Ver todos' : 'Colapsar a últimos 5'}
+              </Button>
+            </div>
           </div>
           <Dialog
             open={editDraft !== null}
@@ -713,7 +815,14 @@ export default function Gastos() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {expenseDetailRows.map(e => (
+                {expenseDetailDisplayRows.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={11} className="text-center text-xs text-muted-foreground py-4">
+                      Sin gastos para el filtro actual.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {expenseDetailDisplayRows.map(e => (
                   <TableRow key={e.id} data-testid={`row-expense-${e.id}`}>
                     <TableCell className="text-sm tabular">{formatDate(e.date)}</TableCell>
                     <TableCell>
@@ -779,6 +888,50 @@ export default function Gastos() {
               </TableBody>
             </Table>
           </div>
+          {!expenseDetailCollapsed && expenseDetailTotalCount > 0 && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground" data-testid="expense-detail-pagination">
+              <div className="flex items-center gap-2">
+                <span>Filas por página</span>
+                <select
+                  value={expenseDetailPageSize}
+                  onChange={e => { setExpenseDetailPageSize(Number(e.target.value) || 25); setExpenseDetailPage(1); }}
+                  className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                  data-testid="select-expense-detail-page-size"
+                >
+                  {[5, 10, 25, 50, 100].map(size => <option key={size} value={size}>{size}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span data-testid="text-expense-detail-page-indicator">
+                  Página {expenseDetailCurrentPage} de {expenseDetailTotalPages} · {expenseDetailTotalCount} gastos
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setExpenseDetailPage(p => Math.max(1, p - 1))}
+                  disabled={expenseDetailCurrentPage <= 1}
+                  aria-label="Página anterior"
+                  data-testid="button-expense-detail-prev"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setExpenseDetailPage(p => Math.min(expenseDetailTotalPages, p + 1))}
+                  disabled={expenseDetailCurrentPage >= expenseDetailTotalPages}
+                  aria-label="Página siguiente"
+                  data-testid="button-expense-detail-next"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
         </Card>
       </section>
 
@@ -939,6 +1092,34 @@ export default function Gastos() {
                   .map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </label>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4" data-testid="operating-average-summary">
+            <div className="rounded-md border border-card-border bg-muted/20 p-3">
+              <p className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Gasto operacional total (filtro)</p>
+              <p className="text-sm font-semibold tabular mt-1" data-testid="text-operating-total">{formatCOP(operatingAverages.total)}</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {operatingAverages.activeMonths} mes(es) con gasto operativo
+              </p>
+            </div>
+            <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3">
+              <p className="text-[10.5px] uppercase tracking-wider text-emerald-200">Promedio por mes con gasto</p>
+              <p className="text-sm font-semibold tabular mt-1 text-emerald-100" data-testid="text-operating-avg-active">
+                {formatCOP(operatingAverages.perActiveMonth)}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Total ÷ {operatingAverages.activeMonths || 0} mes(es) activos
+              </p>
+            </div>
+            <div className="rounded-md border border-sky-500/30 bg-sky-500/5 p-3">
+              <p className="text-[10.5px] uppercase tracking-wider text-sky-200">Promedio mensual calendario</p>
+              <p className="text-sm font-semibold tabular mt-1 text-sky-100" data-testid="text-operating-avg-calendar">
+                {formatCOP(operatingAverages.perCalendarMonth)}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Total ÷ {operatingAverages.calendarMonths} mes(es) calendario
+              </p>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
