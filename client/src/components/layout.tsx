@@ -3,7 +3,7 @@ import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   LayoutDashboard, TrendingUp, Receipt, PackageSearch,
   Boxes, AlertTriangle, Settings, Moon, Sun, RefreshCw,
-  CalendarRange, BookOpen, Brain, Landmark, Menu, X, Sparkles,
+  CalendarRange, BookOpen, Brain, Landmark, Menu, X, Sparkles, Handshake,
 } from 'lucide-react';
 import { ConnabisLogo } from './logo';
 import { useTheme } from './theme-provider';
@@ -23,6 +23,7 @@ const NAV = [
   // `/inventario` and `/material-manager` both render the same page.
   { href: '/material-manager',  label: 'Inventario & Materiales', icon: Boxes,         testId: 'nav-inventario' },
   { href: '/terpenos',          label: 'Rotación de terpenos',  icon: Sparkles,        testId: 'nav-terpenos' },
+  { href: '/connabis-co',       label: 'Connabis & Co',         icon: Handshake,       testId: 'nav-connabis-co' },
   { href: '/alertas',           label: 'Alertas',               icon: AlertTriangle,   testId: 'nav-alertas' },
   { href: '/sugerencias',       label: 'Predicciones',          icon: Brain,           testId: 'nav-sugerencias' },
   { href: '/glosario',          label: 'Diccionario',           icon: BookOpen,        testId: 'nav-glosario' },

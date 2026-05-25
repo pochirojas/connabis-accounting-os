@@ -1,5 +1,9 @@
 # Connabis Accounting OS — ROADMAP
 
+> 2026-05-25 · added **Connabis & Co** B2B tier-pricing page (`/connabis-co`,
+> `/api/b2b-pricing`). Fórmula y decisiones abiertas: ver `B2B_PRICING.md`.
+> Resumen de gaps restantes (P0/P1/P2): ver `SYSTEM_GAPS_REPORT.md`.
+
 ## Modelo de prioridades (2026-05-20)
 
 Las fases históricas (Phase 1, Phase 2.x, Phase 3, Phase 4) se conservan como **etiquetas de implementación / linaje de código**, pero la priorización operativa del producto se rige a partir de ahora por el siguiente overlay:

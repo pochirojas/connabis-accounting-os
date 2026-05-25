@@ -18,6 +18,7 @@ import Alertas from "@/pages/alertas";
 import Sugerencias from "@/pages/sugerencias";
 import Integracion from "@/pages/integracion";
 import Glosario from "@/pages/glosario";
+import ConnabisCo from "@/pages/connabis-co";
 
 function AppRouter() {
   return (
@@ -36,6 +37,7 @@ function AppRouter() {
       <Route path="/sugerencias" component={Sugerencias} />
       <Route path="/integracion" component={Integracion} />
       <Route path="/glosario" component={Glosario} />
+      <Route path="/connabis-co" component={ConnabisCo} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -106,6 +106,7 @@ import {
   setManualCogsOverrideActive,
   upsertManualCogsOverride,
 } from './manual-cogs-overrides';
+import { computeB2bPricing } from './b2b-pricing';
 
 // TTLs (ms) — short enough to keep numbers fresh, long enough to make screen
 // navigation feel instant. Mutation handlers invalidate the relevant prefixes.
@@ -1849,6 +1850,21 @@ export async function registerRoutes(
       res.json(products);
     }
   });
+  // Connabis & Co — B2B tier pricing computed from current Shopify retail
+  // and the canonical COGS source priority used elsewhere in the app.
+  app.get('/api/b2b-pricing', async (_req, res) => {
+    try {
+      const [productRows, orders] = await Promise.all([
+        loadLiveShopifyProducts(),
+        loadLiveShopifyIncomeOrders(),
+      ]);
+      const enriched = addSalesToProducts(productRows, mapOrdersToAccountingLines(orders));
+      res.json(computeB2bPricing(enriched));
+    } catch {
+      res.json(computeB2bPricing(products));
+    }
+  });
+
   app.get('/api/materials', (_req, res) => res.json(materials));
   // Real MM purchase orders — replaces the legacy seed POs entirely.
   app.get('/api/purchase-orders', (_req, res) => {
