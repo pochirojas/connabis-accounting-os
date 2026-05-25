@@ -102,16 +102,12 @@ export default function MaterialManagerPage() {
   const [receiveDialogPoNumber, setReceiveDialogPoNumber] = useState<string | null>(null);
   const selectedPoDetail = useQuery<MmPurchaseOrder>({
     queryKey: ['/api/material-manager/purchase-orders', selectedPoNumber],
-    queryFn: async () => {
-      const response = await apiRequest('GET', `/api/material-manager/purchase-orders/${encodeURIComponent(selectedPoNumber ?? '')}`);
-      return response.json();
-    },
     enabled: Boolean(selectedPoNumber),
   });
   const selectedPoBreakdown = useQuery<PoBreakdown>({
     queryKey: ['/api/material-manager/purchase-orders', selectedPoNumber, 'breakdown'],
     queryFn: async () => {
-      const response = await apiRequest('GET', `/api/material-manager/purchase-orders/${encodeURIComponent(selectedPoNumber ?? '')}/breakdown`);
+      const response = await apiRequest('GET', `/api/material-manager/purchase-orders/${selectedPoNumber}/breakdown`);
       return response.json();
     },
     enabled: Boolean(selectedPoNumber),
@@ -119,7 +115,7 @@ export default function MaterialManagerPage() {
   const selectedPoProgress = useQuery<Array<{ lineId: number; received: number; ordered: number }>>({
     queryKey: ['/api/material-manager/purchase-orders', selectedPoNumber, 'progress'],
     queryFn: async () => {
-      const response = await apiRequest('GET', `/api/material-manager/purchase-orders/${encodeURIComponent(selectedPoNumber ?? '')}/progress`);
+      const response = await apiRequest('GET', `/api/material-manager/purchase-orders/${selectedPoNumber}/progress`);
       return response.json();
     },
     enabled: Boolean(selectedPoNumber),
