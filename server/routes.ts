@@ -53,6 +53,16 @@ import {
   buildCostBreakdownRows,
 } from './cost-breakdown';
 import {
+  buildPoBreakdown,
+  upsertPoCostOverride,
+  deletePoCostOverride,
+  getPoCostOverride,
+} from './po-cost-breakdown';
+import { listInventoryBatches, getBatchByTrackingCode } from './inventory-batches';
+import { buildConsumptionReport, buildLatestCostMap } from './inventory-consumption';
+import { runExtendedQa } from './mm-extended-qa';
+import { updatePoCostOverrideSchema } from '@shared/schema';
+import {
   listTerpeneSlots,
   upsertTerpeneSlot,
   deleteTerpeneSlot,
@@ -1949,6 +1959,42 @@ export async function registerRoutes(
     res.json(listInventoryMovements(sqlite, { materialKey, poNumber }));
   });
 
+  // ---------- Inventory batches (Phase 2.7 P0) ----------
+  app.get('/api/material-manager/inventory-batches', (req, res) => {
+    const materialId = typeof req.query.materialId === 'string' ? req.query.materialId : undefined;
+    const poNumber = typeof req.query.poNumber === 'string' ? req.query.poNumber : undefined;
+    res.json(listInventoryBatches(sqlite, { materialId, poNumber }));
+  });
+
+  app.get('/api/material-manager/inventory-batches/:trackingCode', (req, res) => {
+    const batch = getBatchByTrackingCode(sqlite, req.params.trackingCode);
+    if (!batch) return res.status(404).json({ error: 'batch_not_found' });
+    res.json(batch);
+  });
+
+  // ---------- PO landed-cost degloss (Phase 2.7 P0) ----------
+  app.get('/api/material-manager/purchase-orders/:idOrNumber/breakdown', (req, res) => {
+    const breakdown = buildPoBreakdown(sqlite, req.params.idOrNumber);
+    if (!breakdown) return res.status(404).json({ error: 'po_not_found' });
+    res.json(breakdown);
+  });
+
+  app.patch('/api/material-manager/purchase-orders/:idOrNumber/cost-override', (req, res) => {
+    const po = getMmPurchaseOrder(sqlite, req.params.idOrNumber);
+    if (!po) return res.status(404).json({ error: 'po_not_found' });
+    const parsed = updatePoCostOverrideSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_override', details: parsed.error.flatten() });
+    const override = upsertPoCostOverride(sqlite, po.id, po.poNumber, parsed.data);
+    res.json({ override, breakdown: buildPoBreakdown(sqlite, po.id) });
+  });
+
+  app.delete('/api/material-manager/purchase-orders/:idOrNumber/cost-override', (req, res) => {
+    const po = getMmPurchaseOrder(sqlite, req.params.idOrNumber);
+    if (!po) return res.status(404).json({ error: 'po_not_found' });
+    const deleted = deletePoCostOverride(sqlite, po.id);
+    res.json({ deleted, breakdown: buildPoBreakdown(sqlite, po.id) });
+  });
+
   // PO line matcher — read-only suggestions. Default scope = lines without a
   // canonical materialId. Pass ?all=1 to include already-matched lines too.
   app.get('/api/material-manager/purchase-orders/match/suggestions', (req, res) => {
@@ -2563,6 +2609,56 @@ export async function registerRoutes(
     } catch (error) {
       console.error('[mm-mirror] qa failed', error);
       res.status(500).json({ error: error instanceof Error ? error.message : 'qa_failed' });
+    }
+  });
+
+  // Extended QA — round-trip parity + counts + unmatched lines + landed-cost
+  // sanity + stock checks + warnings. Read-only.
+  app.get('/api/material-manager/qa-extended', (_req, res) => {
+    try {
+      res.json(runExtendedQa(sqlite));
+    } catch (error) {
+      console.error('[mm-qa] extended qa failed', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'qa_failed' });
+    }
+  });
+
+  // Planned BOM consumption from fulfilled Shopify orders. Read-only — does
+  // NOT post negative inventory movements. Use it as a report to validate BOM
+  // coverage and project stock impact before flipping the switch on
+  // destructive deduction.
+  app.get('/api/material-manager/consumption-report', async (req, res) => {
+    try {
+      const month = typeof req.query.month === 'string' ? req.query.month : undefined;
+      const year = typeof req.query.year === 'string' ? req.query.year : undefined;
+      const orders = await loadLiveShopifyIncomeOrders({ month, year });
+      // Re-use the same accounting-line mapping the income/COGS reports use,
+      // then keep only fulfilled lines (mapOrdersToAccountingLines already
+      // filters by fulfillment via `orderInPeriod` upstream, but we keep the
+      // filter here defensively).
+      const accountingLines = mapOrdersToAccountingLines(orders);
+      const fulfilledLines = accountingLines.map(l => ({
+        variantId: l.variantId || null,
+        productName: l.product,
+        variantName: '',
+        qty: l.qty,
+        orderId: l.orderId,
+        fulfillmentStatus: l.fulfillmentStatus,
+      }));
+      const bomRows = listMmBomComponents(sqlite);
+      const materials = listMmMaterialsEffective(sqlite);
+      const latest = buildLatestCostMap(sqlite);
+      const report = buildConsumptionReport(sqlite, {
+        fulfilledLines,
+        bomRows,
+        materials,
+        filter: month || year ? { month, year } : null,
+        latestUnitCostByMaterial: latest,
+      });
+      res.json(report);
+    } catch (error) {
+      console.error('[mm-consumption] report failed', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'consumption_failed' });
     }
   });
 

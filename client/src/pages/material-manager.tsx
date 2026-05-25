@@ -20,6 +20,7 @@ import type {
   CostBreakdownBucketSummary, CostBreakdownRow,
   MaterialCost, MmBomRow, MmCostHistoryRow, MmMaterialRow, MmMirrorStatus,
   MmPurchaseOrder, MmPurchaseOrdersStatus, ReceivePoResult,
+  PoBreakdown,
 } from '@shared/schema';
 
 type MaterialSalesAnalytics = {
@@ -101,6 +102,14 @@ export default function MaterialManagerPage() {
   const [receiveDialogPoNumber, setReceiveDialogPoNumber] = useState<string | null>(null);
   const selectedPoDetail = useQuery<MmPurchaseOrder>({
     queryKey: ['/api/material-manager/purchase-orders', selectedPoNumber],
+    enabled: Boolean(selectedPoNumber),
+  });
+  const selectedPoBreakdown = useQuery<PoBreakdown>({
+    queryKey: ['/api/material-manager/purchase-orders', selectedPoNumber, 'breakdown'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', `/api/material-manager/purchase-orders/${selectedPoNumber}/breakdown`);
+      return response.json();
+    },
     enabled: Boolean(selectedPoNumber),
   });
   const selectedPoProgress = useQuery<Array<{ lineId: number; received: number; ordered: number }>>({
@@ -952,6 +961,74 @@ export default function MaterialManagerPage() {
                       </dl>
                     </Card>
                   </div>
+                  {selectedPoBreakdown.data ? (
+                    <Card className="p-3 mt-3 border-border" data-testid="card-po-breakdown">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <h4 className="text-[12px] font-semibold tracking-tight">Degloss de orden — costo unitario aterrizado (COP)</h4>
+                          <p className="text-[10.5px] text-muted-foreground">
+                            Reparte envío, impuestos, fees, order-protect y descuentos sobre las líneas
+                            ({selectedPoBreakdown.data.allocationBasis === 'subtotal' ? 'por subtotal' : selectedPoBreakdown.data.allocationBasis === 'quantity' ? 'por cantidad' : 'plano'})
+                            · FX {selectedPoBreakdown.data.fxRate?.toFixed(2)}
+                          </p>
+                        </div>
+                        <Badge variant="outline" className="text-[10.5px]">{selectedPoBreakdown.data.lines.length} líneas</Badge>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Producto</TableHead>
+                              <TableHead className="text-right">Q</TableHead>
+                              <TableHead className="text-right">Costo unit.</TableHead>
+                              <TableHead className="text-right">Costo unit. COP</TableHead>
+                              <TableHead className="text-right">Subtotal COP</TableHead>
+                              <TableHead className="text-right">Envío COP</TableHead>
+                              <TableHead className="text-right">Imp. COP</TableHead>
+                              <TableHead className="text-right">OP/Fees COP</TableHead>
+                              <TableHead className="text-right">Desc. COP</TableHead>
+                              <TableHead className="text-right font-semibold">Total aterrizado</TableHead>
+                              <TableHead className="text-right font-semibold">Unitario aterrizado</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {selectedPoBreakdown.data.lines.map(l => (
+                              <TableRow key={l.lineId} data-testid={`row-po-breakdown-${l.lineId}`}>
+                                <TableCell className="text-[12px] font-medium">{l.product}</TableCell>
+                                <TableCell className="text-right tabular text-[11.5px]">{formatQty(l.quantity)}</TableCell>
+                                <TableCell className="text-right tabular text-[11.5px]">{formatCOP(l.unitCost)}</TableCell>
+                                <TableCell className="text-right tabular text-[11.5px]">{formatCOP(l.unitCostCop)}</TableCell>
+                                <TableCell className="text-right tabular text-[11.5px]">{formatCOP(l.subtotalCop)}</TableCell>
+                                <TableCell className="text-right tabular text-[11.5px] text-muted-foreground">{formatCOP(l.shippingAllocatedCop)}</TableCell>
+                                <TableCell className="text-right tabular text-[11.5px] text-muted-foreground">{formatCOP(l.taxAllocatedCop)}</TableCell>
+                                <TableCell className="text-right tabular text-[11.5px] text-muted-foreground">{formatCOP(l.orderProtectAllocatedCop + l.feesAllocatedCop)}</TableCell>
+                                <TableCell className="text-right tabular text-[11.5px] text-muted-foreground">{l.discountAllocatedCop > 0 ? `-${formatCOP(l.discountAllocatedCop)}` : '—'}</TableCell>
+                                <TableCell className="text-right tabular font-semibold">{formatCOP(l.landedTotalCop)}</TableCell>
+                                <TableCell className="text-right tabular font-semibold">{formatCOP(l.landedUnitCop)}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 md:grid-cols-6 gap-2 text-[11px]">
+                        <div className="p-2 rounded bg-muted/20"><div className="text-muted-foreground">Subtotal COP</div><div className="tabular font-semibold">{formatCOP(selectedPoBreakdown.data.subtotalCop)}</div></div>
+                        <div className="p-2 rounded bg-muted/20"><div className="text-muted-foreground">Envío</div><div className="tabular font-semibold">{formatCOP(selectedPoBreakdown.data.shippingCop)}</div></div>
+                        <div className="p-2 rounded bg-muted/20"><div className="text-muted-foreground">Imp.</div><div className="tabular font-semibold">{formatCOP(selectedPoBreakdown.data.taxCop)}</div></div>
+                        <div className="p-2 rounded bg-muted/20"><div className="text-muted-foreground">Order protect / fees</div><div className="tabular font-semibold">{formatCOP(selectedPoBreakdown.data.orderProtectCop + selectedPoBreakdown.data.feesCop)}</div></div>
+                        <div className="p-2 rounded bg-muted/20"><div className="text-muted-foreground">Descuentos</div><div className="tabular font-semibold">{selectedPoBreakdown.data.discountCop > 0 ? `-${formatCOP(selectedPoBreakdown.data.discountCop)}` : '—'}</div></div>
+                        <div className="p-2 rounded bg-accent/10"><div className="text-muted-foreground">Total aterrizado</div><div className="tabular font-semibold">{formatCOP(selectedPoBreakdown.data.totalLandedCop)}</div></div>
+                      </div>
+                      {selectedPoBreakdown.data.override ? (
+                        <p className="text-[10.5px] text-emerald-300 mt-2">
+                          Override local activo · actualizado {formatDate(selectedPoBreakdown.data.override.updatedAt.slice(0, 10))}
+                        </p>
+                      ) : (
+                        <p className="text-[10.5px] text-muted-foreground mt-2">
+                          Usando shipping/tax tal como vienen del CSV. Para sobreescribir envío/impuestos/fees/order-protect/descuentos/FX llamá <code>PATCH /api/material-manager/purchase-orders/{selectedPO.poNumber}/cost-override</code>.
+                        </p>
+                      )}
+                    </Card>
+                  ) : null}
                 </>
               )}
             </Card>

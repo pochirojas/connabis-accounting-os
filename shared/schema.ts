@@ -802,3 +802,167 @@ export type CostBreakdownBucketSummary = {
   totalInventoryValue: number;
   rows: CostBreakdownRow[];
 };
+
+// ---------- Phase 2.7 P0: Inventory batches + PO degloss + planned consumption
+
+// A receivable batch / lot. Each receive (full or partial accept) creates one
+// batch row. Tracking code is deterministic and human-readable so warehouse
+// staff can scan / reference it later: `${poNumber}-L${lineId}-${YYYYMMDD}[-Nn]`.
+// qtyRemaining is decremented only by future consumption logic; today we keep
+// the field around for the upcoming FIFO consumption pass.
+export type InventoryBatch = {
+  id: number;
+  trackingCode: string;
+  materialId: string;
+  materialName: string;
+  poId: number | null;
+  poNumber: string | null;
+  poLineId: number | null;
+  supplier: string;
+  receivedDate: string;          // ISO date
+  qtyReceived: number;
+  qtyRemaining: number;
+  unitCostCop: number;
+  landedUnitCostCop: number;     // unit + allocated shipping/tax/fees
+  currency: string;
+  fxRate: number | null;
+  shippingAllocatedCop: number;
+  taxAllocatedCop: number;
+  feesAllocatedCop: number;
+  discountAllocatedCop: number;
+  note: string | null;
+  createdAt: string;
+};
+
+// Optional per-PO header overrides for landed-cost degloss. Schema-light by
+// design: the PO header table itself stays untouched (round-trip safety for
+// MM CSV imports). Values default to zero / pristine when no override.
+export type MmPoCostOverride = {
+  poId: number;
+  poNumber: string;
+  shippingCop: number | null;
+  shippingOriginal: number | null;   // when currency != COP
+  taxCop: number | null;
+  orderProtectCop: number | null;
+  feesCop: number | null;
+  discountCop: number | null;
+  fxRate: number | null;
+  currency: string | null;           // override currency, defaults to PO currency
+  notes: string | null;
+  updatedAt: string;
+};
+
+// One row per PO line in the degloss. Allocation = line subtotal share of the
+// PO subtotal, falling back to qty share when subtotal == 0.
+export type PoBreakdownLine = {
+  lineId: number;
+  product: string;
+  sku: string;
+  materialId: string | null;
+  quantity: number;
+  unitCost: number;              // in PO currency
+  unitCostCop: number;           // FX-adjusted
+  subtotalOriginal: number;      // qty * unitCost
+  subtotalCop: number;
+  allocationShare: number;       // 0..1, weight used for splitting extras
+  shippingAllocatedCop: number;
+  taxAllocatedCop: number;
+  orderProtectAllocatedCop: number;
+  feesAllocatedCop: number;
+  discountAllocatedCop: number;
+  landedTotalCop: number;        // subtotalCop + allocations - discount
+  landedUnitCop: number;         // landedTotalCop / qty
+};
+
+export type PoBreakdown = {
+  poId: number;
+  poNumber: string;
+  date: string;
+  supplier: string;
+  currency: string;
+  fxRate: number;                // 1 when COP or unknown
+  subtotalCop: number;
+  shippingCop: number;
+  taxCop: number;
+  orderProtectCop: number;
+  feesCop: number;
+  discountCop: number;
+  totalLandedCop: number;
+  allocationBasis: 'subtotal' | 'quantity' | 'flat';
+  override: MmPoCostOverride | null;
+  lines: PoBreakdownLine[];
+};
+
+export const updatePoCostOverrideSchema = z.object({
+  shippingCop: z.number().min(0).max(1_000_000_000).optional().nullable(),
+  shippingOriginal: z.number().min(0).max(1_000_000_000).optional().nullable(),
+  taxCop: z.number().min(0).max(1_000_000_000).optional().nullable(),
+  orderProtectCop: z.number().min(0).max(1_000_000_000).optional().nullable(),
+  feesCop: z.number().min(0).max(1_000_000_000).optional().nullable(),
+  discountCop: z.number().min(0).max(1_000_000_000).optional().nullable(),
+  fxRate: z.number().min(0).max(1_000_000).optional().nullable(),
+  currency: z.string().max(8).optional().nullable(),
+  notes: z.string().max(2000).optional().nullable(),
+});
+export type UpdatePoCostOverride = z.infer<typeof updatePoCostOverrideSchema>;
+
+// Planned consumption from fulfilled Shopify orders. Report-only — does NOT
+// post negative inventory_movements. Surfaces what *would* be consumed if we
+// applied BOM-driven deduction, plus any BOM coverage gaps.
+export type ConsumptionLine = {
+  materialId: string;
+  materialName: string;
+  qtyConsumed: number;
+  unit: string;
+  unitCostCop: number;
+  totalCostCop: number;
+  ordersTouched: number;
+  variantsTouched: number;
+  currentStock: number;
+  projectedStock: number;         // currentStock - qtyConsumed
+  warning: 'ok' | 'low_stock' | 'negative_after';
+};
+
+export type ConsumptionGap = {
+  variantId: string;
+  productName: string;
+  variantName: string;
+  qtySold: number;
+  reason: 'no_bom' | 'unmatched_material';
+};
+
+export type ConsumptionReport = {
+  generatedAt: string;
+  filter: { month?: string; year?: string } | null;
+  ordersAnalyzed: number;
+  fulfilledLineItems: number;
+  totalCogsCop: number;           // ∑ totalCostCop
+  byMaterial: ConsumptionLine[];
+  gaps: ConsumptionGap[];
+  bomCoverage: {
+    coveredLines: number;
+    totalLines: number;
+    coverage: number;             // 0..1
+  };
+};
+
+// Aggregated MM QA snapshot used by the new /api/material-manager/qa-extended
+// endpoint and the inventory tab. Round-trip parity remains the existing QA.
+export type MmExtendedQa = {
+  ranAt: string;
+  roundTrip: MmRoundTripQa;
+  counts: {
+    materials: number;
+    bomComponents: number;
+    purchaseOrders: number;
+    purchaseOrderLines: number;
+    inventoryMovements: number;
+    batches: number;
+  };
+  unmatchedPoLines: number;
+  negativeStockMaterials: Array<{ materialId: string; name: string; stock: number }>;
+  poLandedSanity: Array<{ poNumber: string; declaredTotal: number; computedTotal: number; diff: number }>;
+  bomCoverageOnSales: { covered: number; total: number; coverage: number } | null;
+  warnings: string[];
+  status: 'pass' | 'warn' | 'fail';
+};

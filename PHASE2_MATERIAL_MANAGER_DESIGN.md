@@ -799,3 +799,80 @@ Endpoints:
 - Auto-suggest `material_id` for the legacy CSV PO lines by SKU/name fuzzy match (currently manual via the override + re-receive).
 - Tie inventory movements to the existing restock recommendations so stock-on-hand reflects received POs in real time.
 - USD POs: capture `fxRate` on the line at receive time (schema is already in place; UI captures currency but not per-line TRM yet).
+
+---
+
+## Phase 2.7 — Inventory batches + PO landed cost degloss + planned consumption (2026-05-25)
+
+This slice adds the inventory-logic backbone that the spreadsheet cost-breakdown screenshot shipped on 2026-05-25 was missing.
+
+### Inventory batches
+
+`inventory_batches` table (created lazily by `ensureInventoryBatchSchema`):
+
+```
+id PK · tracking_code · material_id · material_name · po_id · po_number · po_line_id ·
+supplier · received_date · qty_received · qty_remaining · unit_cost_cop · landed_unit_cost_cop ·
+currency · fx_rate · shipping_allocated_cop · tax_allocated_cop · fees_allocated_cop ·
+discount_allocated_cop · note · created_at
+```
+
+- `tracking_code` is deterministic and human-readable: `${PO}-L${lineId}-${YYYYMMDD}`, with `-N{n}` auto-suffix when collisions exist (covers same-day partial receives).
+- `qty_remaining` starts at `qty_received`. Helper `consumeBatchesFifo(materialId, qty)` decrements FIFO — implemented but not yet invoked from production code (destructive deduction is gated on opt-in).
+- A batch is created inside both `receivePurchaseOrder` and `receivePurchaseOrderPartial` (per accepted qty, scaled allocation fraction). Reversal does **not** delete batches — they remain as audit trail.
+
+Endpoints:
+
+- `GET /api/material-manager/inventory-batches[?materialId|poNumber]`
+- `GET /api/material-manager/inventory-batches/:trackingCode`
+
+### PO landed-cost degloss
+
+Module `server/po-cost-breakdown.ts`. New table `mm_po_cost_overrides` (keyed by `po_id`) holds per-PO header overrides for shipping / tax / order protect / fees / discount / FX / currency. The pristine MM tables are never touched.
+
+`buildPoBreakdown(sqlite, idOrNumber)` returns a `PoBreakdown` whose `lines[]` carry:
+
+- `subtotalOriginal`, `subtotalCop`
+- `allocationShare` (0..1) — based on subtotal by default, falling back to quantity share when subtotal == 0, then flat (1 / line_count)
+- `shippingAllocatedCop`, `taxAllocatedCop`, `orderProtectAllocatedCop`, `feesAllocatedCop`, `discountAllocatedCop`
+- `landedTotalCop` = subtotalCop + shipping + tax + OP + fees − discount
+- `landedUnitCop` = `landedTotalCop / quantity`
+
+Endpoints:
+
+- `GET /api/material-manager/purchase-orders/:idOrNumber/breakdown`
+- `PATCH /api/material-manager/purchase-orders/:idOrNumber/cost-override` (zod-validated body)
+- `DELETE /api/material-manager/purchase-orders/:idOrNumber/cost-override`
+
+The receive flow calls `buildPoBreakdown` internally so each batch row gets the same allocated costs the UI shows.
+
+UI: new section "Degloss de orden — costo unitario aterrizado (COP)" in PO detail, with per-line columns mirroring the spreadsheet (Q, Costo unit, Costo unit COP, Subtotal COP, Envío, Impuestos, OP/Fees, Descuentos, Total aterrizado, Unitario aterrizado) plus header KPI cells.
+
+### Planned BOM consumption (report-only)
+
+Module `server/inventory-consumption.ts`. Endpoint `GET /api/material-manager/consumption-report[?month|?year]`:
+
+1. Loads fulfilled Shopify orders for the period via the same `loadLiveShopifyIncomeOrders` + `mapOrdersToAccountingLines` path the income/COGS reports use.
+2. Indexes BOM rows by `variant_id`.
+3. For each fulfilled line: looks up BOM components, multiplies `qty_sold * bom.quantity`, and aggregates per material.
+4. Returns per-material consumption + projected stock + warning level (`ok` / `low_stock` / `negative_after`) + a `gaps[]` list of variants with no BOM or unmatched material.
+5. Values COGS using the latest `inventory_movements` cost per material when present (`buildLatestCostMap`).
+
+**This endpoint never writes negative `inventory_movements` rows.** A future destructive-deduction slice needs an explicit user toggle so historical stock counts are not corrupted.
+
+### Extended QA
+
+Module `server/mm-extended-qa.ts`. Endpoint `GET /api/material-manager/qa-extended` returns:
+
+- `roundTrip`: the existing parity QA (round-trip CSV invariants).
+- `counts`: materials, BOM components, POs, PO lines, inventory_movements, batches.
+- `unmatchedPoLines`: PO lines without `material_id`.
+- `negativeStockMaterials`: any material with effective stock < 0.
+- `poLandedSanity`: POs whose declared total ≠ computed `totalLandedCop` by >1 COP.
+- `bomCoverageOnSales`: BOM-variant coverage proxy.
+- `warnings`: human-readable summary.
+- `status`: `pass` | `warn` | `fail`. `fail` when round-trip fails or stock goes negative.
+
+### Why consumption stays report-only
+
+The user explicitly asked for non-destructive consumption in this slice: "Do NOT destructively subtract existing inventory yet unless safe; provide a consumption ledger/report endpoint and UI indicator". Once BOM coverage on fulfilled lines is consistently high (today: ~41% on April 2026 — many storefront-only or custom variants without BOM rows) and the gap list is empty, we can add a flag that writes negative `inventory_movements` + decrements `inventory_batches.qty_remaining` FIFO.

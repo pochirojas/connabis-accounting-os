@@ -14,6 +14,8 @@ import type {
   MmPurchaseOrdersStatus,
   ReceivePoResult,
 } from '@shared/schema';
+import { createInventoryBatch, ensureInventoryBatchSchema, generateTrackingCode } from './inventory-batches';
+import { buildPoBreakdown, ensurePoCostOverrideSchema } from './po-cost-breakdown';
 
 const PO_CSV_DIR = '/home/user/workspace';
 const PO_CSV_GLOB = /^purchase_order_po(\d+)(?:-\d+)?\.csv$/i;
@@ -805,16 +807,42 @@ function generateBatchId(poNumber: string, lineId: number): string {
   return `${poNumber}-L${lineId}-${Date.now().toString(36)}`;
 }
 
+// Compute the allocated shipping/tax/fees/discount for each PO line at receive
+// time. Re-uses the same breakdown engine the UI calls so receive-time landed
+// cost = displayed degloss. Returns a map keyed by line id.
+function computeLineAllocations(sqlite: Database.Database, poId: number | string) {
+  try {
+    const breakdown = buildPoBreakdown(sqlite, poId);
+    if (!breakdown) return new Map<number, { shipping: number; tax: number; fees: number; discount: number; landedUnitCop: number }>();
+    const map = new Map<number, { shipping: number; tax: number; fees: number; discount: number; landedUnitCop: number }>();
+    breakdown.lines.forEach(l => {
+      map.set(l.lineId, {
+        shipping: l.shippingAllocatedCop,
+        tax: l.taxAllocatedCop,
+        fees: l.feesAllocatedCop + l.orderProtectAllocatedCop,
+        discount: l.discountAllocatedCop,
+        landedUnitCop: l.landedUnitCop,
+      });
+    });
+    return map;
+  } catch {
+    return new Map<number, { shipping: number; tax: number; fees: number; discount: number; landedUnitCop: number }>();
+  }
+}
+
 // Idempotent: inserts a positive movement per matched (materialId != null) PO
 // line that does NOT already have one. Unmatched lines are reported in the
 // `unmatchedLines` count and never silently update stock.
 export function receivePurchaseOrder(sqlite: Database.Database, idOrNumber: string | number): ReceivePoResult {
   ensureMmPurchaseOrderSchema(sqlite);
+  ensureInventoryBatchSchema(sqlite);
+  ensurePoCostOverrideSchema(sqlite);
   const po = getMmPurchaseOrder(sqlite, idOrNumber);
   if (!po) throw new Error('po_not_found');
   if (po.status === 'cancelled') throw new Error('po_cancelled_cannot_receive');
 
   const createdAt = new Date().toISOString();
+  const allocByLine = computeLineAllocations(sqlite, po.id);
   let movementsCreated = 0;
   let movementsSkipped = 0;
   let matchedLines = 0;
@@ -851,16 +879,21 @@ export function receivePurchaseOrder(sqlite: Database.Database, idOrNumber: stri
       const existing = sqlite.prepare(`SELECT 1 FROM inventory_movements WHERE po_line_id = ?`).get(line.id);
       if (existing) { movementsSkipped += 1; continue; }
       const materialRow = sqlite.prepare(`SELECT name FROM material_manager_materials WHERE id = ?`).get(line.materialId) as { name?: string } | undefined;
-      const batchId = line.batchId && line.batchId.trim() ? line.batchId : generateBatchId(po.poNumber, line.id);
+      const materialName = materialRow?.name ?? line.product;
+      const receivedDate = po.date || createdAt.slice(0, 10);
+      const batchId = line.batchId && line.batchId.trim()
+        ? line.batchId
+        : generateTrackingCode(sqlite, po.poNumber, line.id, receivedDate);
+      const alloc = allocByLine.get(line.id) ?? { shipping: 0, tax: 0, fees: 0, discount: 0, landedUnitCop: line.unitCost };
       insertMv.run({
         material_key: line.materialId,
-        material_name: materialRow?.name ?? line.product,
+        material_name: materialName,
         po_id: po.id,
         po_number: po.poNumber,
         po_line_id: line.id,
         qty_delta: line.quantity,
         unit_cost_cop: line.unitCost,
-        date: po.date || createdAt.slice(0, 10),
+        date: receivedDate,
         supplier: po.supplier,
         currency: po.currency,
         fx_rate: null,
@@ -869,6 +902,27 @@ export function receivePurchaseOrder(sqlite: Database.Database, idOrNumber: stri
         created_at: createdAt,
       });
       updateLineBatch.run(batchId, line.id);
+      // Create the batch ledger row alongside the inventory movement so
+      // tracking codes, landed cost, and allocations are persisted.
+      createInventoryBatch(sqlite, {
+        trackingCode: batchId,
+        materialId: line.materialId,
+        materialName,
+        poId: po.id,
+        poNumber: po.poNumber,
+        poLineId: line.id,
+        supplier: po.supplier,
+        receivedDate,
+        qtyReceived: line.quantity,
+        unitCostCop: line.unitCost,
+        currency: po.currency,
+        fxRate: null,
+        shippingAllocatedCop: alloc.shipping,
+        taxAllocatedCop: alloc.tax,
+        feesAllocatedCop: alloc.fees,
+        discountAllocatedCop: alloc.discount,
+        note: null,
+      });
       // Push latest unit cost + supplier into the material override (does not
       // mutate the pristine MM row used for round-trip export).
       if (line.unitCost > 0) {
@@ -924,9 +978,12 @@ export function receivePurchaseOrderPartial(
   lines: PartialReceiveLineInput[],
 ): PartialReceiveResult {
   ensureMmPurchaseOrderSchema(sqlite);
+  ensureInventoryBatchSchema(sqlite);
+  ensurePoCostOverrideSchema(sqlite);
   const po = getMmPurchaseOrder(sqlite, idOrNumber);
   if (!po) throw new Error('po_not_found');
   if (po.status === 'cancelled') throw new Error('po_cancelled_cannot_receive');
+  const allocByLinePartial = computeLineAllocations(sqlite, po.id);
 
   const createdAt = new Date().toISOString();
   let acceptCreated = 0;
@@ -975,7 +1032,14 @@ export function receivePurchaseOrderPartial(
       const remaining = Math.max(0, line.quantity - alreadyReceived);
       const acceptQty = Math.min(accept, remaining);
       if (acceptQty > 0) {
-        const batchId = line.batchId && line.batchId.trim() ? line.batchId : generateBatchId(po.poNumber, line.id);
+        const receivedDate = po.date || createdAt.slice(0, 10);
+        // Each partial accept gets a fresh deterministic code so the batch
+        // ledger never collides. The first accept reuses the line's existing
+        // tracking code if available; follow-ups get a new code via the
+        // generator (which auto-suffixes -Nn when needed).
+        const batchId = alreadyReceived === 0 && line.batchId && line.batchId.trim()
+          ? line.batchId
+          : generateTrackingCode(sqlite, po.poNumber, line.id, receivedDate);
         insertMv.run(
           line.materialId,
           line.product,
@@ -987,7 +1051,7 @@ export function receivePurchaseOrderPartial(
           alreadyReceived > 0 ? null : line.id,
           acceptQty,
           line.unitCost,
-          po.date || createdAt.slice(0, 10),
+          receivedDate,
           po.supplier,
           po.currency,
           null,
@@ -996,6 +1060,29 @@ export function receivePurchaseOrderPartial(
           createdAt,
         );
         if (!line.batchId) updateLineBatch.run(batchId, line.id);
+        // Allocations are computed against the full PO quantity; scale by
+        // the actually-accepted fraction so partial receives get a fair share.
+        const fullAlloc = allocByLinePartial.get(line.id) ?? { shipping: 0, tax: 0, fees: 0, discount: 0, landedUnitCop: line.unitCost };
+        const fraction = line.quantity > 0 ? acceptQty / line.quantity : 0;
+        createInventoryBatch(sqlite, {
+          trackingCode: batchId,
+          materialId: line.materialId,
+          materialName: line.product,
+          poId: po.id,
+          poNumber: po.poNumber,
+          poLineId: line.id,
+          supplier: po.supplier,
+          receivedDate,
+          qtyReceived: acceptQty,
+          unitCostCop: line.unitCost,
+          currency: po.currency,
+          fxRate: null,
+          shippingAllocatedCop: fullAlloc.shipping * fraction,
+          taxAllocatedCop: fullAlloc.tax * fraction,
+          feesAllocatedCop: fullAlloc.fees * fraction,
+          discountAllocatedCop: fullAlloc.discount * fraction,
+          note: alreadyReceived > 0 ? `partial_accept_of_line:${line.id}` : null,
+        });
         if (line.unitCost > 0) {
           upsertOverride.run(line.materialId, line.unitCost, po.supplier || '', createdAt, null);
         }
