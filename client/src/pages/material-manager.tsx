@@ -21,12 +21,29 @@ import type {
   MaterialCost, MmBomRow, MmCostHistoryRow, MmMaterialRow, MmMirrorStatus,
   MmPurchaseOrder, MmPurchaseOrdersStatus, ReceivePoResult,
 } from '@shared/schema';
+
+type MaterialSalesAnalytics = {
+  materialId: string;
+  stock: number;
+  soldLast30Days: number;
+  incoming: number;
+  daysOfInventory: number | null;
+  restockForecast30Days: number;
+};
+
+type MaterialsHeaderKpis = {
+  daysOfInventoryBuckets: { zero: number; oneToThirty: number; thirtyOneToNinety: number; ninetyOnePlus: number; nA: number };
+  incomingMaterials: number;
+  monthlyOrderCount: { current: number; limit: number };
+};
 import { MaterialDetailView } from '@/components/material-detail';
 import { ProductBomEditor } from '@/components/product-bom-editor';
 import { CartCalculator } from '@/components/cart-calculator';
 import { CreatePurchaseOrderDialog } from '@/components/create-purchase-order-dialog';
 import { CreateMaterialDialog } from '@/components/create-material-dialog';
 import { PoLineMatcher } from '@/components/po-line-matcher';
+import { MmSettingsPanel } from '@/components/mm-settings';
+import { ReceiveInventoryDialog } from '@/components/receive-inventory-dialog';
 
 type ImportResponse = MmMirrorStatus & { warnings?: string[] };
 
@@ -53,12 +70,18 @@ export default function MaterialManagerPage() {
   const [bomFilter, setBomFilter] = useState('');
   const [selectedMaterialId, setSelectedMaterialId] = useState<string | null>(null);
   const [bomEditorVariantId, setBomEditorVariantId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'materials' | 'bom' | 'purchase' | 'costs' | 'calculator' | 'admin'>('materials');
+  const [activeTab, setActiveTab] = useState<'materials' | 'bom' | 'purchase' | 'costs' | 'calculator' | 'settings' | 'admin'>('materials');
+  const [materialsSubTab, setMaterialsSubTab] = useState<'default' | 'sales'>('default');
+  const [materialSort, setMaterialSort] = useState<{ key: 'name' | 'stock' | 'sold' | 'days'; dir: 'asc' | 'desc' }>({ key: 'name', dir: 'asc' });
+  // Inline available-input draft buffer + autosave (MM-like behavior).
+  const [availableDrafts, setAvailableDrafts] = useState<Record<string, string>>({});
   const [expandedProducts, setExpandedProducts] = useState<Record<string, boolean>>({});
   const [expandedVariants, setExpandedVariants] = useState<Record<string, boolean>>({});
 
   const status = useQuery<MmMirrorStatus>({ queryKey: ['/api/material-manager/status'] });
   const materials = useQuery<MmMaterialRow[]>({ queryKey: ['/api/material-manager/materials'] });
+  const materialsAnalytics = useQuery<MaterialSalesAnalytics[]>({ queryKey: ['/api/material-manager/materials/analytics'] });
+  const materialsHeaderKpis = useQuery<MaterialsHeaderKpis>({ queryKey: ['/api/material-manager/materials/header-kpis'] });
   const bom = useQuery<MmBomRow[]>({ queryKey: ['/api/material-manager/bom'] });
   const costHistory = useQuery<MmCostHistoryRow[]>({ queryKey: ['/api/material-manager/cost-history'] });
   // Active Shopify variant IDs — used to scope the BOM page to active products.
@@ -75,8 +98,17 @@ export default function MaterialManagerPage() {
   const purchaseOrders = useQuery<MmPurchaseOrder[]>({ queryKey: ['/api/material-manager/purchase-orders'] });
   const purchaseOrderStatus = useQuery<MmPurchaseOrdersStatus>({ queryKey: ['/api/material-manager/purchase-orders/status'] });
   const [selectedPoNumber, setSelectedPoNumber] = useState<string | null>(null);
+  const [receiveDialogPoNumber, setReceiveDialogPoNumber] = useState<string | null>(null);
   const selectedPoDetail = useQuery<MmPurchaseOrder>({
     queryKey: ['/api/material-manager/purchase-orders', selectedPoNumber],
+    enabled: Boolean(selectedPoNumber),
+  });
+  const selectedPoProgress = useQuery<Array<{ lineId: number; received: number; ordered: number }>>({
+    queryKey: ['/api/material-manager/purchase-orders', selectedPoNumber, 'progress'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', `/api/material-manager/purchase-orders/${selectedPoNumber}/progress`);
+      return response.json();
+    },
     enabled: Boolean(selectedPoNumber),
   });
   const reimportPos = useMutation({
@@ -141,15 +173,52 @@ export default function MaterialManagerPage() {
     onError: error => toast({ title: 'Falló QA', description: String(error), variant: 'destructive' }),
   });
 
+  // Inline available-stock save (MM editable column on the main list).
+  const saveAvailable = useMutation({
+    mutationFn: async ({ id, stock }: { id: string; stock: number }) => {
+      const response = await apiRequest('PATCH', `/api/material-manager/materials/${id}/override`, { stock });
+      return response.json();
+    },
+    onSuccess: (_data, vars) => {
+      setAvailableDrafts(prev => {
+        const next = { ...prev };
+        delete next[vars.id];
+        return next;
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/material-manager/materials'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/material-manager/materials/analytics'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/material-manager/materials/header-kpis'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/material-manager/cost-breakdown'] });
+    },
+    onError: (error) => toast({ title: 'No se pudo guardar', description: String(error), variant: 'destructive' }),
+  });
+
+  const analyticsById = useMemo(() => new Map((materialsAnalytics.data ?? []).map(a => [a.materialId, a])), [materialsAnalytics.data]);
+
   const filteredMaterials = useMemo(() => {
     const term = materialFilter.trim().toLowerCase();
-    if (!term) return materials.data ?? [];
-    return (materials.data ?? []).filter(m =>
-      m.name.toLowerCase().includes(term) ||
-      m.category.toLowerCase().includes(term) ||
-      m.sku.toLowerCase().includes(term),
-    );
-  }, [materials.data, materialFilter]);
+    let rows = materials.data ?? [];
+    if (term) {
+      rows = rows.filter(m =>
+        m.name.toLowerCase().includes(term) ||
+        m.category.toLowerCase().includes(term) ||
+        m.sku.toLowerCase().includes(term),
+      );
+    }
+    const dir = materialSort.dir === 'asc' ? 1 : -1;
+    const sortKey = materialSort.key;
+    return [...rows].sort((a, b) => {
+      if (sortKey === 'name') return a.name.localeCompare(b.name) * dir;
+      if (sortKey === 'stock') return (a.stock - b.stock) * dir;
+      const aA = analyticsById.get(a.id);
+      const bA = analyticsById.get(b.id);
+      if (sortKey === 'sold') return ((aA?.soldLast30Days ?? 0) - (bA?.soldLast30Days ?? 0)) * dir;
+      // days: nulls last (treat as Infinity for asc, -Infinity for desc).
+      const ad = aA?.daysOfInventory ?? (dir > 0 ? Infinity : -Infinity);
+      const bd = bA?.daysOfInventory ?? (dir > 0 ? Infinity : -Infinity);
+      return (ad - bd) * dir;
+    });
+  }, [materials.data, materialFilter, materialSort, analyticsById]);
 
   const activeVariantSet = useMemo(() => {
     const ids = activeVariants.data?.variantIds;
@@ -331,24 +400,84 @@ export default function MaterialManagerPage() {
           <TabsTrigger value="purchase" data-testid="tab-purchase">Órdenes de compra</TabsTrigger>
           <TabsTrigger value="costs" data-testid="tab-costs">Costos (dashes)</TabsTrigger>
           <TabsTrigger value="calculator" data-testid="tab-calculator">Calculadora de Carts</TabsTrigger>
+          <TabsTrigger value="settings" data-testid="tab-settings">Settings</TabsTrigger>
           <TabsTrigger value="admin" data-testid="tab-admin">Admin · QA · costos</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="materials" className="mt-4">
-          <Card className="p-5" data-testid="card-mm-materials">
-            <div className="flex items-center justify-between mb-3">
+        <TabsContent value="materials" className="mt-4 space-y-4">
+          {/* MM-parity header KPI strip: days-of-inventory buckets, incoming materials, monthly order count. */}
+          <Card className="p-4" data-testid="card-mm-header-kpis">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <h3 className="text-sm font-semibold tracking-tight">Materiales (MM mirror)</h3>
-                <p className="text-xs text-muted-foreground">Click en una fila para abrir el detalle. Insumo = no inventario; Noid = cannabinoide.</p>
+                <div className="text-[11px] font-semibold text-muted-foreground mb-1">Materials by days of inventory remaining</div>
+                <div className="flex flex-wrap gap-3 text-[13px]">
+                  <span><span className="font-semibold text-rose-300">{materialsHeaderKpis.data?.daysOfInventoryBuckets.zero ?? 0}</span> 0 days</span>
+                  <span><span className="font-semibold text-amber-300">{materialsHeaderKpis.data?.daysOfInventoryBuckets.oneToThirty ?? 0}</span> 1-30 days</span>
+                  <span><span className="font-semibold text-sky-300">{materialsHeaderKpis.data?.daysOfInventoryBuckets.thirtyOneToNinety ?? 0}</span> 31-90 days</span>
+                  <span><span className="font-semibold text-emerald-300">{materialsHeaderKpis.data?.daysOfInventoryBuckets.ninetyOnePlus ?? 0}</span> 91+ days</span>
+                  {(materialsHeaderKpis.data?.daysOfInventoryBuckets.nA ?? 0) > 0 ? (
+                    <span className="text-muted-foreground">· {materialsHeaderKpis.data?.daysOfInventoryBuckets.nA} n/a</span>
+                  ) : null}
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] font-semibold text-muted-foreground mb-1">Incoming materials</div>
+                <div className="text-[20px] font-semibold tabular">{materialsHeaderKpis.data?.incomingMaterials ?? 0}</div>
+                <div className="text-[10.5px] text-muted-foreground">Materiales con líneas de PO en borrador (aún no recibidas).</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-semibold text-muted-foreground mb-1">Monthly order count</div>
+                <div className="text-[20px] font-semibold tabular">
+                  {materialsHeaderKpis.data?.monthlyOrderCount.current ?? 0}
+                  <span className="text-muted-foreground text-[13px] font-normal"> / {materialsHeaderKpis.data?.monthlyOrderCount.limit ?? 5000}</span>
+                </div>
+                <div className="text-[10.5px] text-muted-foreground">POs recibidas este mes calendario.</div>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-5" data-testid="card-mm-materials">
+            <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant={materialsSubTab === 'default' ? 'default' : 'outline'}
+                  onClick={() => setMaterialsSubTab('default')}
+                  data-testid="subtab-default"
+                >Default</Button>
+                <Button
+                  size="sm"
+                  variant={materialsSubTab === 'sales' ? 'default' : 'outline'}
+                  onClick={() => setMaterialsSubTab('sales')}
+                  data-testid="subtab-sales"
+                >Sales data</Button>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <Input
                   value={materialFilter}
                   onChange={e => setMaterialFilter(e.target.value)}
-                  placeholder="Filtrar materiales…"
+                  placeholder="Buscar por nombre, SKU o categoría…"
                   className="max-w-xs"
                   data-testid="input-mm-material-filter"
                 />
+                <select
+                  value={`${materialSort.key}-${materialSort.dir}`}
+                  onChange={e => {
+                    const [key, dir] = e.target.value.split('-') as [typeof materialSort.key, typeof materialSort.dir];
+                    setMaterialSort({ key, dir });
+                  }}
+                  className="h-9 rounded-md border border-input bg-background px-2 text-[12px]"
+                  data-testid="select-mm-material-sort"
+                >
+                  <option value="name-asc">Nombre A→Z</option>
+                  <option value="name-desc">Nombre Z→A</option>
+                  <option value="stock-asc">Stock ↑</option>
+                  <option value="stock-desc">Stock ↓</option>
+                  <option value="days-asc">Días inventario ↑</option>
+                  <option value="days-desc">Días inventario ↓</option>
+                  <option value="sold-desc">Vendido 30d ↓</option>
+                  <option value="sold-asc">Vendido 30d ↑</option>
+                </select>
                 <CreateMaterialDialog onCreated={(m) => setSelectedMaterialId(m.id)} />
               </div>
             </div>
@@ -356,47 +485,87 @@ export default function MaterialManagerPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Nombre</TableHead>
-                    <TableHead>SKU</TableHead>
-                    <TableHead>Categoría</TableHead>
-                    <TableHead>Proveedor</TableHead>
-                    <TableHead className="text-right">Costo</TableHead>
-                    <TableHead>Medida</TableHead>
-                    <TableHead className="text-right">Stock</TableHead>
-                    <TableHead>Banderas</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead className="text-right">Available</TableHead>
+                    <TableHead className="text-right">Incoming</TableHead>
+                    <TableHead>Measurement</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Supplier</TableHead>
+                    {materialsSubTab === 'sales' ? (
+                      <>
+                        <TableHead className="text-right">Sold (30d)</TableHead>
+                        <TableHead className="text-right">Días inv.</TableHead>
+                        <TableHead className="text-right">30d restock</TableHead>
+                      </>
+                    ) : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredMaterials.slice(0, 250).map(m => (
-                    <TableRow
-                      key={m.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setSelectedMaterialId(m.id)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') setSelectedMaterialId(m.id); }}
-                      className="cursor-pointer hover:bg-muted/40"
-                      data-testid={`row-mm-material-${m.id}`}
-                    >
-                      <TableCell className="text-[13px] font-medium">{m.name}</TableCell>
-                      <TableCell className="font-mono text-[11.5px]">{m.sku || '—'}</TableCell>
-                      <TableCell><Badge variant="outline" className="text-[10.5px]">{m.category || '—'}</Badge></TableCell>
-                      <TableCell className="text-[12px]">{m.supplier || <span className="text-muted-foreground">desconocido</span>}</TableCell>
-                      <TableCell className="text-right tabular">{formatCOP(m.cost)}</TableCell>
-                      <TableCell className="text-[11.5px] text-muted-foreground">{m.measurement || '—'}</TableCell>
-                      <TableCell className="text-right tabular">{formatQty(m.stock)}</TableCell>
-                      <TableCell className="space-x-1">
-                        {m.isInsumo && <Badge variant="outline" className="text-[10px]">Insumo</Badge>}
-                        {m.isNoid && <Badge variant="outline" className="text-[10px]">Noid</Badge>}
-                        {m.updateShopifyInventory && <Badge variant="outline" className="text-[10px]">Sync Shopify</Badge>}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {filteredMaterials.slice(0, 250).map(m => {
+                    const an = analyticsById.get(m.id);
+                    const stockLow = m.stock <= 0;
+                    const draftValue = availableDrafts[m.id];
+                    return (
+                      <TableRow
+                        key={m.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setSelectedMaterialId(m.id)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') setSelectedMaterialId(m.id); }}
+                        className={`cursor-pointer hover:bg-muted/40 ${stockLow ? 'bg-amber-500/[0.04]' : ''}`}
+                        data-testid={`row-mm-material-${m.id}`}
+                      >
+                        <TableCell className="text-[13px] font-medium">
+                          <div className="flex items-center gap-1.5">
+                            <span>{m.name}</span>
+                            {m.origin === 'local' && <Badge variant="outline" className="text-[9.5px] border-sky-500/40 text-sky-300">local</Badge>}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right tabular" onClick={(e) => e.stopPropagation()}>
+                          <Input
+                            type="number"
+                            step="any"
+                            value={draftValue ?? String(m.stock)}
+                            onChange={(e) => setAvailableDrafts(prev => ({ ...prev, [m.id]: e.target.value }))}
+                            onBlur={() => {
+                              if (draftValue === undefined) return;
+                              const next = Number(draftValue);
+                              if (!Number.isFinite(next) || next === m.stock) {
+                                setAvailableDrafts(prev => { const c = { ...prev }; delete c[m.id]; return c; });
+                                return;
+                              }
+                              saveAvailable.mutate({ id: m.id, stock: next });
+                            }}
+                            className="h-8 w-[80px] text-right tabular"
+                            data-testid={`input-available-${m.id}`}
+                          />
+                        </TableCell>
+                        <TableCell className="text-right tabular text-[12px]">{formatQty(an?.incoming ?? 0)}</TableCell>
+                        <TableCell className="text-[11.5px] text-muted-foreground">{m.measurement || '—'}</TableCell>
+                        <TableCell className="text-[11.5px]"><Badge variant="outline" className="text-[10.5px]">{m.category || '—'}</Badge></TableCell>
+                        <TableCell className="text-[12px]">{m.supplier || <span className="text-muted-foreground">desconocido</span>}</TableCell>
+                        {materialsSubTab === 'sales' ? (
+                          <>
+                            <TableCell className="text-right tabular">{formatQty(an?.soldLast30Days ?? 0)}</TableCell>
+                            <TableCell className={`text-right tabular ${an?.daysOfInventory != null && an.daysOfInventory <= 30 ? 'text-rose-300 font-semibold' : ''}`}>
+                              {an?.daysOfInventory == null ? <span className="text-muted-foreground">n/a</span> : an.daysOfInventory}
+                            </TableCell>
+                            <TableCell className="text-right tabular">{formatQty(an?.restockForecast30Days ?? 0)}</TableCell>
+                          </>
+                        ) : null}
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
             {filteredMaterials.length > 250 && (
               <p className="text-[11px] text-muted-foreground mt-2">Mostrando 250 de {filteredMaterials.length}. Refina el filtro.</p>
             )}
+            <p className="text-[10.5px] text-muted-foreground mt-2">
+              <strong>Available</strong> editable inline — autosave al perder foco (escribe como override local, no toca el mirror MM).
+              {materialsSubTab === 'sales' ? ' Sold 30d se calcula de inventory_movements salientes; días de inventario = stock / consumo diario.' : ''}
+            </p>
           </Card>
         </TabsContent>
 
@@ -669,19 +838,46 @@ export default function MaterialManagerPage() {
                 <div className="flex items-center gap-2">
                   <Badge variant="outline" className="text-[11px]">{(selectedPO.lines ?? []).length} líneas</Badge>
                   {selectedPO.status !== 'cancelled' ? (
-                    <Button
-                      size="sm"
-                      variant={selectedPO.status === 'received' ? 'outline' : 'default'}
-                      onClick={() => receivePoMutation.mutate(selectedPO.poNumber)}
-                      disabled={receivePoMutation.isPending}
-                      data-testid={`button-receive-po-${selectedPO.poNumber}`}
-                    >
-                      <Truck className="h-3.5 w-3.5 mr-1.5" />
-                      {selectedPO.status === 'received' ? 'Re-recibir (idempotente)' : 'Recibir PO'}
-                    </Button>
+                    <>
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={() => setReceiveDialogPoNumber(selectedPO.poNumber)}
+                        data-testid={`button-receive-inventory-${selectedPO.poNumber}`}
+                      >
+                        <Truck className="h-3.5 w-3.5 mr-1.5" /> Receive inventory
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => receivePoMutation.mutate(selectedPO.poNumber)}
+                        disabled={receivePoMutation.isPending}
+                        data-testid={`button-receive-all-po-${selectedPO.poNumber}`}
+                      >
+                        {receivePoMutation.isPending ? 'Recibiendo…' : 'Receive all'}
+                      </Button>
+                    </>
                   ) : null}
                 </div>
               </div>
+              {/* MM-parity total received progress bar */}
+              {(() => {
+                const progress = selectedPoProgress.data ?? [];
+                const totalReceived = progress.reduce((s, p) => s + p.received, 0);
+                const totalOrdered = progress.reduce((s, p) => s + p.ordered, 0);
+                const pct = totalOrdered > 0 ? Math.min(100, (totalReceived / totalOrdered) * 100) : 0;
+                if (selectedPO.status === 'cancelled') return null;
+                return (
+                  <div className="mb-3">
+                    <div className="h-1.5 rounded-full bg-muted/40 overflow-hidden">
+                      <div className="h-full bg-emerald-500/70" style={{ width: `${pct}%` }} />
+                    </div>
+                    <div className="text-[10.5px] text-muted-foreground mt-1 text-right">
+                      Total recibido: {formatQty(totalReceived)} de {formatQty(totalOrdered)} ({pct.toFixed(0)}%)
+                    </div>
+                  </div>
+                );
+              })()}
               {selectedPO.status === 'cancelled' ? (
                 <p className="text-[11.5px] text-muted-foreground">
                   Esta orden está marcada como cancelada y no aporta al total de compras ni al inventario.
@@ -691,41 +887,70 @@ export default function MaterialManagerPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Producto</TableHead>
-                        <TableHead>Material MM</TableHead>
-                        <TableHead>SKU</TableHead>
-                        <TableHead className="text-right">Cant.</TableHead>
-                        <TableHead className="text-right">Costo unit.</TableHead>
-                        <TableHead className="text-right">Total COP</TableHead>
+                        <TableHead>Product</TableHead>
+                        <TableHead>Supplier SKU</TableHead>
+                        <TableHead className="text-right">Received</TableHead>
+                        <TableHead className="text-right">Cost</TableHead>
+                        <TableHead className="text-right">Tax</TableHead>
+                        <TableHead className="text-right">Total</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {(selectedPO.lines ?? []).map((line) => (
-                        <TableRow key={line.id} data-testid={`row-po-line-${selectedPO.poNumber}-${line.lineIndex}`}>
-                          <TableCell className="text-[13px] font-medium">{line.product}</TableCell>
-                          <TableCell className="text-[11px]">
-                            {line.materialId ? (
-                              <Badge variant="outline" className="text-[10px] border-emerald-500/40 text-emerald-300">matched</Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-300">unmatched/manual</Badge>
-                            )}
-                            {line.batchId ? (
-                              <span className="ml-1.5 text-[10px] text-muted-foreground font-mono">{line.batchId}</span>
-                            ) : null}
-                          </TableCell>
-                          <TableCell className="text-[11.5px] font-mono text-muted-foreground">{line.sku || '—'}</TableCell>
-                          <TableCell className="text-right tabular">{formatQty(line.quantity)}</TableCell>
-                          <TableCell className="text-right tabular">{formatCOP(line.unitCost)}</TableCell>
-                          <TableCell className="text-right tabular font-semibold">{formatCOP(line.totalCop)}</TableCell>
-                        </TableRow>
-                      ))}
+                      {(selectedPO.lines ?? []).map((line) => {
+                        const progress = (selectedPoProgress.data ?? []).find(p => p.lineId === line.id);
+                        const received = progress?.received ?? 0;
+                        const pct = line.quantity > 0 ? Math.min(100, (received / line.quantity) * 100) : 0;
+                        return (
+                          <TableRow key={line.id} data-testid={`row-po-line-${selectedPO.poNumber}-${line.lineIndex}`}>
+                            <TableCell className="text-[13px] font-medium">
+                              <div>{line.product}</div>
+                              <div className="text-[10.5px] mt-0.5 flex items-center gap-1">
+                                {line.materialId ? (
+                                  <Badge variant="outline" className="text-[9.5px] border-emerald-500/40 text-emerald-300">matched</Badge>
+                                ) : (
+                                  <Badge variant="outline" className="text-[9.5px] border-amber-500/40 text-amber-300">unmatched</Badge>
+                                )}
+                                {line.batchId ? <span className="text-muted-foreground font-mono">{line.batchId}</span> : null}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-[11.5px] font-mono text-muted-foreground">{line.sku || '—'}</TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center gap-2 justify-end min-w-[180px]">
+                                <div className="w-[100px] h-1.5 rounded-full bg-muted/40 overflow-hidden">
+                                  <div className="h-full bg-emerald-500/70" style={{ width: `${pct}%` }} />
+                                </div>
+                                <span className="tabular text-[11.5px] text-muted-foreground">
+                                  {formatQty(received)} de {formatQty(line.quantity)}
+                                </span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right tabular">{formatCOP(line.unitCost)}</TableCell>
+                            <TableCell className="text-right tabular text-[11.5px] text-muted-foreground">{line.taxPct ? `${line.taxPct}%` : '—'}</TableCell>
+                            <TableCell className="text-right tabular font-semibold">{formatCOP(line.totalCop)}</TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
-                  <div className="mt-4 ml-auto max-w-xs text-[12.5px]">
-                    <div className="flex justify-between py-0.5"><span className="text-muted-foreground">Subtotal</span><span className="tabular">{formatCOP(selectedPO.subtotal)}</span></div>
-                    <div className="flex justify-between py-0.5"><span className="text-muted-foreground">Impuestos</span><span className="tabular">{formatCOP(selectedPO.taxes)}</span></div>
-                    <div className="flex justify-between py-0.5"><span className="text-muted-foreground">Envío</span><span className="tabular">{formatCOP(selectedPO.shipping)}</span></div>
-                    <div className="flex justify-between py-0.5 border-t border-card-border pt-1 mt-1 font-semibold"><span>Total</span><span className="tabular">{formatCOP(selectedPO.total)}</span></div>
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <Card className="p-3 border-border" data-testid="card-po-additional-details">
+                      <h4 className="text-[12px] font-semibold tracking-tight">Additional details</h4>
+                      <dl className="mt-2 text-[12px] space-y-1.5">
+                        <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Reference number</dt><dd className="tabular">{selectedPO.referenceNumber || <span className="text-muted-foreground">None</span>}</dd></div>
+                        <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Notes</dt><dd className="text-right max-w-[60%]">{selectedPO.notes || <span className="text-muted-foreground">None</span>}</dd></div>
+                        <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Ordered</dt><dd className="tabular">{selectedPO.date ? formatDate(selectedPO.date) : '—'}</dd></div>
+                        <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Ship to</dt><dd className="text-right max-w-[60%]">{selectedPO.shipTo || '—'}</dd></div>
+                      </dl>
+                    </Card>
+                    <Card className="p-3 border-border" data-testid="card-po-cost-summary">
+                      <h4 className="text-[12px] font-semibold tracking-tight">Cost summary</h4>
+                      <dl className="mt-2 text-[12.5px] space-y-1.5">
+                        <div className="flex justify-between py-0.5"><dt className="text-muted-foreground">Subtotal</dt><dd className="tabular">{formatCOP(selectedPO.subtotal)}</dd></div>
+                        <div className="flex justify-between py-0.5"><dt className="text-muted-foreground">Tax</dt><dd className="tabular">{formatCOP(selectedPO.taxes)}</dd></div>
+                        <div className="flex justify-between py-0.5"><dt className="text-muted-foreground">Shipping (tax included)</dt><dd className="tabular">{formatCOP(selectedPO.shipping)}</dd></div>
+                        <div className="flex justify-between py-0.5 border-t border-card-border pt-1 mt-1 font-semibold"><dt>Total</dt><dd className="tabular">{formatCOP(selectedPO.total)}</dd></div>
+                      </dl>
+                    </Card>
                   </div>
                 </>
               )}
@@ -829,6 +1054,10 @@ export default function MaterialManagerPage() {
           <CartCalculator />
         </TabsContent>
 
+        <TabsContent value="settings" className="mt-4">
+          <MmSettingsPanel />
+        </TabsContent>
+
         <TabsContent value="admin" className="mt-4 space-y-4">
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Card className="p-5" data-testid="card-mm-actions">
@@ -925,6 +1154,12 @@ export default function MaterialManagerPage() {
         productName={editorProductName}
         variants={variantsForEditor}
         initialVariantId={bomEditorVariantId ?? undefined}
+      />
+
+      <ReceiveInventoryDialog
+        poNumber={receiveDialogPoNumber}
+        open={Boolean(receiveDialogPoNumber)}
+        onOpenChange={(next) => { if (!next) setReceiveDialogPoNumber(null); }}
       />
     </Layout>
   );

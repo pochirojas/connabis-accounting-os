@@ -893,6 +893,200 @@ export function receivePurchaseOrder(sqlite: Database.Database, idOrNumber: stri
   };
 }
 
+// Partial / per-line receive flow (Phase 2.6 P0). The MM UI lets the user
+// type an Accept qty + Reject qty per line, with "All unreceived" shortcuts.
+// We translate that into inventory_movements:
+//   * Accept qty > 0 → positive movement (idempotency check by sum-of-accepted
+//     so re-submitting the same partial receive doesn't double-post).
+//   * Reject qty > 0 → negative-quantity movement tagged `rejection_of:<lineId>`
+//     so it shows up in the adjustment history without polluting stock.
+// Unmatched lines (no materialId) are skipped and counted in unmatchedLines.
+export type PartialReceiveLineInput = {
+  lineId: number;
+  accept?: number;
+  reject?: number;
+};
+
+export type PartialReceiveResult = {
+  poNumber: string;
+  status: MmPoStatus;
+  acceptCreated: number;
+  rejectCreated: number;
+  matchedLines: number;
+  unmatchedLines: number;
+  totalAccepted: number;
+  totalOrdered: number;
+};
+
+export function receivePurchaseOrderPartial(
+  sqlite: Database.Database,
+  idOrNumber: string | number,
+  lines: PartialReceiveLineInput[],
+): PartialReceiveResult {
+  ensureMmPurchaseOrderSchema(sqlite);
+  const po = getMmPurchaseOrder(sqlite, idOrNumber);
+  if (!po) throw new Error('po_not_found');
+  if (po.status === 'cancelled') throw new Error('po_cancelled_cannot_receive');
+
+  const createdAt = new Date().toISOString();
+  let acceptCreated = 0;
+  let rejectCreated = 0;
+  let matchedLines = 0;
+  let unmatchedLines = 0;
+  let totalAccepted = 0;
+  let totalOrdered = 0;
+
+  const linesByPoId = new Map((po.lines ?? []).map(l => [l.id, l] as const));
+
+  const insertMv = sqlite.prepare(`
+    INSERT INTO inventory_movements (
+      material_key, material_name, po_id, po_number, po_line_id, qty_delta, unit_cost_cop,
+      date, supplier, currency, fx_rate, batch_id, note, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const updateLineBatch = sqlite.prepare(`UPDATE material_manager_purchase_order_lines SET batch_id = ? WHERE id = ?`);
+  const upsertOverride = sqlite.prepare(`
+    INSERT INTO material_manager_material_overrides (
+      material_id, cost, supplier, updated_at, note
+    ) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(material_id) DO UPDATE SET
+      cost = excluded.cost,
+      supplier = excluded.supplier,
+      updated_at = excluded.updated_at
+  `);
+
+  const tx = sqlite.transaction(() => {
+    for (const line of po.lines ?? []) {
+      totalOrdered += line.quantity;
+    }
+    for (const input of lines) {
+      const line = linesByPoId.get(input.lineId);
+      if (!line) continue;
+      const accept = Math.max(0, Number(input.accept ?? 0));
+      const reject = Math.max(0, Number(input.reject ?? 0));
+      if (accept <= 0 && reject <= 0) continue;
+      if (!line.materialId) { unmatchedLines += 1; continue; }
+      matchedLines += 1;
+
+      const alreadyReceived = (sqlite.prepare(`
+        SELECT COALESCE(SUM(qty_delta), 0) AS sum FROM inventory_movements
+        WHERE po_line_id = ? AND qty_delta > 0
+      `).get(line.id) as { sum: number }).sum;
+      const remaining = Math.max(0, line.quantity - alreadyReceived);
+      const acceptQty = Math.min(accept, remaining);
+      if (acceptQty > 0) {
+        const batchId = line.batchId && line.batchId.trim() ? line.batchId : generateBatchId(po.poNumber, line.id);
+        insertMv.run(
+          line.materialId,
+          line.product,
+          po.id,
+          po.poNumber,
+          // po_line_id: re-use the line id for the first accept movement (so
+          // the unique index applies). When a follow-up partial accept lands
+          // for the same line, we need a fresh row → set NULL and tag note.
+          alreadyReceived > 0 ? null : line.id,
+          acceptQty,
+          line.unitCost,
+          po.date || createdAt.slice(0, 10),
+          po.supplier,
+          po.currency,
+          null,
+          batchId,
+          alreadyReceived > 0 ? `partial_accept_of_line:${line.id}` : null,
+          createdAt,
+        );
+        if (!line.batchId) updateLineBatch.run(batchId, line.id);
+        if (line.unitCost > 0) {
+          upsertOverride.run(line.materialId, line.unitCost, po.supplier || '', createdAt, null);
+        }
+        acceptCreated += 1;
+        totalAccepted += acceptQty;
+      }
+      if (reject > 0) {
+        // Negative movement that does NOT touch stock balance net of the
+        // accept (they're independent ledger rows). Tag the note so the
+        // adjustment history shows "rejection · X units".
+        insertMv.run(
+          line.materialId,
+          line.product,
+          po.id,
+          po.poNumber,
+          null,
+          -reject,
+          line.unitCost,
+          po.date || createdAt.slice(0, 10),
+          po.supplier,
+          po.currency,
+          null,
+          line.batchId ?? null,
+          `rejection_of_line:${line.id}`,
+          createdAt,
+        );
+        rejectCreated += 1;
+      }
+    }
+    // Promote PO status. Strict full-receive comparison would race partial
+    // submissions, so we leave it on 'received' once anything has landed
+    // and revert to 'draft' only via explicit reverse.
+    if (po.status !== 'received' && acceptCreated > 0) {
+      sqlite.prepare(`UPDATE material_manager_purchase_orders SET status = 'received' WHERE id = ?`).run(po.id);
+    }
+  });
+  tx();
+
+  // Recompute totals for the return payload now that the ledger reflects this batch.
+  const accepted = (sqlite.prepare(`
+    SELECT COALESCE(SUM(qty_delta), 0) AS sum FROM inventory_movements
+    WHERE po_id = ? AND qty_delta > 0
+  `).get(po.id) as { sum: number }).sum;
+
+  return {
+    poNumber: po.poNumber,
+    status: 'received',
+    acceptCreated,
+    rejectCreated,
+    matchedLines,
+    unmatchedLines,
+    totalAccepted: accepted,
+    totalOrdered,
+  };
+}
+
+// Sum the positive movements per PO line so the UI can show received progress
+// without re-querying the ledger row-by-row.
+export type PoLineReceivedProgress = { lineId: number; received: number; ordered: number };
+
+export function getPoLineReceivedProgress(sqlite: Database.Database, poId: number): PoLineReceivedProgress[] {
+  ensureMmPurchaseOrderSchema(sqlite);
+  const rows = sqlite.prepare(`
+    SELECT l.id AS lineId, l.quantity AS ordered,
+           COALESCE((
+             SELECT SUM(qty_delta) FROM inventory_movements
+             WHERE po_id = ? AND po_line_id = l.id AND qty_delta > 0
+           ), 0) AS receivedDirect,
+           COALESCE((
+             SELECT SUM(qty_delta) FROM inventory_movements
+             WHERE po_id = ? AND po_line_id IS NULL AND qty_delta > 0
+               AND note = ?
+           ), 0) AS receivedPartial
+    FROM material_manager_purchase_order_lines l
+    WHERE l.purchase_order_id = ?
+  `).all(poId, poId, `partial_accept_of_line:`, poId) as Array<{ lineId: number; ordered: number; receivedDirect: number; receivedPartial: number }>;
+  // The partial_accept_of_line note is per-line, so a bare lookup is fine here
+  // — we re-query with the actual line ids:
+  return rows.map(r => {
+    const partial = (sqlite.prepare(`
+      SELECT COALESCE(SUM(qty_delta), 0) AS sum FROM inventory_movements
+      WHERE po_id = ? AND po_line_id IS NULL AND qty_delta > 0 AND note = ?
+    `).get(poId, `partial_accept_of_line:${r.lineId}`) as { sum: number }).sum;
+    return {
+      lineId: Number(r.lineId),
+      ordered: Number(r.ordered),
+      received: Number(r.receivedDirect) + Number(partial),
+    };
+  });
+}
+
 // Reverse a previously-received PO: writes compensating negative-qty
 // movements for every existing positive movement of this PO so the ledger
 // nets to zero. Sets status back to 'draft'. Safe to call once per PO.

@@ -12,9 +12,9 @@ import { useToast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
 import { formatCOP, formatDate, formatNumber, formatQty } from '@/lib/format';
 import {
-  ArrowLeft, Bell, Boxes as BoxesIcon, ChevronRight, Edit2, Mail, RotateCcw, Save, Trash2, TrendingUp, Truck,
+  ArrowLeft, Bell, Boxes as BoxesIcon, ChevronRight, ChevronDown, Edit2, Mail, RotateCcw, Save, Trash2, TrendingUp, Truck,
 } from 'lucide-react';
-import type { MaterialDetail } from '@shared/schema';
+import type { InventoryMovement, MaterialDetail } from '@shared/schema';
 
 type Props = {
   materialId: string;
@@ -116,6 +116,15 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant, category
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const detail = useQuery<MaterialDetail>({ queryKey: [`/api/material-manager/materials/${materialId}`] });
+  // Inventory adjustment history (positive = recibo PO, negative = rechazo/consumo).
+  const movements = useQuery<InventoryMovement[]>({
+    queryKey: ['/api/material-manager/inventory-movements', materialId],
+    queryFn: async () => {
+      const response = await apiRequest('GET', `/api/material-manager/inventory-movements?materialKey=${encodeURIComponent(materialId)}&limit=200`);
+      return response.json();
+    },
+  });
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [draftEdits, setDraftEdits] = useState<Record<number, { quantity?: number; note?: string }>>({});
   const [edit, setEdit] = useState<MaterialEditState>(() => toEditState(detail.data?.material));
   const [dirty, setDirty] = useState(false);
@@ -378,14 +387,27 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant, category
                   data-testid="input-material-supplier"
                 />
               </EditField>
-              <EditField label="Used in all orders (qty)" testId="field-mat-used-in-orders">
-                <Input
-                  value={edit.materialsUsedInAllOrders}
-                  onChange={(e) => onFieldChange('materialsUsedInAllOrders', e.target.value)}
-                  className="h-8"
-                  placeholder="ej. 1"
-                  data-testid="input-material-used-in-orders"
-                />
+              <EditField label="Use this material in every order" testId="field-mat-used-in-orders">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(edit.materialsUsedInAllOrders.trim())}
+                    onChange={(e) => onFieldChange('materialsUsedInAllOrders', e.target.checked ? '1' : '')}
+                    data-testid="checkbox-material-used-in-orders"
+                  />
+                  <Input
+                    type="number"
+                    step="any"
+                    min="0"
+                    disabled={!edit.materialsUsedInAllOrders.trim()}
+                    value={edit.materialsUsedInAllOrders === '' ? '' : edit.materialsUsedInAllOrders}
+                    onChange={(e) => onFieldChange('materialsUsedInAllOrders', e.target.value)}
+                    className="h-8 flex-1"
+                    placeholder="Cantidad por orden"
+                    data-testid="input-material-used-in-orders"
+                  />
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-1">Cuando esté activo, esta cantidad se descontará en cada orden sin importar qué producto se compre.</p>
               </EditField>
               <EditField label="Sync flags Shopify" testId="field-mat-flags">
                 <div className="flex flex-col gap-1.5">
@@ -554,7 +576,16 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant, category
         {/* Right column — Inventory / Procurement / Materials sold / Notifications */}
         <div className="space-y-4">
           <Card className="p-4" data-testid="card-material-inventory">
-            <div className="flex items-center gap-2"><BoxesIcon className="h-4 w-4 text-accent" /><h3 className="text-sm font-semibold">Inventario</h3></div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2"><BoxesIcon className="h-4 w-4 text-accent" /><h3 className="text-sm font-semibold">Inventario</h3></div>
+              <button
+                onClick={() => setHistoryOpen(v => !v)}
+                className="text-[11px] text-accent hover:underline inline-flex items-center gap-0.5"
+                data-testid="button-toggle-adjustment-history"
+              >
+                Adjustment history <ChevronDown className={`h-3 w-3 transition-transform ${historyOpen ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
             <div className="mt-3 space-y-2 text-[12.5px]">
               <label className="flex items-center justify-between gap-2">
                 <span className="text-muted-foreground">Stock disponible</span>
@@ -589,9 +620,41 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant, category
             </div>
             <p className="text-[10.5px] text-muted-foreground mt-3 leading-relaxed">
               Edición local · override sobre el mirror MM. Las escrituras a Shopify quedan bloqueadas en Phase 2.1.
-              {/* TODO Phase 2.5: full inventory adjustment history (movements log).
-                  Por ahora el historial de costos en "Procurement" hace de placeholder. */}
             </p>
+            {historyOpen ? (
+              <div className="mt-3 pt-3 border-t border-card-border" data-testid="block-adjustment-history">
+                <div className="text-[10.5px] uppercase tracking-wider text-muted-foreground mb-1.5">Adjustment history</div>
+                {movements.isLoading ? (
+                  <p className="text-[11px] text-muted-foreground">Cargando…</p>
+                ) : (movements.data ?? []).length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground">Sin movimientos registrados. Recibe una PO para empezar el ledger.</p>
+                ) : (
+                  <ul className="text-[11.5px] space-y-1 max-h-[180px] overflow-y-auto">
+                    {(movements.data ?? []).slice(0, 50).map(mv => {
+                      const isReceipt = mv.qtyDelta > 0;
+                      const isRejection = !isReceipt && mv.note && mv.note.startsWith('rejection_of_line');
+                      const isReversal = !isReceipt && mv.note && mv.note.startsWith('reversal_of_');
+                      return (
+                        <li key={mv.id} className="flex items-center justify-between gap-2">
+                          <span className="text-muted-foreground tabular">{mv.date}</span>
+                          <span className="flex-1 truncate">
+                            {mv.poNumber ? <span className="font-mono">{mv.poNumber}</span> : 'manual'}
+                            {isRejection ? <Badge variant="outline" className="ml-1 text-[9px] border-rose-500/40 text-rose-300">rejection</Badge> : null}
+                            {isReversal ? <Badge variant="outline" className="ml-1 text-[9px] border-amber-500/40 text-amber-300">reversal</Badge> : null}
+                          </span>
+                          <span className={`tabular font-semibold ${isReceipt ? 'text-emerald-300' : 'text-rose-300'}`}>
+                            {isReceipt ? '+' : ''}{formatQty(mv.qtyDelta)}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {(movements.data ?? []).length > 50 ? (
+                  <p className="text-[10px] text-muted-foreground mt-1">Mostrando 50 de {movements.data?.length}.</p>
+                ) : null}
+              </div>
+            ) : null}
           </Card>
 
           <Card className="p-4" data-testid="card-material-procurement">

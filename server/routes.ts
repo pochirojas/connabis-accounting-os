@@ -37,12 +37,16 @@ import {
   getMmPurchaseOrdersStatus,
   createMmPurchaseOrder,
   receivePurchaseOrder,
+  receivePurchaseOrderPartial,
   reversePurchaseOrderReceipt,
   listInventoryMovements,
   suggestMatchesForLines,
   applyPoLineMatch,
   clearPoLineMatch,
+  getPoLineReceivedProgress,
 } from './material-manager-purchase-orders';
+import { getMmSettings, updateMmSettings } from './material-manager-settings';
+import { buildMaterialSalesAnalytics, getMaterialsHeaderKpis } from './material-manager-analytics';
 import {
   getCostBreakdownByBucket,
   getLatestPriceDash,
@@ -1907,6 +1911,29 @@ export async function registerRoutes(
     }
   });
 
+  // Partial / per-line receive (Accept / Reject quantities per line).
+  app.post('/api/material-manager/purchase-orders/:idOrNumber/receive-partial', (req, res) => {
+    try {
+      const linesRaw = Array.isArray(req.body?.lines) ? req.body.lines : [];
+      const lines = linesRaw.map((l: Record<string, unknown>) => ({
+        lineId: Number(l.lineId),
+        accept: typeof l.accept === 'number' ? l.accept : Number(l.accept ?? 0),
+        reject: typeof l.reject === 'number' ? l.reject : Number(l.reject ?? 0),
+      })).filter((l: { lineId: number }) => Number.isFinite(l.lineId));
+      res.json(receivePurchaseOrderPartial(sqlite, req.params.idOrNumber, lines));
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'partial_receive_failed' });
+    }
+  });
+
+  // Per-line received progress (received vs ordered) — UI uses it for the
+  // green progress bars on the PO detail page.
+  app.get('/api/material-manager/purchase-orders/:idOrNumber/progress', (req, res) => {
+    const po = getMmPurchaseOrder(sqlite, req.params.idOrNumber);
+    if (!po) return res.status(404).json({ error: 'po_not_found' });
+    res.json(getPoLineReceivedProgress(sqlite, po.id));
+  });
+
   app.post('/api/material-manager/purchase-orders/:idOrNumber/reverse', (req, res) => {
     try {
       const result = reversePurchaseOrderReceipt(sqlite, req.params.idOrNumber);
@@ -2465,6 +2492,16 @@ export async function registerRoutes(
     }
   });
 
+  // Sales-data analytics for the Materials list (parity with MM "Sales data" tab).
+  app.get('/api/material-manager/materials/analytics', (_req, res) => {
+    res.json(buildMaterialSalesAnalytics(sqlite));
+  });
+
+  // Header KPIs (days-of-inventory buckets, incoming materials, monthly orders).
+  app.get('/api/material-manager/materials/header-kpis', (_req, res) => {
+    res.json(getMaterialsHeaderKpis(sqlite));
+  });
+
   // Archive / unarchive a material (works for both MM mirror and local).
   app.post('/api/material-manager/materials/:id/archive', (req, res) => {
     const archived = Boolean(req.body?.archived ?? true);
@@ -2620,6 +2657,18 @@ export async function registerRoutes(
 
   app.delete('/api/material-manager/variants/:variantId/bom-overrides/:materialId', (req, res) => {
     res.json({ deleted: deleteMmBomOverride(sqlite, req.params.variantId, req.params.materialId) });
+  });
+
+  // ---------- Local Material Manager settings ----------
+  app.get('/api/material-manager/settings', (_req, res) => {
+    res.json(getMmSettings(sqlite));
+  });
+  app.patch('/api/material-manager/settings', (req, res) => {
+    try {
+      res.json(updateMmSettings(sqlite, req.body ?? {}));
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'settings_update_failed' });
+    }
   });
 
   // Cart Calculator — recipes + packaging seeded from the accounting sheet
