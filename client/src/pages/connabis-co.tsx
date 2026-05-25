@@ -11,9 +11,14 @@ import { formatCOP, formatPct } from '@/lib/format';
 import { KpiCard } from '@/components/kpi-card';
 import {
   Search, Package, AlertTriangle, ShieldCheck, Info, Download,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, Flag,
 } from 'lucide-react';
 import { Fragment, useMemo, useState } from 'react';
+import { B2bSimulatorPanel } from '@/components/b2b-simulator-panel';
+import {
+  DEFAULT_TIERS, PresetKey, SimParams, computeSimTier,
+  evaluateCustomPrice, tierFeasible,
+} from '@/lib/b2b-simulator';
 
 type B2bTierRow = {
   units: number;
@@ -190,6 +195,37 @@ function formatRange(min: number | null, max: number | null, fmt: (v: number) =>
   return `${fmt(min)} – ${fmt(max)}`;
 }
 
+// Renders a single tier cell with simulated price, margins, Δ vs baseline, and
+// infeasibility flag if retail can't cover both margin targets.
+function TierCell({ tier, basePrice }: { tier: B2bTierRow; basePrice: number | null }) {
+  if (tier.price === null) {
+    return <TableCell className="text-right text-muted-foreground">—</TableCell>;
+  }
+  const low = tier.flags.includes('poco_margen_reseller');
+  const infeasible = tier.flags.includes('retail_insuficiente');
+  const delta = basePrice !== null ? tier.price - basePrice : null;
+  return (
+    <TableCell className="text-right tabular-nums">
+      <div className={low ? 'text-orange-600' : ''}>
+        {formatCOP(tier.price)}
+        {infeasible && (
+          <span title="Retail no permite ese margen" className="inline-flex ml-1 align-middle">
+            <Flag className="h-3 w-3 text-red-500" />
+          </span>
+        )}
+      </div>
+      <div className="text-[10.5px] text-muted-foreground">
+        {tier.connabisMargin !== null ? formatPct(tier.connabisMargin) : '—'} / {tier.resellerMargin !== null ? formatPct(tier.resellerMargin) : '—'}
+      </div>
+      {delta !== null && Math.abs(delta) >= 1 && (
+        <div className={`text-[10.5px] ${delta > 0 ? 'text-emerald-600' : 'text-orange-600'}`}>
+          Δ {delta > 0 ? '+' : ''}{formatCOP(delta)}
+        </div>
+      )}
+    </TableCell>
+  );
+}
+
 export default function ConnabisCo() {
   const query = useQuery<B2bPricingResponse>({ queryKey: ['/api/b2b-pricing'] });
   const [search, setSearch] = useState('');
@@ -200,8 +236,63 @@ export default function ConnabisCo() {
   const [view, setView] = useState<'simple' | 'detallada'>('simple');
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
-  const rows = query.data?.rows ?? [];
+  // ── B2B Pricing Simulator ─────────────────────────────────────────────────
+  const [preset, setPreset] = useState<PresetKey>('balanceado');
+  const [simParams, setSimParams] = useState<SimParams>({
+    tiers: DEFAULT_TIERS,
+    retailCeiling: 0.95,
+    roundingStep: 'auto',
+  });
+  // Per-row custom price overrides (unit price @100u entered in expanded detail).
+  const [customPrices, setCustomPrices] = useState<Record<string, string>>({});
+
+  const baselineRows = query.data?.rows ?? [];
   const summary = query.data?.summary;
+
+  // Recompute each row's tier prices from sim params, preserving baseline as
+  // `baseTiers` so we can show Δ vs the default policy.
+  const rows = useMemo<B2bPricingRow[]>(() => {
+    return baselineRows.map(r => {
+      if (r.cogs === null || r.retailPrice <= 0) return r;
+      const newTiers = simParams.tiers.map(t => {
+        const sim = computeSimTier(r.cogs!, r.retailPrice, t, simParams.retailCeiling, simParams.roundingStep);
+        // If this tier can't satisfy both margins, surface as 'retail_insuficiente'.
+        if (!tierFeasible(r.cogs, r.retailPrice, t) && !sim.flags.includes('retail_insuficiente')) {
+          sim.flags = [...sim.flags, 'retail_insuficiente'];
+        }
+        return sim as B2bTierRow;
+      });
+      const anyPocoMargen = newTiers.some(t => t.flags.includes('poco_margen_reseller'));
+      const status: B2bPricingRow['status'] = anyPocoMargen ? 'margen_bajo' : 'ok_b2b';
+      return { ...r, tiers: newTiers, status };
+    });
+  }, [baselineRows, simParams]);
+
+  // Baseline lookup by id for delta computation.
+  const baselineById = useMemo(() => {
+    const m = new Map<string, B2bPricingRow>();
+    baselineRows.forEach(r => m.set(r.id, r));
+    return m;
+  }, [baselineRows]);
+
+  // Averages for simulator summary cards.
+  const simAverages = useMemo(() => {
+    const at100 = rows
+      .map(r => r.tiers.find(t => t.units === 100))
+      .filter((t): t is B2bTierRow => !!t && t.price !== null);
+    const avgConnabis = at100.length
+      ? at100.reduce((s, t) => s + (t.connabisMargin ?? 0), 0) / at100.length : null;
+    const avgReseller = at100.length
+      ? at100.reduce((s, t) => s + (t.resellerMargin ?? 0), 0) / at100.length : null;
+    const infeasibleCount = rows.filter(r => {
+      const t100 = r.tiers.find(t => t.units === 100);
+      return t100 && t100.flags.includes('retail_insuficiente');
+    }).length;
+    return {
+      avgConnabis, avgReseller, infeasibleCount,
+      totalEligible: rows.filter(r => r.cogs !== null && r.retailPrice > 0).length,
+    };
+  }, [rows]);
 
   const families = useMemo(() => ['Todas', ...Array.from(new Set(rows.map(r => r.family)))], [rows]);
 
@@ -329,14 +420,29 @@ export default function ConnabisCo() {
         <KpiCard
           icon={ShieldCheck}
           label="Margen Connabis @ 100u"
-          value={summary ? formatPct(summary.avgB2bMarginAt100) : '—'}
+          value={simAverages.avgConnabis !== null ? formatPct(simAverages.avgConnabis) : (summary ? formatPct(summary.avgB2bMarginAt100) : '—')}
+          hint={preset === 'balanceado' ? 'política actual' : `sim · ${preset}`}
         />
         <KpiCard
           icon={ShieldCheck}
           label="Margen reseller @ 100u"
-          value={summary ? formatPct(summary.avgResellerMarginAt100) : '—'}
+          value={simAverages.avgReseller !== null ? formatPct(simAverages.avgReseller) : (summary ? formatPct(summary.avgResellerMarginAt100) : '—')}
+          hint={preset === 'balanceado' ? 'política actual' : `sim · ${preset}`}
         />
       </div>
+
+      <B2bSimulatorPanel
+        params={simParams}
+        onChange={setSimParams}
+        preset={preset}
+        onPresetChange={setPreset}
+        avgConnabisAt100={simAverages.avgConnabis}
+        avgResellerAt100={simAverages.avgReseller}
+        baselineConnabisAt100={summary?.avgB2bMarginAt100 ?? null}
+        baselineResellerAt100={summary?.avgResellerMarginAt100 ?? null}
+        infeasibleCount={simAverages.infeasibleCount}
+        totalEligible={simAverages.totalEligible}
+      />
 
       <Card className="p-4 mb-5 border-l-4 border-l-amber-400/70" data-testid="card-explainer">
         <div className="flex items-start gap-3">
@@ -513,37 +619,84 @@ export default function ConnabisCo() {
                     </TableRow>
                     {open && g.items.map(r => {
                       const tier100 = r.tiers.find(t => t.units === 100);
+                      const base = baselineById.get(r.id);
+                      const baseTier = (u: number) => base?.tiers.find(t => t.units === u)?.price ?? null;
+                      const custom = customPrices[r.id] ?? '';
+                      const sim100 = simParams.tiers.find(t => t.units === 100);
+                      const customNum = Number(custom.replace(/[^\d.]/g, ''));
+                      const customEval = (custom && customNum > 0 && sim100)
+                        ? evaluateCustomPrice(r.cogs, r.retailPrice, customNum, sim100.targetConnabisMargin, sim100.targetResellerMargin)
+                        : null;
                       return (
-                        <TableRow key={`${g.key}::${r.id}`} data-testid={`detail-row-${r.id}`} className="bg-muted/20">
-                          <TableCell />
-                          <TableCell className="pl-8">
-                            <div>{r.name}</div>
-                            <div className="text-[11px] text-muted-foreground">{r.sku ?? '—'} · {r.family}</div>
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">{r.retailPrice > 0 ? formatCOP(r.retailPrice) : '—'}</TableCell>
-                          <TableCell className="text-right tabular-nums">{r.cogs !== null ? formatCOP(r.cogs) : '—'}</TableCell>
-                          <TableCell className="text-right tabular-nums">{r.retailMargin !== null ? formatPct(r.retailMargin) : '—'}</TableCell>
-                          {TIER_UNITS.map(u => {
-                            const t = r.tiers.find(x => x.units === u);
-                            if (!t || t.price === null) {
-                              return <TableCell key={u} className="text-right text-muted-foreground">—</TableCell>;
-                            }
-                            const low = t.flags.includes('poco_margen_reseller');
-                            return (
-                              <TableCell key={u} className="text-right tabular-nums">
-                                <div className={low ? 'text-orange-600' : ''}>{formatCOP(t.price)}</div>
-                                <div className="text-[10.5px] text-muted-foreground">
-                                  {t.connabisMargin !== null ? formatPct(t.connabisMargin) : '—'} / {t.resellerMargin !== null ? formatPct(t.resellerMargin) : '—'}
+                        <Fragment key={`${g.key}::${r.id}`}>
+                          <TableRow data-testid={`detail-row-${r.id}`} className="bg-muted/20">
+                            <TableCell />
+                            <TableCell className="pl-8">
+                              <div>{r.name}</div>
+                              <div className="text-[11px] text-muted-foreground">{r.sku ?? '—'} · {r.family}</div>
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{r.retailPrice > 0 ? formatCOP(r.retailPrice) : '—'}</TableCell>
+                            <TableCell className="text-right tabular-nums">{r.cogs !== null ? formatCOP(r.cogs) : '—'}</TableCell>
+                            <TableCell className="text-right tabular-nums">{r.retailMargin !== null ? formatPct(r.retailMargin) : '—'}</TableCell>
+                            {TIER_UNITS.map(u => {
+                              const t = r.tiers.find(x => x.units === u);
+                              if (!t) return <TableCell key={u} className="text-right text-muted-foreground">—</TableCell>;
+                              return <TierCell key={u} tier={t} basePrice={baseTier(u)} />;
+                            })}
+                            <TableCell className="text-right tabular-nums">
+                              {tier100?.connabisMargin !== undefined && tier100?.connabisMargin !== null ? formatPct(tier100.connabisMargin) : '—'}
+                            </TableCell>
+                            <TableCell />
+                            <TableCell>{statusBadge(r.status)}</TableCell>
+                          </TableRow>
+                          {r.cogs !== null && r.retailPrice > 0 && (
+                            <TableRow className="bg-muted/10 hover:bg-muted/10">
+                              <TableCell />
+                              <TableCell colSpan={12} className="py-2">
+                                <div className="flex flex-wrap items-center gap-3 text-[11.5px]">
+                                  <span className="text-muted-foreground">Calculadora @100u:</span>
+                                  <label className="flex items-center gap-1.5">
+                                    <span>Precio custom</span>
+                                    <Input
+                                      type="text"
+                                      inputMode="numeric"
+                                      placeholder={tier100?.price ? String(tier100.price) : 'COP'}
+                                      value={custom}
+                                      onChange={e => setCustomPrices(prev => ({ ...prev, [r.id]: e.target.value }))}
+                                      className="h-7 w-28 text-[12px]"
+                                      data-testid={`custom-price-${r.id}`}
+                                    />
+                                  </label>
+                                  {customEval && customEval.connabisMargin !== null && customEval.resellerMargin !== null ? (
+                                    <>
+                                      <span>
+                                        Margen Connabis: <strong className={customEval.flags.includes('margen_connabis_bajo') ? 'text-orange-600' : 'text-emerald-700'}>
+                                          {formatPct(customEval.connabisMargin)}
+                                        </strong>
+                                      </span>
+                                      <span>
+                                        Margen reseller: <strong className={customEval.flags.includes('poco_margen_reseller') ? 'text-orange-600' : 'text-emerald-700'}>
+                                          {formatPct(customEval.resellerMargin)}
+                                        </strong>
+                                      </span>
+                                      {customEval.flags.includes('precio_sobre_retail') && (
+                                        <Badge variant="outline" className="text-red-700 border-red-400">Precio ≥ retail</Badge>
+                                      )}
+                                      {customEval.flags.includes('retail_insuficiente') && (
+                                        <Badge variant="outline" className="text-red-700 border-red-400">Retail no permite ese margen</Badge>
+                                      )}
+                                      {customNum > 0 && tier100?.price && (
+                                        <span className="text-muted-foreground">Δ vs sim: {customNum > tier100.price ? '+' : ''}{formatCOP(customNum - tier100.price)}</span>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <span className="text-muted-foreground">Ingresa un precio por unidad para ver margen Connabis y reseller.</span>
+                                  )}
                                 </div>
                               </TableCell>
-                            );
-                          })}
-                          <TableCell className="text-right tabular-nums">
-                            {tier100?.connabisMargin !== undefined && tier100?.connabisMargin !== null ? formatPct(tier100.connabisMargin) : '—'}
-                          </TableCell>
-                          <TableCell />
-                          <TableCell>{statusBadge(r.status)}</TableCell>
-                        </TableRow>
+                            </TableRow>
+                          )}
+                        </Fragment>
                       );
                     })}
                   </Fragment>
@@ -579,6 +732,8 @@ export default function ConnabisCo() {
               )}
               {filtered.map(r => {
                 const tier100 = r.tiers.find(t => t.units === 100);
+                const base = baselineById.get(r.id);
+                const baseTier = (u: number) => base?.tiers.find(t => t.units === u)?.price ?? null;
                 return (
                   <TableRow key={r.id} data-testid={`row-b2b-${r.id}`}>
                     <TableCell className="font-medium">
@@ -590,18 +745,8 @@ export default function ConnabisCo() {
                     <TableCell className="text-right tabular-nums">{r.retailMargin !== null ? formatPct(r.retailMargin) : '—'}</TableCell>
                     {TIER_UNITS.map(u => {
                       const t = r.tiers.find(x => x.units === u);
-                      if (!t || t.price === null) {
-                        return <TableCell key={u} className="text-right text-muted-foreground">—</TableCell>;
-                      }
-                      const low = t.flags.includes('poco_margen_reseller');
-                      return (
-                        <TableCell key={u} className="text-right tabular-nums">
-                          <div className={low ? 'text-orange-600' : ''}>{formatCOP(t.price)}</div>
-                          <div className="text-[10.5px] text-muted-foreground">
-                            {t.connabisMargin !== null ? formatPct(t.connabisMargin) : '—'} / {t.resellerMargin !== null ? formatPct(t.resellerMargin) : '—'}
-                          </div>
-                        </TableCell>
-                      );
+                      if (!t) return <TableCell key={u} className="text-right text-muted-foreground">—</TableCell>;
+                      return <TierCell key={u} tier={t} basePrice={baseTier(u)} />;
                     })}
                     <TableCell className="text-right tabular-nums">
                       {tier100?.connabisMargin !== undefined && tier100?.connabisMargin !== null ? formatPct(tier100.connabisMargin) : '—'}

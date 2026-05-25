@@ -72,6 +72,50 @@ controls the 95% cap.
 
 Per-tier flag `poco_margen_reseller` renders the price in orange in the UI.
 
+## Simulator (UI-only, read-only)
+
+The Connabis & Co page ships with an interactive **B2B Pricing Simulator** that
+recomputes tier prices client-side from the same `{retail, cogs}` rows the API
+returns. **Nothing is written back** — neither to Shopify nor to the API; it is
+a "what-if" tool for negotiation prep and policy exploration.
+
+Controls (collapsible panel above the table):
+
+| Control | Effect |
+|---|---|
+| Preset | `Conservador` / `Balanceado (actual)` / `Agresivo para revendedor` / `Custom`. Anchors the @100u targets; other tiers scale proportionally to the default curve. |
+| Margen reseller objetivo @100u | Slider 5–50%. Scales the reseller margin curve across all tiers. |
+| Margen Connabis mínimo @100u | Slider 20–70%. Warns when < 30%. |
+| Techo retail | Slider 70–100%. Default 95%. |
+| Redondeo | `Auto` (500/1.000/5.000 según rango), `500 COP` fijo, `1.000 COP` fijo. |
+
+Preset anchors:
+
+| Preset | Connabis @100u | Reseller @100u |
+|---|---|---|
+| Conservador | 52% | 18% |
+| Balanceado (actual) | 48% | 22% |
+| Agresivo para revendedor | 42% | 30% |
+
+Outputs:
+
+- **KPI cards** at top swap to the simulated `Margen Connabis @ 100u` and
+  `Margen reseller @ 100u`, with `política actual` or `sim · {preset}` hint.
+- **Summary cards** inside the simulator show Δ vs the API baseline for both
+  margins, and the count of products whose @100u tier is **infactible**
+  (retail can't satisfy both margin floors simultaneously — those rows show a
+  red flag icon next to the price).
+- **Tier columns** in the table render the simulated price, simulated margins,
+  and a `Δ vs default` line (green when up, orange when down) on each detail
+  row.
+- **Per-SKU calculator** (in expanded detail rows): type a custom unit price
+  @100u and see the resulting Connabis and reseller margins. Badges flag
+  `Precio ≥ retail` and `Retail no permite ese margen`.
+
+The simulator never overrides the underlying API math — the
+`/api/b2b-pricing` endpoint and the KPIs persisted server-side stay on the
+canonical policy. When the page reloads, controls reset to `Balanceado`.
+
 ## Open decisions
 
 - **Volume discounts vs unit cost.** Today we use the same per-unit COGS for
