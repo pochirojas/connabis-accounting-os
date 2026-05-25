@@ -196,6 +196,21 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant, category
     },
   });
 
+  const archiveMutation = useMutation({
+    mutationFn: (archived: boolean) =>
+      postJson(`/api/material-manager/materials/${materialId}/archive`, { archived }, 'POST'),
+    onSuccess: (_res, archived) => {
+      toast({
+        title: archived ? 'Material archivado' : 'Material reactivado',
+        description: archived
+          ? 'Oculto de listas y cost dashes. Activa "Mostrar archivados" para verlo.'
+          : 'Vuelve a aparecer en listas y cost dashes.',
+      });
+      refetch();
+    },
+    onError: (error) => toast({ title: 'No se pudo archivar', description: String(error), variant: 'destructive' }),
+  });
+
   const productsUsing = detail.data?.productsUsing ?? [];
   const latestCost = detail.data?.costHistory?.[0];
 
@@ -241,6 +256,8 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant, category
           <span className="text-foreground">{m.name}</span>
         </div>
         <div className="flex flex-wrap gap-1.5">
+          {m.origin === 'local' && <Badge variant="outline" className="text-[10px] border-sky-500/40 text-sky-300">Local · no MM CSV</Badge>}
+          {m.archived && <Badge variant="outline" className="text-[10px] border-rose-500/40 text-rose-300">Archivado</Badge>}
           {m.isInsumo && <Badge variant="outline" className="text-[10px]">Insumo</Badge>}
           {m.isNoid && <Badge variant="outline" className="text-[10px]">Noid</Badge>}
           {m.updateShopifyInventory && <Badge variant="outline" className="text-[10px]">Sync Shopify</Badge>}
@@ -720,6 +737,16 @@ export function MaterialDetailView({ materialId, onBack, onOpenVariant, category
                   <RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Restablecer MM
                 </Button>
               ) : null}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => archiveMutation.mutate(!m.archived)}
+                disabled={archiveMutation.isPending}
+                data-testid="button-archive-material"
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                {m.archived ? 'Reactivar material' : 'Archivar material'}
+              </Button>
               <Button variant="outline" size="sm" onClick={onBack}>Volver</Button>
             </div>
           </Card>

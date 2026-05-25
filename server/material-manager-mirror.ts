@@ -146,6 +146,34 @@ export function ensureMaterialManagerMirrorSchema(sqlite: Database.Database) {
       materials_used_in_all_orders TEXT,
       stock REAL,
       note TEXT,
+      archived INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+
+    -- Locally-created materials. Same shape as the MM mirror but tagged with
+    -- origin='local' so they NEVER round-trip to the MM CSV export (rollback
+    -- contract). They DO show up in the effective list, cost dashes, PO line
+    -- pickers, and the BOM matcher.
+    CREATE TABLE IF NOT EXISTS material_manager_materials_local (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      measurement TEXT NOT NULL DEFAULT '',
+      sku TEXT NOT NULL DEFAULT '',
+      barcode TEXT NOT NULL DEFAULT '',
+      category TEXT NOT NULL DEFAULT '',
+      supplier TEXT NOT NULL DEFAULT '',
+      cost REAL NOT NULL DEFAULT 0,
+      currency_code TEXT NOT NULL DEFAULT 'COP',
+      update_shopify_inventory INTEGER NOT NULL DEFAULT 0,
+      limit_shopify_inventory INTEGER NOT NULL DEFAULT 0,
+      materials_used_in_all_orders TEXT NOT NULL DEFAULT '',
+      stock REAL NOT NULL DEFAULT 0,
+      is_insumo INTEGER NOT NULL DEFAULT 0,
+      is_noid INTEGER NOT NULL DEFAULT 0,
+      image_url TEXT,
+      archived INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
 
@@ -173,6 +201,13 @@ export function ensureMaterialManagerMirrorSchema(sqlite: Database.Database) {
   // float quantities. Re-create the column as REAL if needed.
   migrateColumnToReal(sqlite, 'material_manager_materials', 'stock');
   migrateColumnToReal(sqlite, 'material_manager_material_overrides', 'stock');
+  // Migration: older override table lacks `archived`. Add idempotently.
+  try {
+    const cols = sqlite.prepare(`PRAGMA table_info(material_manager_material_overrides)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'archived')) {
+      sqlite.exec(`ALTER TABLE material_manager_material_overrides ADD COLUMN archived INTEGER NOT NULL DEFAULT 0`);
+    }
+  } catch { /* noop */ }
 }
 
 function migrateColumnToReal(sqlite: Database.Database, table: string, column: string) {
@@ -775,25 +810,33 @@ export function getMmMaterial(sqlite: Database.Database, materialId: string): Mm
     FROM material_manager_materials
     WHERE id = ?
   `).get(materialId) as Record<string, unknown> | undefined;
-  if (!row) return null;
-  return {
-    id: String(row.id),
-    name: String(row.name ?? ''),
-    description: String(row.description ?? ''),
-    measurement: String(row.measurement ?? ''),
-    sku: String(row.sku ?? ''),
-    barcode: String(row.barcode ?? ''),
-    category: String(row.category ?? ''),
-    supplier: String(row.supplier ?? ''),
-    cost: Number(row.cost ?? 0),
-    currencyCode: String(row.currency_code ?? 'COP'),
-    updateShopifyInventory: Number(row.update_shopify_inventory) === 1,
-    limitShopifyInventory: Number(row.limit_shopify_inventory) === 1,
-    materialsUsedInAllOrders: String(row.materials_used_in_all_orders ?? ''),
-    stock: Number(row.stock ?? 0),
-    isInsumo: Number(row.is_insumo) === 1,
-    isNoid: Number(row.is_noid) === 1,
-  };
+  if (row) {
+    return {
+      id: String(row.id),
+      name: String(row.name ?? ''),
+      description: String(row.description ?? ''),
+      measurement: String(row.measurement ?? ''),
+      sku: String(row.sku ?? ''),
+      barcode: String(row.barcode ?? ''),
+      category: String(row.category ?? ''),
+      supplier: String(row.supplier ?? ''),
+      cost: Number(row.cost ?? 0),
+      currencyCode: String(row.currency_code ?? 'COP'),
+      updateShopifyInventory: Number(row.update_shopify_inventory) === 1,
+      limitShopifyInventory: Number(row.limit_shopify_inventory) === 1,
+      materialsUsedInAllOrders: String(row.materials_used_in_all_orders ?? ''),
+      stock: Number(row.stock ?? 0),
+      isInsumo: Number(row.is_insumo) === 1,
+      isNoid: Number(row.is_noid) === 1,
+      origin: 'mm',
+      archived: false,
+    };
+  }
+  // Fallback: locally-created material (origin='local'). The detail/override
+  // endpoints accept both kinds so callers don't need to know which table to
+  // hit first.
+  const local = getLocalMaterial(sqlite, materialId);
+  return local ? { ...local } : null;
 }
 
 function mapDraftRow(row: Record<string, unknown>): MmBomDraftRow {
@@ -906,8 +949,11 @@ export function getMaterialDetail(sqlite: Database.Database, materialId: string)
   ensureMaterialManagerMirrorSchema(sqlite);
   const base = getMmMaterial(sqlite, materialId);
   if (!base) return null;
-  const override = getMaterialOverride(sqlite, materialId);
-  const effective = mergeMaterialWithOverride(base, override);
+  const isLocal = base.origin === 'local';
+  const override = isLocal ? null : getMaterialOverride(sqlite, materialId);
+  const effective = isLocal ? base : mergeMaterialWithOverride(base, override);
+  const archivedById = listMaterialArchivedFlags(sqlite);
+  const archived = isLocal ? Boolean(base.archived) : (archivedById.get(materialId) ?? false);
   const bom = listMmBomComponents(sqlite, { materialId });
   const bomDrafts = listMmBomDrafts(sqlite, { materialId });
   const costHistory = listMmCostHistory(sqlite, { materialKey: base.name ? normalizeMaterialKey(base.name) : undefined, limit: 60 });
@@ -930,9 +976,11 @@ export function getMaterialDetail(sqlite: Database.Database, materialId: string)
   return {
     material: {
       ...effective,
+      origin: isLocal ? 'local' : 'mm',
+      archived,
       hasLocalEdit: override !== null,
       override,
-      baseMaterial: base,
+      baseMaterial: { ...base, origin: isLocal ? 'local' : 'mm' },
     },
     bom,
     bomDrafts,
@@ -1028,6 +1076,7 @@ function mapMaterialOverrideRow(row: Record<string, unknown>): MmMaterialOverrid
       ? null : String(row.materials_used_in_all_orders),
     stock: row.stock === null || row.stock === undefined ? null : Number(row.stock),
     note: row.note === null || row.note === undefined ? null : String(row.note),
+    archived: Number(row.archived ?? 0) === 1,
     updatedAt: String(row.updated_at),
   };
 }
@@ -1064,29 +1113,252 @@ function mergeMaterialWithOverride(base: MmMaterialRow, override: MmMaterialOver
   };
 }
 
-export function listMmMaterialsEffective(sqlite: Database.Database): MmMaterialEffective[] {
+export function listMmMaterialsEffective(sqlite: Database.Database, opts?: { includeArchived?: boolean }): MmMaterialEffective[] {
   const base = listMmMaterials(sqlite);
   const overridesById = new Map(listMaterialOverrides(sqlite).map(o => [o.materialId, o] as const));
-  return base.map(m => {
+  const archivedById = listMaterialArchivedFlags(sqlite);
+  const includeArchived = Boolean(opts?.includeArchived);
+  const mmRows: MmMaterialEffective[] = base.map(m => {
     const override = overridesById.get(m.id) ?? null;
+    const archived = archivedById.get(m.id) ?? false;
+    const merged = mergeMaterialWithOverride(m, override);
     return {
-      ...mergeMaterialWithOverride(m, override),
+      ...merged,
+      origin: 'mm',
+      archived,
       hasLocalEdit: override !== null,
       override,
-      baseMaterial: m,
+      baseMaterial: { ...m, origin: 'mm', archived: false },
     };
   });
+  const localRows: MmMaterialEffective[] = listLocalMaterials(sqlite).map(local => ({
+    ...local,
+    hasLocalEdit: false,
+    override: null,
+    baseMaterial: local,
+  }));
+  const combined = [...mmRows, ...localRows];
+  return includeArchived ? combined : combined.filter(m => !m.archived);
+}
+
+function listMaterialArchivedFlags(sqlite: Database.Database): Map<string, boolean> {
+  const rows = sqlite.prepare(`SELECT material_id, archived FROM material_manager_material_overrides WHERE archived = 1`).all() as Array<{ material_id: string; archived: number }>;
+  return new Map(rows.map(r => [String(r.material_id), Number(r.archived) === 1]));
+}
+
+// ---------- Locally-created materials (origin='local') ----------
+
+function generateLocalMaterialId(sqlite: Database.Database): string {
+  // Format: local-YYYYMMDD-<6char>. Prefixed so it can never collide with
+  // MM-issued UUIDs (which are 36-char hyphenated).
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const rand = Math.random().toString(36).slice(2, 8);
+    const id = `local-${stamp}-${rand}`;
+    const existing = sqlite.prepare(`SELECT 1 FROM material_manager_materials_local WHERE id = ?`).get(id)
+      || sqlite.prepare(`SELECT 1 FROM material_manager_materials WHERE id = ?`).get(id);
+    if (!existing) return id;
+  }
+  throw new Error('local_id_generation_failed');
+}
+
+function bucketFlags(bucket: 'noids' | 'insumos' | 'materials' | 'supplements' | undefined, category: string): { isInsumo: boolean; isNoid: boolean } {
+  if (bucket === 'noids') return { isInsumo: false, isNoid: true };
+  if (bucket === 'insumos') return { isInsumo: true, isNoid: false };
+  if (bucket === 'materials' || bucket === 'supplements') return { isInsumo: false, isNoid: false };
+  return categoryFlags(category);
+}
+
+export type CreateLocalMaterialInput = {
+  name: string;
+  description?: string;
+  measurement?: string;
+  sku?: string;
+  barcode?: string;
+  category?: string;
+  supplier?: string;
+  cost?: number;
+  currencyCode?: string;
+  stock?: number;
+  updateShopifyInventory?: boolean;
+  limitShopifyInventory?: boolean;
+  bucket?: 'noids' | 'insumos' | 'materials' | 'supplements';
+  imageUrl?: string;
+};
+
+function mapLocalMaterialRow(row: Record<string, unknown>): MmMaterialRow & { origin: 'local'; archived: boolean } {
+  return {
+    id: String(row.id),
+    name: String(row.name ?? ''),
+    description: String(row.description ?? ''),
+    measurement: String(row.measurement ?? ''),
+    sku: String(row.sku ?? ''),
+    barcode: String(row.barcode ?? ''),
+    category: String(row.category ?? ''),
+    supplier: String(row.supplier ?? ''),
+    cost: Number(row.cost ?? 0),
+    currencyCode: String(row.currency_code ?? 'COP'),
+    updateShopifyInventory: Number(row.update_shopify_inventory) === 1,
+    limitShopifyInventory: Number(row.limit_shopify_inventory) === 1,
+    materialsUsedInAllOrders: String(row.materials_used_in_all_orders ?? ''),
+    stock: Number(row.stock ?? 0),
+    isInsumo: Number(row.is_insumo) === 1,
+    isNoid: Number(row.is_noid) === 1,
+    origin: 'local',
+    archived: Number(row.archived) === 1,
+  };
+}
+
+export function listLocalMaterials(sqlite: Database.Database): Array<MmMaterialRow & { origin: 'local'; archived: boolean }> {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const rows = sqlite.prepare(`
+    SELECT id, name, description, measurement, sku, barcode, category, supplier,
+           cost, currency_code, update_shopify_inventory, limit_shopify_inventory,
+           materials_used_in_all_orders, stock, is_insumo, is_noid, image_url, archived
+    FROM material_manager_materials_local
+    ORDER BY name COLLATE NOCASE
+  `).all() as Array<Record<string, unknown>>;
+  return rows.map(mapLocalMaterialRow);
+}
+
+export function getLocalMaterial(sqlite: Database.Database, id: string): (MmMaterialRow & { origin: 'local'; archived: boolean }) | null {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const row = sqlite.prepare(`
+    SELECT id, name, description, measurement, sku, barcode, category, supplier,
+           cost, currency_code, update_shopify_inventory, limit_shopify_inventory,
+           materials_used_in_all_orders, stock, is_insumo, is_noid, image_url, archived
+    FROM material_manager_materials_local
+    WHERE id = ?
+  `).get(id) as Record<string, unknown> | undefined;
+  return row ? mapLocalMaterialRow(row) : null;
+}
+
+export function createLocalMaterial(sqlite: Database.Database, input: CreateLocalMaterialInput): MmMaterialRow & { origin: 'local'; archived: boolean } {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const id = generateLocalMaterialId(sqlite);
+  const now = new Date().toISOString();
+  const category = input.category ?? '';
+  const flags = bucketFlags(input.bucket, category);
+  sqlite.prepare(`
+    INSERT INTO material_manager_materials_local (
+      id, name, description, measurement, sku, barcode, category, supplier,
+      cost, currency_code, update_shopify_inventory, limit_shopify_inventory,
+      materials_used_in_all_orders, stock, is_insumo, is_noid, image_url, archived,
+      created_at, updated_at
+    ) VALUES (
+      @id, @name, @description, @measurement, @sku, @barcode, @category, @supplier,
+      @cost, @currency_code, @update_shopify_inventory, @limit_shopify_inventory,
+      '', @stock, @is_insumo, @is_noid, @image_url, 0,
+      @created_at, @updated_at
+    )
+  `).run({
+    id,
+    name: input.name.trim(),
+    description: input.description ?? '',
+    measurement: input.measurement ?? '',
+    sku: input.sku ?? '',
+    barcode: input.barcode ?? '',
+    category,
+    supplier: input.supplier ?? '',
+    cost: Number(input.cost ?? 0),
+    currency_code: input.currencyCode ?? 'COP',
+    update_shopify_inventory: input.updateShopifyInventory ? 1 : 0,
+    limit_shopify_inventory: input.limitShopifyInventory ? 1 : 0,
+    stock: Number(input.stock ?? 0),
+    is_insumo: flags.isInsumo ? 1 : 0,
+    is_noid: flags.isNoid ? 1 : 0,
+    image_url: input.imageUrl ?? null,
+    created_at: now,
+    updated_at: now,
+  });
+  const created = getLocalMaterial(sqlite, id);
+  if (!created) throw new Error('local_material_create_failed');
+  return created;
+}
+
+export function updateLocalMaterial(sqlite: Database.Database, id: string, patch: Partial<CreateLocalMaterialInput> & { archived?: boolean }): (MmMaterialRow & { origin: 'local'; archived: boolean }) | null {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const existing = getLocalMaterial(sqlite, id);
+  if (!existing) return null;
+  const now = new Date().toISOString();
+  const category = patch.category ?? existing.category;
+  const flags = patch.bucket
+    ? bucketFlags(patch.bucket, category)
+    : { isInsumo: existing.isInsumo, isNoid: existing.isNoid };
+  sqlite.prepare(`
+    UPDATE material_manager_materials_local
+    SET name = ?, description = ?, measurement = ?, sku = ?, barcode = ?,
+        category = ?, supplier = ?, cost = ?, currency_code = ?,
+        update_shopify_inventory = ?, limit_shopify_inventory = ?,
+        stock = ?, is_insumo = ?, is_noid = ?, image_url = ?, archived = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(
+    patch.name?.trim() ?? existing.name,
+    patch.description ?? existing.description,
+    patch.measurement ?? existing.measurement,
+    patch.sku ?? existing.sku,
+    patch.barcode ?? existing.barcode,
+    category,
+    patch.supplier ?? existing.supplier,
+    Number(patch.cost ?? existing.cost),
+    patch.currencyCode ?? existing.currencyCode,
+    (patch.updateShopifyInventory ?? existing.updateShopifyInventory) ? 1 : 0,
+    (patch.limitShopifyInventory ?? existing.limitShopifyInventory) ? 1 : 0,
+    Number(patch.stock ?? existing.stock),
+    flags.isInsumo ? 1 : 0,
+    flags.isNoid ? 1 : 0,
+    patch.imageUrl ?? null,
+    patch.archived ?? existing.archived ? 1 : 0,
+    now,
+    id,
+  );
+  return getLocalMaterial(sqlite, id);
+}
+
+export function setMaterialArchived(sqlite: Database.Database, materialId: string, archived: boolean): { origin: 'mm' | 'local'; archived: boolean } | null {
+  ensureMaterialManagerMirrorSchema(sqlite);
+  const local = getLocalMaterial(sqlite, materialId);
+  if (local) {
+    const updated = updateLocalMaterial(sqlite, materialId, { archived });
+    return updated ? { origin: 'local', archived: updated.archived } : null;
+  }
+  const mm = getMmMaterial(sqlite, materialId);
+  if (!mm) return null;
+  // For MM-imported materials, flip the override's archived column. Pristine
+  // MM mirror is untouched so the round-trip export stays bit-exact.
+  const now = new Date().toISOString();
+  sqlite.prepare(`
+    INSERT INTO material_manager_material_overrides (material_id, archived, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(material_id) DO UPDATE SET archived = excluded.archived, updated_at = excluded.updated_at
+  `).run(materialId, archived ? 1 : 0, now);
+  return { origin: 'mm', archived };
 }
 
 export function getMmMaterialEffective(sqlite: Database.Database, materialId: string): MmMaterialEffective | null {
   const base = getMmMaterial(sqlite, materialId);
   if (!base) return null;
+  // Locally-created materials are mutable in-place (no override layer): the
+  // edit endpoints write directly to material_manager_materials_local.
+  if (base.origin === 'local') {
+    return {
+      ...base,
+      hasLocalEdit: false,
+      override: null,
+      baseMaterial: base,
+    };
+  }
   const override = getMaterialOverride(sqlite, materialId);
+  const archivedById = listMaterialArchivedFlags(sqlite);
+  const archived = archivedById.get(materialId) ?? false;
   return {
     ...mergeMaterialWithOverride(base, override),
+    origin: 'mm',
+    archived,
     hasLocalEdit: override !== null,
     override,
-    baseMaterial: base,
+    baseMaterial: { ...base, origin: 'mm', archived: false },
   };
 }
 
@@ -1098,6 +1370,28 @@ export function upsertMaterialOverride(
   ensureMaterialManagerMirrorSchema(sqlite);
   const base = getMmMaterial(sqlite, materialId);
   if (!base) return null;
+  // If this is a locally-created material, route the edit straight to the
+  // local table (no override layer for local materials — they are mutable).
+  if (base.origin === 'local') {
+    updateLocalMaterial(sqlite, materialId, {
+      name: payload.name ?? undefined,
+      description: payload.description ?? undefined,
+      measurement: payload.measurement ?? undefined,
+      sku: payload.sku ?? undefined,
+      barcode: payload.barcode ?? undefined,
+      category: payload.category ?? undefined,
+      supplier: payload.supplier ?? undefined,
+      cost: payload.cost ?? undefined,
+      currencyCode: payload.currencyCode ?? undefined,
+      stock: payload.stock ?? undefined,
+      updateShopifyInventory: payload.updateShopifyInventory ?? undefined,
+      limitShopifyInventory: payload.limitShopifyInventory ?? undefined,
+      archived: payload.archived ?? undefined,
+    });
+    // Return a synthetic override-shaped row so callers stay uniform. Local
+    // materials don't have a real override row.
+    return null;
+  }
   const existing = getMaterialOverride(sqlite, materialId);
   const now = new Date().toISOString();
   // Reduce a field: if `null` is explicitly passed, clear it back to MM; if
@@ -1123,16 +1417,19 @@ export function upsertMaterialOverride(
     materials_used_in_all_orders: pick('materialsUsedInAllOrders'),
     stock: pick('stock'),
     note: pick('note'),
+    archived: Object.prototype.hasOwnProperty.call(payload, 'archived')
+      ? (payload.archived ? 1 : 0)
+      : (existing ? (existing.archived ? 1 : 0) : 0),
   };
   sqlite.prepare(`
     INSERT INTO material_manager_material_overrides (
       material_id, name, description, measurement, sku, barcode, category, supplier,
       cost, currency_code, update_shopify_inventory, limit_shopify_inventory,
-      materials_used_in_all_orders, stock, note, updated_at
+      materials_used_in_all_orders, stock, note, archived, updated_at
     ) VALUES (
       @material_id, @name, @description, @measurement, @sku, @barcode, @category, @supplier,
       @cost, @currency_code, @update_shopify_inventory, @limit_shopify_inventory,
-      @materials_used_in_all_orders, @stock, @note, @updated_at
+      @materials_used_in_all_orders, @stock, @note, @archived, @updated_at
     )
     ON CONFLICT(material_id) DO UPDATE SET
       name = excluded.name,
@@ -1149,6 +1446,7 @@ export function upsertMaterialOverride(
       materials_used_in_all_orders = excluded.materials_used_in_all_orders,
       stock = excluded.stock,
       note = excluded.note,
+      archived = excluded.archived,
       updated_at = excluded.updated_at
   `).run({ material_id: materialId, ...next, updated_at: now });
   return getMaterialOverride(sqlite, materialId);

@@ -424,6 +424,12 @@ export type MmMaterialRow = {
   // Derived flags
   isInsumo: boolean;     // tools/equipment — not inventory-trackable BOM/COGS
   isNoid: boolean;       // carts/disposables for cannabinoids stay in Noids
+  // Origin marker — 'mm' = pristine MM mirror, 'local' = created in this OS
+  // (never round-tripped back to MM CSV export). Always present on the
+  // effective view; omitted from the raw MM mirror reads to keep older code
+  // forward-compatible.
+  origin?: 'mm' | 'local';
+  archived?: boolean;    // soft-delete flag — hidden from default lists/dashes
 };
 
 export type MmBomRow = {
@@ -588,6 +594,7 @@ export type MmMaterialOverrideRow = {
   materialsUsedInAllOrders?: string | null;
   stock?: number | null;
   note?: string | null;
+  archived?: boolean;
   updatedAt: string;
 };
 
@@ -621,9 +628,46 @@ export const updateMaterialOverrideSchema = z.object({
   limitShopifyInventory: z.boolean().optional().nullable(),
   materialsUsedInAllOrders: z.string().max(200).optional().nullable(),
   stock: z.number().min(0).max(1_000_000_000).optional().nullable(),
-  note: z.string().max(500).optional().nullable(),
+  note: z.string().max(2000).optional().nullable(),
+  archived: z.boolean().optional().nullable(),
 });
 export type UpdateMaterialOverride = z.infer<typeof updateMaterialOverrideSchema>;
+
+// New: payload for creating a from-scratch local material. Local materials are
+// never round-tripped to the MM CSV export, so the rollback contract stays
+// intact. They surface in the effective list, in cost dashes, and in PO line
+// pickers.
+export const createLocalMaterialSchema = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().max(2000).optional(),
+  measurement: z.string().max(40).optional(),
+  sku: z.string().max(120).optional(),
+  barcode: z.string().max(120).optional(),
+  category: z.string().max(120).optional(),
+  supplier: z.string().max(200).optional(),
+  cost: z.number().min(0).max(1_000_000_000).optional(),
+  currencyCode: z.string().max(8).optional(),
+  stock: z.number().min(0).max(1_000_000_000).optional(),
+  updateShopifyInventory: z.boolean().optional(),
+  limitShopifyInventory: z.boolean().optional(),
+  // Inventory bucket override: 'noids' | 'insumos' | 'materials' | 'supplements'.
+  // When provided, forces the bucket flags on the new material; when omitted,
+  // flags fall back to category hints (the same logic as MM imports).
+  bucket: z.enum(['noids', 'insumos', 'materials', 'supplements']).optional(),
+  imageUrl: z.string().max(1000).optional(),
+});
+export type CreateLocalMaterial = z.infer<typeof createLocalMaterialSchema>;
+
+// New: matcher suggestion for a historical PO line.
+export type PoLineMatchSuggestion = {
+  lineId: number;
+  poNumber: string;
+  product: string;
+  sku: string;
+  exactSkuMatch: { materialId: string; name: string; sku: string } | null;
+  exactNameMatch: { materialId: string; name: string; sku: string } | null;
+  fuzzySuggestions: Array<{ materialId: string; name: string; sku: string; score: number }>;
+};
 
 export const updateBomOverrideSchema = z.object({
   quantity: z.number().min(0).max(10_000).optional().nullable(),

@@ -8,6 +8,7 @@ import type { Alert, DailyPerformance, Expense, Product } from '@shared/schema';
 import { sqlite, storage } from './storage';
 import {
   createBomDraft,
+  createLocalMaterial,
   deleteBomDraft,
   deleteMaterialOverride,
   deleteMmBomOverride,
@@ -24,6 +25,7 @@ import {
   listMmCostHistory,
   listMmMaterialsEffective,
   runRoundTripQa,
+  setMaterialArchived,
   updateBomDraft,
   upsertMaterialOverride,
   upsertMmBomOverride,
@@ -37,6 +39,9 @@ import {
   receivePurchaseOrder,
   reversePurchaseOrderReceipt,
   listInventoryMovements,
+  suggestMatchesForLines,
+  applyPoLineMatch,
+  clearPoLineMatch,
 } from './material-manager-purchase-orders';
 import {
   getCostBreakdownByBucket,
@@ -69,6 +74,7 @@ import {
   updateBomDraftSchema,
   updateBomOverrideSchema,
   updateMaterialOverrideSchema,
+  createLocalMaterialSchema,
 } from '@shared/schema';
 import type { MmPurchaseOrder, PurchaseOrder } from '@shared/schema';
 import {
@@ -1916,6 +1922,29 @@ export async function registerRoutes(
     res.json(listInventoryMovements(sqlite, { materialKey, poNumber }));
   });
 
+  // PO line matcher — read-only suggestions. Default scope = lines without a
+  // canonical materialId. Pass ?all=1 to include already-matched lines too.
+  app.get('/api/material-manager/purchase-orders/match/suggestions', (req, res) => {
+    const all = String(req.query.all ?? '') === '1';
+    const materials = listMmMaterialsEffective(sqlite);
+    res.json(suggestMatchesForLines(sqlite, materials, { onlyUnmatched: !all }));
+  });
+
+  // Apply an explicit user choice: link this PO line to this material id.
+  app.post('/api/material-manager/purchase-orders/lines/:lineId/match', (req, res) => {
+    const materialId = String(req.body?.materialId ?? '').trim();
+    if (!materialId) return res.status(400).json({ error: 'materialId_required' });
+    try {
+      res.json(applyPoLineMatch(sqlite, Number(req.params.lineId), materialId));
+    } catch (error) {
+      res.status(404).json({ error: error instanceof Error ? error.message : 'match_failed' });
+    }
+  });
+
+  app.delete('/api/material-manager/purchase-orders/lines/:lineId/match', (req, res) => {
+    res.json(clearPoLineMatch(sqlite, Number(req.params.lineId)));
+  });
+
   // Cost-breakdown dashes — Noids / Materials / Supplements / Insumos.
   app.get('/api/material-manager/cost-breakdown', (_req, res) => {
     res.json(getCostBreakdownByBucket(sqlite));
@@ -2412,12 +2441,36 @@ export async function registerRoutes(
   });
 
   app.get('/api/material-manager/materials', (req, res) => {
-    // Effective view = MM mirror + local overrides. Pristine mirror is only
-    // read by the round-trip export/QA endpoints.
-    const materials = listMmMaterialsEffective(sqlite);
+    // Effective view = MM mirror + local overrides + locally-created.
+    // Archived materials are hidden by default; pass ?includeArchived=1 to surface them.
+    const includeArchived = String(req.query.includeArchived ?? '') === '1';
+    const materials = listMmMaterialsEffective(sqlite, { includeArchived });
     const filter = String(req.query.category ?? '').toLowerCase();
     const filtered = filter ? materials.filter(m => m.category.toLowerCase().includes(filter)) : materials;
     res.json(filtered);
+  });
+
+  // Create a brand-new local material (origin='local'). Not round-tripped to MM
+  // CSV export — rollback bit-equality preserved.
+  app.post('/api/material-manager/materials', (req, res) => {
+    const parsed = createLocalMaterialSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_payload', details: parsed.error.flatten() });
+    }
+    try {
+      const created = createLocalMaterial(sqlite, parsed.data);
+      res.status(201).json(created);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'create_failed' });
+    }
+  });
+
+  // Archive / unarchive a material (works for both MM mirror and local).
+  app.post('/api/material-manager/materials/:id/archive', (req, res) => {
+    const archived = Boolean(req.body?.archived ?? true);
+    const result = setMaterialArchived(sqlite, req.params.id, archived);
+    if (!result) return res.status(404).json({ error: 'material_not_found' });
+    res.json(result);
   });
 
   app.get('/api/material-manager/bom', (req, res) => {

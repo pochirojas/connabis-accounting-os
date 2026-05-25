@@ -25,6 +25,8 @@ import { MaterialDetailView } from '@/components/material-detail';
 import { ProductBomEditor } from '@/components/product-bom-editor';
 import { CartCalculator } from '@/components/cart-calculator';
 import { CreatePurchaseOrderDialog } from '@/components/create-purchase-order-dialog';
+import { CreateMaterialDialog } from '@/components/create-material-dialog';
+import { PoLineMatcher } from '@/components/po-line-matcher';
 
 type ImportResponse = MmMirrorStatus & { warnings?: string[] };
 
@@ -339,13 +341,16 @@ export default function MaterialManagerPage() {
                 <h3 className="text-sm font-semibold tracking-tight">Materiales (MM mirror)</h3>
                 <p className="text-xs text-muted-foreground">Click en una fila para abrir el detalle. Insumo = no inventario; Noid = cannabinoide.</p>
               </div>
-              <Input
-                value={materialFilter}
-                onChange={e => setMaterialFilter(e.target.value)}
-                placeholder="Filtrar materiales…"
-                className="max-w-xs"
-                data-testid="input-mm-material-filter"
-              />
+              <div className="flex items-center gap-2 flex-wrap">
+                <Input
+                  value={materialFilter}
+                  onChange={e => setMaterialFilter(e.target.value)}
+                  placeholder="Filtrar materiales…"
+                  className="max-w-xs"
+                  data-testid="input-mm-material-filter"
+                />
+                <CreateMaterialDialog onCreated={(m) => setSelectedMaterialId(m.id)} />
+              </div>
             </div>
             <div className="overflow-x-auto">
               <Table>
@@ -646,6 +651,8 @@ export default function MaterialManagerPage() {
               </Table>
             </div>
           </Card>
+
+          <PoLineMatcher />
 
           {selectedPO ? (
             <Card className="p-5" data-testid="card-po-detail">

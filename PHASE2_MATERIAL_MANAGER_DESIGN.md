@@ -22,14 +22,16 @@ Lo que ya está en código y vivo:
 - Phase 2.3 — Calculadora de Carts con MM live + seed fallback etiquetado.
 - Phase 2.4 — Análisis de gastos, packaging Jeringa 1mL, BOM agrupado por producto base.
 - Phase 2.5 — POs orden cronológico, gastos paidTo fallback, detalle de material totalmente editable como override.
+- Phase 2.5.1 (P0 slice 2026-05-25) — **crear materiales locales desde cero** (tabla `material_manager_materials_local`, `origin='local'`, no se exporta al CSV MM), **archivado / soft-delete** de cualquier material (override `archived` para MM-origin · columna `archived` para local), y **historical PO line matcher** (sugerencias SKU/nombre exacto + fuzzy, apply explícito).
 
 Lo que falta para cerrar Phase 2 (mantener sincronizado con `ROADMAP.md`):
 
 - **Paridad UI total con Material Manager**: interacciones, atajos, edición inline, micro-UX. Hoy hay paridad funcional parcial.
-- **Crear materiales nuevos dentro del OS**: hoy solo se edita lo que viene del mirror MM. El flujo "+ Nuevo material" con ID local estable y sync opt-in a MM no existe.
+- **Promote material local → MM**: hoy los materiales locales viven solo en este OS (rollback bit-exact preservado). Falta pipeline para empujarlos a MM con doble confirmación.
 - **Detalle de material completo**: campos secundarios MM (multi-ubicación, lead time por proveedor, alias, equivalencias de unidad, adjuntos) aún no cubiertos.
 - **BOM editor robusto (draft/edit)**: vista combinada MM ∪ overrides ∪ drafts, validaciones cruzadas, búsqueda dentro del modal, batch edit multi-variante, undo por fila, promoción controlada.
 - **UI QA**: pasada lado a lado con MM de Inventario, detalle de material y editor BOM.
+- **Batch costing real**: schema `batch_id` está; falta motor FIFO/weighted y rollup a producción.
 - **Terpene Rotation Manager** (ver sección dedicada más abajo): bloqueante para considerar el switch desde MM como seamless.
 
 ## Draft BOM overlay (Phase 2.1+)

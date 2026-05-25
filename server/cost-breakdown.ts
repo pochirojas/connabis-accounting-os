@@ -117,6 +117,9 @@ function normalizeMaterialKey(value: string): string {
 }
 
 export function buildCostBreakdownRows(sqlite: Database.Database): CostBreakdownRow[] {
+  // Archived materials are excluded from cost dashes — they should not show
+  // up in operational latest-price views. Pass includeArchived if a future
+  // admin view needs them.
   const materials = listMmMaterialsEffective(sqlite);
   return materials.map(m => {
     const bucket = classifyMaterial(m);

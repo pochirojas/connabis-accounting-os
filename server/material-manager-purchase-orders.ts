@@ -933,6 +933,108 @@ export function reversePurchaseOrderReceipt(sqlite: Database.Database, idOrNumbe
   return { poNumber: po.poNumber, reversedMovements: movements.length };
 }
 
+// ---------- Historical PO line matcher (Phase 2.2 P0) ----------
+// Suggest a canonical Material Manager material for unmatched PO lines.
+// Order of preference: exact SKU > exact normalized name > fuzzy token-overlap.
+// The matcher NEVER mutates lines on its own — the UI must call the apply
+// endpoint with an explicit lineId + materialId.
+import type { MmMaterialEffective, PoLineMatchSuggestion } from '@shared/schema';
+
+function normalizeNameKey(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function tokenOverlapScore(a: string, b: string): number {
+  const ta = new Set(a.split(/\s+/).filter(t => t.length > 1));
+  const tb = new Set(b.split(/\s+/).filter(t => t.length > 1));
+  if (ta.size === 0 || tb.size === 0) return 0;
+  let shared = 0;
+  ta.forEach(t => { if (tb.has(t)) shared += 1; });
+  return shared / Math.max(ta.size, tb.size);
+}
+
+export function suggestMatchesForLines(
+  sqlite: Database.Database,
+  materials: MmMaterialEffective[],
+  options?: { onlyUnmatched?: boolean; limitFuzzy?: number },
+): PoLineMatchSuggestion[] {
+  ensureMmPurchaseOrderSchema(sqlite);
+  const onlyUnmatched = options?.onlyUnmatched ?? true;
+  const limitFuzzy = options?.limitFuzzy ?? 3;
+  const where = onlyUnmatched ? `WHERE material_id IS NULL OR material_id = ''` : '';
+  const rows = sqlite.prepare(`
+    SELECT id, po_number, product, sku
+    FROM material_manager_purchase_order_lines
+    ${where}
+    ORDER BY po_number DESC, line_index ASC
+  `).all() as Array<{ id: number; po_number: string; product: string; sku: string }>;
+
+  // Build lookups once.
+  const bySku = new Map<string, MmMaterialEffective>();
+  const byNameKey = new Map<string, MmMaterialEffective>();
+  materials.forEach(m => {
+    if (m.sku) bySku.set(m.sku.trim().toLowerCase(), m);
+    const key = normalizeNameKey(m.name);
+    if (key) byNameKey.set(key, m);
+  });
+
+  return rows.map(r => {
+    const skuLower = (r.sku || '').trim().toLowerCase();
+    const nameKey = normalizeNameKey(r.product || '');
+    const exactSkuMatch = skuLower && bySku.has(skuLower)
+      ? { materialId: bySku.get(skuLower)!.id, name: bySku.get(skuLower)!.name, sku: bySku.get(skuLower)!.sku }
+      : null;
+    const exactNameMatch = nameKey && byNameKey.has(nameKey)
+      ? { materialId: byNameKey.get(nameKey)!.id, name: byNameKey.get(nameKey)!.name, sku: byNameKey.get(nameKey)!.sku }
+      : null;
+    let fuzzy: Array<{ materialId: string; name: string; sku: string; score: number }> = [];
+    if (!exactSkuMatch && !exactNameMatch && nameKey) {
+      fuzzy = materials
+        .map(m => ({
+          materialId: m.id,
+          name: m.name,
+          sku: m.sku,
+          score: tokenOverlapScore(nameKey, normalizeNameKey(m.name)),
+        }))
+        .filter(s => s.score >= 0.4)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limitFuzzy);
+    }
+    return {
+      lineId: r.id,
+      poNumber: r.po_number,
+      product: r.product,
+      sku: r.sku,
+      exactSkuMatch,
+      exactNameMatch,
+      fuzzySuggestions: fuzzy,
+    };
+  });
+}
+
+export function applyPoLineMatch(
+  sqlite: Database.Database,
+  lineId: number,
+  materialId: string,
+): { lineId: number; materialId: string } {
+  ensureMmPurchaseOrderSchema(sqlite);
+  const exists = sqlite.prepare(`SELECT id FROM material_manager_purchase_order_lines WHERE id = ?`).get(lineId);
+  if (!exists) throw new Error('po_line_not_found');
+  sqlite.prepare(`UPDATE material_manager_purchase_order_lines SET material_id = ? WHERE id = ?`).run(materialId, lineId);
+  return { lineId, materialId };
+}
+
+export function clearPoLineMatch(sqlite: Database.Database, lineId: number): { lineId: number; cleared: boolean } {
+  ensureMmPurchaseOrderSchema(sqlite);
+  const info = sqlite.prepare(`UPDATE material_manager_purchase_order_lines SET material_id = NULL WHERE id = ?`).run(lineId);
+  return { lineId, cleared: info.changes > 0 };
+}
+
 // Auto-import on startup if the table is empty. Idempotent.
 export function ensureMmPurchaseOrdersImported(sqlite: Database.Database): MmPurchaseOrdersStatus {
   ensureMmPurchaseOrderSchema(sqlite);
