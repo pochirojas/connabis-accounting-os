@@ -102,12 +102,16 @@ export default function MaterialManagerPage() {
   const [receiveDialogPoNumber, setReceiveDialogPoNumber] = useState<string | null>(null);
   const selectedPoDetail = useQuery<MmPurchaseOrder>({
     queryKey: ['/api/material-manager/purchase-orders', selectedPoNumber],
+    queryFn: async () => {
+      const response = await apiRequest('GET', `/api/material-manager/purchase-orders/${encodeURIComponent(selectedPoNumber ?? '')}`);
+      return response.json();
+    },
     enabled: Boolean(selectedPoNumber),
   });
   const selectedPoBreakdown = useQuery<PoBreakdown>({
     queryKey: ['/api/material-manager/purchase-orders', selectedPoNumber, 'breakdown'],
     queryFn: async () => {
-      const response = await apiRequest('GET', `/api/material-manager/purchase-orders/${selectedPoNumber}/breakdown`);
+      const response = await apiRequest('GET', `/api/material-manager/purchase-orders/${encodeURIComponent(selectedPoNumber ?? '')}/breakdown`);
       return response.json();
     },
     enabled: Boolean(selectedPoNumber),
@@ -115,7 +119,7 @@ export default function MaterialManagerPage() {
   const selectedPoProgress = useQuery<Array<{ lineId: number; received: number; ordered: number }>>({
     queryKey: ['/api/material-manager/purchase-orders', selectedPoNumber, 'progress'],
     queryFn: async () => {
-      const response = await apiRequest('GET', `/api/material-manager/purchase-orders/${selectedPoNumber}/progress`);
+      const response = await apiRequest('GET', `/api/material-manager/purchase-orders/${encodeURIComponent(selectedPoNumber ?? '')}/progress`);
       return response.json();
     },
     enabled: Boolean(selectedPoNumber),
@@ -809,8 +813,23 @@ export default function MaterialManagerPage() {
                       key={p.poNumber}
                       role="button"
                       tabIndex={0}
-                      onClick={() => setSelectedPoNumber(p.poNumber)}
-                      className={`cursor-pointer transition-colors hover:bg-muted/35 ${selectedPoNumber === p.poNumber ? 'bg-accent/8' : ''} ${p.status === 'cancelled' ? 'opacity-60' : ''}`}
+                      onClick={() => {
+                        setSelectedPoNumber(p.poNumber);
+                        requestAnimationFrame(() => {
+                          document.getElementById('po-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        });
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSelectedPoNumber(p.poNumber);
+                          requestAnimationFrame(() => {
+                            document.getElementById('po-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                          });
+                        }
+                      }}
+                      title={`Click para ver líneas, breakdown de costo y opciones de recepción de ${p.poNumber}`}
+                      className={`cursor-pointer transition-colors hover:bg-muted/35 ${selectedPoNumber === p.poNumber ? 'bg-accent/8 ring-1 ring-inset ring-accent/40' : ''} ${p.status === 'cancelled' ? 'opacity-60' : ''}`}
                       data-testid={`row-po-${p.poNumber}`}
                     >
                       <TableCell className="text-[13px] font-semibold tabular">{p.poNumber}</TableCell>
@@ -830,10 +849,8 @@ export default function MaterialManagerPage() {
             </div>
           </Card>
 
-          <PoLineMatcher />
-
           {selectedPO ? (
-            <Card className="p-5" data-testid="card-po-detail">
+            <Card id="po-detail" className="p-5 scroll-mt-4" data-testid="card-po-detail">
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <h3 className="text-sm font-semibold tracking-tight">{selectedPO.poNumber} · {selectedPO.supplier || (selectedPO.status === 'cancelled' ? 'Cancelada' : '—')}</h3>
@@ -1033,6 +1050,8 @@ export default function MaterialManagerPage() {
               )}
             </Card>
           ) : null}
+
+          <PoLineMatcher />
         </TabsContent>
 
         <TabsContent value="costs" className="mt-4 space-y-4">
