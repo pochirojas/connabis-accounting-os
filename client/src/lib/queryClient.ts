@@ -2,12 +2,21 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
 const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 
+// When any request comes back 401 (session expired / logged out), clear the
+// cached user so <AuthGate> shows the login screen.
+function handleUnauthorized(url: string) {
+  if (!url.includes('/api/auth/')) queryClient.setQueryData(['/api/auth/me'], null);
+}
+
 async function throwIfResNotOk(res: Response) {
+  if (res.status === 401) handleUnauthorized(res.url);
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
     throw new Error(`${res.status}: ${text}`);
   }
 }
+
+export { API_BASE };
 
 export async function apiRequest(
   method: string,
@@ -18,6 +27,7 @@ export async function apiRequest(
     method,
     headers: data ? { "Content-Type": "application/json" } : {},
     body: data ? JSON.stringify(data) : undefined,
+    credentials: "include",
   });
 
   await throwIfResNotOk(res);
@@ -30,7 +40,7 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(`${API_BASE}${queryKey.join("/")}`);
+    const res = await fetch(`${API_BASE}${queryKey.join("/")}`, { credentials: "include" });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
       return null;

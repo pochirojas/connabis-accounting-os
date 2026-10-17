@@ -26,8 +26,7 @@ import {
   type UpdateMaterialOverride,
 } from '@shared/schema';
 
-const MM_MATERIALS_CSV = '/home/user/workspace/material-manager-export.csv';
-const MM_BOM_CSV = '/home/user/workspace/material-manager-export-material-product.csv';
+import { MM_MATERIALS_CSV, MM_BOM_CSV } from './config';
 const COST_HISTORY_JSON = path.resolve(
   process.cwd(),
   'server/data/material-cost-history.json',

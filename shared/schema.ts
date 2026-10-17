@@ -180,13 +180,63 @@ export type IncomeDetail = {
   fulfillmentStatus: 'fulfilled' | 'unfulfilled' | 'partial';
 };
 
+// ---------- Expenses ----------
+// Single source of truth for every expense: historical sheet rows, manual
+// entries, the mobile capture form and Discord imports all live in one table.
+export const EXPENSE_BRANDS = ['connabis', 'turros', 'shared'] as const;
+export type ExpenseBrand = typeof EXPENSE_BRANDS[number];
+export const EXPENSE_BRAND_LABELS: Record<ExpenseBrand, string> = {
+  connabis: 'Connabis',
+  turros: 'Turros',
+  shared: 'Compartido',
+};
+
+// capturado  → entered quickly (form / Discord), not yet checked. NOT in P&L.
+// revisado   → checked by one of us; counts in P&L.
+// en_dataico → also registered in Dataico (official books).
+// historico  → imported from the old sheet, before the cut-over date.
+// descartado → duplicate / not a company expense. Never counted.
+export const EXPENSE_STATUSES = ['capturado', 'revisado', 'en_dataico', 'historico', 'descartado'] as const;
+export type ExpenseStatus = typeof EXPENSE_STATUSES[number];
+export const EXPENSE_STATUS_LABELS: Record<ExpenseStatus, string> = {
+  capturado: 'Por revisar',
+  revisado: 'Revisado',
+  en_dataico: 'En Dataico',
+  historico: 'Histórico (sheet)',
+  descartado: 'Descartado',
+};
+export const BOOKED_EXPENSE_STATUSES: ExpenseStatus[] = ['revisado', 'en_dataico', 'historico'];
+
+export const DOCUMENT_TYPES = ['factura_electronica', 'documento_soporte', 'cuenta_cobro', 'recibo', 'sin_soporte'] as const;
+export type DocumentType = typeof DOCUMENT_TYPES[number];
+export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
+  factura_electronica: 'Factura electrónica',
+  documento_soporte: 'Documento soporte (lo emitimos en Dataico)',
+  cuenta_cobro: 'Cuenta de cobro',
+  recibo: 'Recibo / tirilla',
+  sin_soporte: 'Sin soporte',
+};
+
+export const EXPENSE_SOURCES = ['shopify', 'sheet', 'manual', 'capture', 'discord'] as const;
+export type ExpenseSource = typeof EXPENSE_SOURCES[number];
+
+export type ExpenseAttachment = {
+  id: string;
+  expenseId: string;
+  fileName: string;
+  mimeType: string;
+  url: string;          // /api/attachments/:id for stored files, or external URL
+  external: boolean;
+  createdAt: string;
+};
+
 export type Expense = {
   id: string;
   date: string;
   month: string;       // 'YYYY-MM'
   category: string;
   description: string;
-  amount: number;
+  amount: number;      // COP
   paidTo?: string;
   paidWith?: string;
   paidBy?: string;
@@ -196,21 +246,50 @@ export type Expense = {
   tax?: number;
   notes?: string;
   classification?: 'operating' | 'inventory' | 'capex' | 'uncategorized';
-  source: 'shopify' | 'sheet' | 'manual';
+  source: ExpenseSource;
+  // Accounting / DIAN fields
+  brand?: ExpenseBrand;
+  supplierNit?: string;
+  documentType?: DocumentType;
+  documentNumber?: string;
+  cufe?: string;
+  iva?: number;
+  retefuente?: number;
+  status?: ExpenseStatus;
+  dataicoRef?: string;
+  sourceRef?: string;
+  rawText?: string;
+  capturedBy?: string;
+  hasInvoice?: boolean;
+  attachments?: ExpenseAttachment[];
+  createdAt?: string;
+  updatedAt?: string;
 };
 
-export const insertExpenseSchema = z.object({
-  date: z.string().min(1),
+const expenseFieldsSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha inválida (YYYY-MM-DD).'),
   category: z.string().min(1),
   description: z.string().min(1),
   amount: z.number().positive().max(500_000_000),
   paidTo: z.string().optional(),
   paidWith: z.string().optional(),
+  paidBy: z.string().optional(),
   currency: z.enum(['COP', 'USD']).default('COP'),
   originalAmount: z.number().positive().optional(),
   fxRate: z.number().positive().optional(),
   notes: z.string().optional(),
-}).superRefine((value, ctx) => {
+  brand: z.enum(EXPENSE_BRANDS).optional(),
+  supplierNit: z.string().max(20).optional(),
+  documentType: z.enum(DOCUMENT_TYPES).optional(),
+  documentNumber: z.string().max(60).optional(),
+  cufe: z.string().max(120).optional(),
+  iva: z.number().min(0).optional(),
+  retefuente: z.number().min(0).optional(),
+  status: z.enum(EXPENSE_STATUSES).optional(),
+  dataicoRef: z.string().max(60).optional(),
+});
+
+function refineUsd(value: { currency?: string; fxRate?: number; originalAmount?: number }, ctx: z.RefinementCtx) {
   if (value.currency === 'USD' && (!value.fxRate || !value.originalAmount)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -218,11 +297,67 @@ export const insertExpenseSchema = z.object({
       message: 'Los gastos en USD requieren monto original y TRM.',
     });
   }
-});
+}
 
+export const insertExpenseSchema = expenseFieldsSchema.superRefine(refineUsd);
 export type InsertExpense = z.infer<typeof insertExpenseSchema>;
 export const updateExpenseSchema = insertExpenseSchema;
 export type UpdateExpense = z.infer<typeof updateExpenseSchema>;
+
+export const attachmentUploadSchema = z.object({
+  fileName: z.string().min(1).max(200),
+  mimeType: z.string().regex(/^(image\/(jpeg|png|webp|heic|heif)|application\/pdf|application\/xml|text\/xml|application\/zip)$/, 'Tipo de archivo no permitido.'),
+  dataBase64: z.string().min(1),
+});
+export type AttachmentUpload = z.infer<typeof attachmentUploadSchema>;
+
+// Quick capture from the phone. Only amount + (description or photo) are required.
+export const captureExpenseSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  amount: z.number().positive().max(500_000_000),
+  currency: z.enum(['COP', 'USD']).default('COP'),
+  fxRate: z.number().positive().optional(),
+  description: z.string().max(300).default(''),
+  paidTo: z.string().max(120).optional(),
+  paidWith: z.string().max(60).optional(),
+  brand: z.enum(EXPENSE_BRANDS).optional(),
+  category: z.string().max(60).optional(),
+  hasInvoice: z.boolean().default(false),
+  attachments: z.array(attachmentUploadSchema).max(5).default([]),
+}).superRefine((value, ctx) => {
+  if (!value.description.trim() && value.attachments.length === 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['description'], message: 'Agrega una descripción o una foto del soporte.' });
+  }
+  if (value.currency === 'USD' && !value.fxRate) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['fxRate'], message: 'Los gastos en USD requieren TRM.' });
+  }
+});
+export type CaptureExpense = z.infer<typeof captureExpenseSchema>;
+
+export const updateExpenseStatusSchema = z.object({ status: z.enum(EXPENSE_STATUSES) });
+
+export type DiscordImportCandidate = {
+  sourceRef: string;
+  date: string;
+  author: string;
+  rawText: string;
+  amount: number | null;
+  currency: 'COP' | 'USD';
+  confidence: 'alta' | 'media' | 'baja';
+  paidWith?: string;
+  brand?: ExpenseBrand;
+  attachmentUrls: string[];
+  duplicate: boolean;
+};
+export type DiscordImportResult = {
+  channel: string;
+  totalMessages: number;
+  candidates: DiscordImportCandidate[];
+  imported: number;
+  skippedDuplicates: number;
+  skippedNoContent: number;
+  dryRun: boolean;
+};
 
 export type DailyPerformance = {
   date: string;
@@ -333,12 +468,18 @@ export type CashFlowSnapshot = {
   explanation: string;
 };
 
+export const CASH_ACCOUNT_IDS = [
+  'nequi', 'nequi_wompi', 'nu_debit', 'nu_credit_card_debt', 'daviplata',
+  'wompi_pending', 'bancolombia', 'mercado_pago', 'efectivo',
+] as const;
+export type CashAccountId = typeof CASH_ACCOUNT_IDS[number];
 export type CashAccount = {
-  id: 'nequi' | 'nu_debit' | 'mercado_pago_released' | 'mercado_pago_unreleased' | 'nu_credit_card_debt';
+  id: CashAccountId;
   label: string;
   type: 'asset' | 'pending_asset' | 'liability';
   amount: number;
   description: string;
+  updatedAt?: string;
 };
 
 export const updateCashAccountSchema = z.object({

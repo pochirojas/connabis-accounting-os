@@ -14,3 +14,6 @@ data.db-journal
 
 *.log
 .DS_Store
+
+# Runtime data (DB, Material Manager CSVs, attachments) — lives in DATA_DIR
+data/

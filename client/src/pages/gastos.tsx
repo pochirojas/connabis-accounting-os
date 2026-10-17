@@ -14,7 +14,12 @@ import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
   PieChart, Pie, Cell,
 } from 'recharts';
-import type { MonthlyRow, Expense } from '@shared/schema';
+import type { MonthlyRow, Expense, ExpenseBrand, DocumentType } from '@shared/schema';
+import { EXPENSE_BRAND_LABELS, EXPENSE_STATUS_LABELS } from '@shared/schema';
+import { BRAND_OPTIONS, CATEGORY_OPTIONS, DOCUMENT_OPTIONS, PAID_WITH_OPTIONS } from '@/lib/expense-options';
+import { ExpenseEditorDialog } from '@/components/expenses/expense-editor-dialog';
+import { ExpenseReviewQueue } from '@/components/expenses/expense-review-queue';
+import { DiscordImportPanel } from '@/components/expenses/discord-import-panel';
 import { formatCOP, formatCOPCompact, formatDate } from '@/lib/format';
 import { KpiCard } from '@/components/kpi-card';
 import { Receipt, TrendingDown, TrendingUp, AlertTriangle, Plus, Trash2, Pencil, Save, X, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -74,15 +79,15 @@ type ExpenseDraft = {
   originalAmount: string;
   fxRate: string;
   notes: string;
+  brand: ExpenseBrand | '';
+  documentType: DocumentType | '';
 };
 
-const CATEGORY_OPTIONS = ['Operación', 'Inventario', 'Capex', 'Marketing', 'Logística', 'Comisiones', 'Impuestos', 'Muestras', 'Reposiciones', 'Software', 'Nómina', 'Servicios profesionales', 'Otros'];
 const PIE_COLORS = [
   'hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))',
   'hsl(var(--chart-4))', 'hsl(var(--chart-5))',
   'hsl(160 60% 45%)', 'hsl(45 90% 55%)', 'hsl(0 70% 55%)',
 ];
-const PAID_WITH_OPTIONS = ['Nequi', 'Nu Crédito', 'Nu Débito', 'Mercado Pago liberado', 'Mercado Pago no liberado', 'Efectivo', 'Otro'];
 
 // Historic rows often have blank / "No especificado" paidWith. Display-only: prefer
 // "Nequi" for those, since every new flow is Nequi or Nu Crédito. We do NOT rewrite
@@ -110,9 +115,10 @@ export default function Gastos() {
     originalAmount: '',
     fxRate: '',
     notes: '',
+    brand: '',
+    documentType: '',
   });
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<ExpenseDraft | null>(null);
+  const [editorExpense, setEditorExpense] = useState<Expense | null>(null);
   const [exportMonth, setExportMonth] = useState('all');
   const [exportYear, setExportYear] = useState('all');
   const [monthlySort, setMonthlySort] = useState<ChartSortOrder>('oldest');
@@ -336,33 +342,6 @@ export default function Gastos() {
     },
   });
 
-  const updateExpense = useMutation({
-    mutationFn: async ({ id, payload }: {
-      id: string;
-      payload: {
-        date: string;
-        category: string;
-        description: string;
-        amount: number;
-        paidTo?: string;
-        paidWith?: string;
-        currency: 'COP' | 'USD';
-        originalAmount?: number;
-        fxRate?: number;
-        notes?: string;
-      };
-    }) => (await apiRequest('PUT', `/api/expenses/${id}`, payload)).json() as Promise<Expense>,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/expenses'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/months'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/kpis'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/cash-accounts'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/cash-flow'] });
-      setEditingId(null);
-      setEditDraft(null);
-    },
-  });
-
   const deleteExpense = useMutation({
     mutationFn: async (id: string) => (await apiRequest('DELETE', `/api/expenses/${id}`)).json(),
     onSuccess: () => {
@@ -400,33 +379,13 @@ export default function Gastos() {
       originalAmount,
       fxRate,
       notes: source.notes.trim() || undefined,
+      brand: source.brand || undefined,
+      documentType: source.documentType || undefined,
     };
   }
 
   function startEdit(expense: Expense) {
-    const sellerExists = sellerOptions.includes(expense.paidTo ?? '');
-    setEditingId(expense.id);
-    setEditDraft({
-      date: expense.date,
-      category: expense.category || 'Operación',
-      description: expense.description,
-      paidTo: sellerExists ? expense.paidTo ?? 'Otro' : 'Otro',
-      paidToOther: sellerExists ? '' : expense.paidTo ?? '',
-      paidWith: displayPaidWith(expense.paidWith),
-      currency: expense.currency ?? 'COP',
-      amount: formatAmountInput(String(expense.amount)),
-      originalAmount: formatAmountInput(String(expense.originalAmount ?? expense.amount)),
-      fxRate: expense.fxRate ? formatAmountInput(String(expense.fxRate)) : '',
-      notes: expense.notes ?? '',
-    });
-  }
-
-  function saveEdit(e: FormEvent) {
-    e.preventDefault();
-    if (!editingId || !editDraft) return;
-    const payload = buildExpensePayload(editDraft);
-    if (!payload) return;
-    updateExpense.mutate({ id: editingId, payload });
+    setEditorExpense(expense);
   }
 
   async function downloadExpensesCsv(scope: 'month' | 'year' | 'all') {
@@ -446,13 +405,18 @@ export default function Gastos() {
   }
 
   return (
-    <Layout title="Gastos & Contabilidad" subtitle="Ingresos desde Shopify live · gastos históricos desde Expenses sheet + gastos manuales nuevos">
+    <Layout title="Gastos & Contabilidad" subtitle="Ingresos desde Shopify · gastos revisados (históricos del sheet + nuevos). Lo capturado espera en Por revisar.">
       <section className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <KpiCard label="Ingresos totales" value={formatCOP(totalIncome)} icon={TrendingUp} emphasis="emerald" testId="kpi-gastos-ingresos" />
         <KpiCard label="Gastos operativos" value={formatCOP(totalExpenses)} icon={Receipt} testId="kpi-gastos-totales" hint="Operating + sin categoría" />
         <KpiCard label="Inventario / Capex" value={formatCOP(totalInventoryCapex)} icon={Receipt} testId="kpi-gastos-inventory-capex" hint="Visible, excluido del P&L operativo" />
         <KpiCard label="Utilidad neta" value={formatCOP(totalProfit)} icon={totalProfit >= 0 ? TrendingUp : TrendingDown} emphasis="gold" testId="kpi-gastos-utilidad" />
         <KpiCard label="Meses con pérdida" value={`${lossMonths} / ${monthsWithManual.length || 5}`} icon={AlertTriangle} testId="kpi-meses-perdida" hint="Incluye manuales guardados" />
+      </section>
+
+      <section className="mt-6 grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <ExpenseReviewQueue />
+        <DiscordImportPanel />
       </section>
 
       <section className="mt-6">
@@ -504,12 +468,12 @@ export default function Gastos() {
             <div>
               <h2 className="text-sm font-semibold tracking-tight">Agregar gasto manual</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Guarda gastos nuevos reales. El histórico viene del tab Expenses del Excel contable.
+                Formulario completo (queda como revisado). Para algo rápido desde el celular usa "Capturar gasto".
               </p>
             </div>
             <Badge variant="outline" className="text-[11px]">Manual nuevo</Badge>
           </div>
-          <form onSubmit={addExpense} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[140px_150px_180px_1fr_150px_120px_170px_auto] gap-3 items-end">
+          <form onSubmit={addExpense} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 items-end">
             <label className="space-y-1.5">
               <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Fecha</span>
               <Input
@@ -574,6 +538,30 @@ export default function Gastos() {
                 {PAID_WITH_OPTIONS.map(c => (
                   <option key={c} value={c}>{c}</option>
                 ))}
+              </select>
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Marca</span>
+              <select
+                value={draft.brand}
+                onChange={e => setDraft(prev => ({ ...prev, brand: e.target.value as ExpenseBrand | '' }))}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                data-testid="select-expense-brand"
+              >
+                <option value="">— Elegir —</option>
+                {BRAND_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Soporte</span>
+              <select
+                value={draft.documentType}
+                onChange={e => setDraft(prev => ({ ...prev, documentType: e.target.value as DocumentType | '' }))}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                data-testid="select-expense-document-type"
+              >
+                <option value="">— Elegir —</option>
+                {DOCUMENT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </label>
             <label className="space-y-1.5">
@@ -698,105 +686,7 @@ export default function Gastos() {
               </Button>
             </div>
           </div>
-          <Dialog
-            open={editDraft !== null}
-            onOpenChange={(open) => { if (!open) { setEditingId(null); setEditDraft(null); } }}
-          >
-            <DialogContent
-              className="max-w-3xl max-h-[90vh] overflow-y-auto"
-              data-testid="dialog-edit-expense"
-            >
-              <DialogHeader>
-                <DialogTitle className="text-emerald-200">Editando gasto existente</DialogTitle>
-                <DialogDescription>
-                  Se guarda sobre el mismo ID, sin duplicar. Si es manual, ajusta caja revirtiendo el valor anterior.
-                </DialogDescription>
-              </DialogHeader>
-              {editDraft && (
-                <form onSubmit={saveEdit} data-testid="form-edit-expense">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                    <label className="space-y-1.5">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Fecha</span>
-                      <Input type="date" value={editDraft.date} onChange={e => setEditDraft(prev => prev ? { ...prev, date: e.target.value } : prev)} data-testid="input-edit-expense-date" />
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Categoría</span>
-                      <select value={editDraft.category} onChange={e => setEditDraft(prev => prev ? { ...prev, category: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-category">
-                        {CATEGORY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Pagado a</span>
-                      <select value={editDraft.paidTo} onChange={e => setEditDraft(prev => prev ? { ...prev, paidTo: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-paid-to">
-                        {sellerOptions.map(seller => <option key={seller} value={seller}>{seller}</option>)}
-                      </select>
-                    </label>
-                    {editDraft.paidTo === 'Otro' && (
-                      <label className="space-y-1.5">
-                        <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Nuevo seller</span>
-                        <Input value={editDraft.paidToOther} onChange={e => setEditDraft(prev => prev ? { ...prev, paidToOther: e.target.value } : prev)} data-testid="input-edit-expense-paid-to-other" />
-                      </label>
-                    )}
-                    <label className="space-y-1.5 sm:col-span-2 xl:col-span-3">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Descripción</span>
-                      <Input value={editDraft.description} onChange={e => setEditDraft(prev => prev ? { ...prev, description: e.target.value } : prev)} data-testid="input-edit-expense-description" />
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Pagado con</span>
-                      <select value={editDraft.paidWith} onChange={e => setEditDraft(prev => prev ? { ...prev, paidWith: e.target.value } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-paid-with">
-                        {(PAID_WITH_OPTIONS.includes(editDraft.paidWith) ? PAID_WITH_OPTIONS : [editDraft.paidWith, ...PAID_WITH_OPTIONS]).map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Moneda</span>
-                      <select value={editDraft.currency} onChange={e => setEditDraft(prev => prev ? { ...prev, currency: e.target.value as 'COP' | 'USD' } : prev)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" data-testid="select-edit-expense-currency">
-                        <option value="COP">COP</option>
-                        <option value="USD">USD</option>
-                      </select>
-                    </label>
-                    <label className="space-y-1.5">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{editDraft.currency === 'USD' ? 'Monto COP calculado' : 'Monto COP'}</span>
-                      <Input
-                        type="text"
-                        inputMode="decimal"
-                        value={editDraft.currency === 'USD' && editDraft.originalAmount && editDraft.fxRate ? formatAmountInput(String(parseAmountInput(editDraft.originalAmount) * parseAmountInput(editDraft.fxRate))) : editDraft.amount}
-                        onChange={e => setEditDraft(prev => prev ? { ...prev, amount: formatAmountInput(e.target.value) } : prev)}
-                        className="text-right tabular pr-4"
-                        disabled={editDraft.currency === 'USD'}
-                        data-testid="input-edit-expense-amount"
-                      />
-                    </label>
-                    {editDraft.currency === 'USD' && (
-                      <>
-                        <label className="space-y-1.5">
-                          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Monto USD</span>
-                          <Input type="text" inputMode="decimal" value={editDraft.originalAmount} onChange={e => setEditDraft(prev => prev ? { ...prev, originalAmount: formatAmountInput(e.target.value) } : prev)} className="text-right tabular pr-4" data-testid="input-edit-expense-original-amount" />
-                        </label>
-                        <label className="space-y-1.5">
-                          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">TRM</span>
-                          <Input type="text" inputMode="decimal" value={editDraft.fxRate} onChange={e => setEditDraft(prev => prev ? { ...prev, fxRate: formatAmountInput(e.target.value) } : prev)} className="text-right tabular pr-4" data-testid="input-edit-expense-fx-rate" />
-                        </label>
-                      </>
-                    )}
-                    <label className="space-y-1.5 sm:col-span-2 xl:col-span-3">
-                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Notas</span>
-                      <Input value={editDraft.notes} onChange={e => setEditDraft(prev => prev ? { ...prev, notes: e.target.value } : prev)} data-testid="input-edit-expense-notes" />
-                    </label>
-                  </div>
-                  <div className="mt-5 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
-                    <Button type="button" variant="ghost" onClick={() => { setEditingId(null); setEditDraft(null); }} data-testid="button-cancel-edit-expense">
-                      <X className="h-4 w-4 mr-1" />
-                      Cancelar
-                    </Button>
-                    <Button type="submit" className="gap-2" disabled={updateExpense.isPending} data-testid="button-save-edit-expense">
-                      <Save className="h-4 w-4" />
-                      {updateExpense.isPending ? 'Guardando' : 'Guardar cambios'}
-                    </Button>
-                  </div>
-                </form>
-              )}
-            </DialogContent>
-          </Dialog>
+          <ExpenseEditorDialog expense={editorExpense} onClose={() => setEditorExpense(null)} />
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
@@ -836,6 +726,8 @@ export default function Gastos() {
                       <Badge variant={e.source === 'shopify' ? 'default' : e.source === 'manual' ? 'outline' : 'secondary'} className="text-[10px] uppercase tracking-wide">
                         {e.source}
                       </Badge>
+                      {e.brand ? <Badge variant="secondary" className="ml-1 text-[10px]">{EXPENSE_BRAND_LABELS[e.brand]}</Badge> : null}
+                      {e.status === 'en_dataico' ? <Badge variant="outline" className="ml-1 text-[10px]">{EXPENSE_STATUS_LABELS.en_dataico}</Badge> : null}
                     </TableCell>
                     <TableCell>
                       <Badge
@@ -867,7 +759,7 @@ export default function Gastos() {
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                      {e.source === 'manual' ? (
+                      {e.source !== 'sheet' ? (
                         <Button
                           variant="ghost"
                           size="icon"

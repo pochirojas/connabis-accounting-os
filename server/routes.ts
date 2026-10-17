@@ -3,7 +3,9 @@ import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { insertExpenseSchema, updateCashAccountSchema, updateCloseChecklistSchema, updateExpenseSchema } from '@shared/schema';
+import os from 'node:os';
+import path from 'node:path';
+import { attachmentUploadSchema, insertExpenseSchema, updateCashAccountSchema, updateCloseChecklistSchema, updateExpenseSchema } from '@shared/schema';
 import type { Alert, DailyPerformance, Expense, Product } from '@shared/schema';
 import { sqlite, storage } from './storage';
 import {
@@ -91,14 +93,18 @@ import {
   createLocalMaterialSchema,
 } from '@shared/schema';
 import type { MmPurchaseOrder, PurchaseOrder } from '@shared/schema';
+import { integrationPhases, glossaryTerms, closeChecklist } from './static-config';
 import {
-  channels, years, months, kpis, products,
-  materials, alerts, integrationPhases,
-  dailyPerformance, glossaryTerms, accountingSuggestions,
-  incomeDetails, restockRecommendations,
-  ceoMetrics, pnlRows, cashFlowSnapshots, inventoryAccountingRows, closeChecklist,
-} from './seed';
+  BOOKED_EXPENSE_STATUSES,
+  captureExpenseSchema,
+  updateExpenseStatusSchema,
+} from '@shared/schema';
+import type { CashFlowSnapshot, CeoMetric, ExpenseStatus } from '@shared/schema';
+import type { DiscordExport } from './discord-import';
+import { runDiscordImport } from './discord-import-runner';
+import { currentUserName } from './auth';
 import { cached, cachedSync, cacheInvalidate } from './cache';
+import { HISTORICAL_EXPENSES_JSON, MM_BOM_CSV, MM_MATERIALS_CSV } from './config';
 import {
   deleteManualCogsOverride,
   getManualCogsOverrideByMatchKey,
@@ -114,12 +120,10 @@ const SHOPIFY_ORDERS_TTL = 60_000;     // 1 min — paginated Shopify orders
 const SHOPIFY_SALES_TTL = 60_000;      // 1 min — ShopifyQL aggregations
 const SHOPIFY_PRODUCTS_TTL = 120_000;  // 2 min — products catalog
 const EXPENSES_TTL = 30_000;           // 30 s — manual+historical expenses
-const HISTORICAL_EXPENSES_FILE_TTL = 5 * 60_000; // 5 min — JSON file rarely changes
 
 const SHOPIFY_API_VERSION = '2026-04';
-const MATERIAL_MANAGER_BOM_PATH = '/home/user/workspace/material-manager-export-material-product.csv';
-const MATERIAL_MANAGER_MATERIALS_PATH = '/home/user/workspace/material-manager-export.csv';
-const HISTORICAL_EXPENSES_PATH = '/home/user/workspace/connabis-accounting-os/server/data/historical-expenses.json';
+const MATERIAL_MANAGER_BOM_PATH = MM_BOM_CSV;
+const MATERIAL_MANAGER_MATERIALS_PATH = MM_MATERIALS_CSV;
 
 // Map a real MM purchase order onto the legacy PurchaseOrder shape used by the
 // existing /api/purchase-orders consumers. Quantity is the SUM of all line
@@ -155,16 +159,6 @@ function mmPoToLegacy(po: MmPurchaseOrder): PurchaseOrder {
   };
 }
 
-function loadHistoricalExpenses() {
-  return cachedSync('historical-expenses-file', HISTORICAL_EXPENSES_FILE_TTL, () => {
-    if (!fs.existsSync(HISTORICAL_EXPENSES_PATH)) return [];
-    const payload = JSON.parse(fs.readFileSync(HISTORICAL_EXPENSES_PATH, 'utf-8')) as {
-      expenses?: Array<Record<string, unknown>>;
-    };
-    return payload.expenses ?? [];
-  });
-}
-
 // Effective-field fallback: when paidTo is blank/null, surface description as paidTo
 // so historic provider analytics (pivot, breakdowns, CSV) attribute the expense to
 // something instead of an "(sin proveedor)" bucket. Idempotent — never overwrites a
@@ -179,14 +173,10 @@ function applyPaidToFallback<T extends { paidTo?: string | null; description?: s
 
 async function loadAllExpenses() {
   return cached('expenses-all', EXPENSES_TTL, async () => {
-    const manualExpenses = await storage.listManualExpenses();
-    const overrides = await storage.listExpenseOverrides();
-    return [...loadHistoricalExpenses(), ...manualExpenses]
-      .map(expense => ({
-        ...expense,
-        ...(overrides[String(expense.id)] ?? {}),
-      }))
-      .map(applyPaidToFallback);
+    // Only booked expenses (revisado / en_dataico / historico) feed KPIs and P&L.
+    // Items still in the review queue (capturado) are excluded on purpose.
+    const booked = await storage.listExpenses({ statuses: BOOKED_EXPENSE_STATUSES });
+    return booked.map(applyPaidToFallback) as Array<Expense & Record<string, unknown>>;
   });
 }
 
@@ -1805,11 +1795,7 @@ export async function registerRoutes(
       res.json(buildDashboardKpis(orders, allExpenses));
     } catch (error) {
       console.error('[kpis] failed to calculate real dashboard metrics', error);
-      res.json({
-        ...kpis,
-        topProductFamily: `${kpis.topProductFamily} (seed/prototipo)`,
-        dataQualityNote: 'Seed/prototipo: Shopify o Material Manager no respondieron al calcular KPIs reales.',
-      });
+      res.status(502).json({ error: 'Shopify no respondió. No se muestran KPIs para no mezclar datos de prueba.' });
     }
   });
   app.get('/api/channels', async (_req, res) => {
@@ -1846,7 +1832,19 @@ export async function registerRoutes(
       if (account.type === 'liability') return sum - account.amount;
       return sum + account.amount;
     }, 0);
-    res.json(ceoMetrics.map(metric => metric.id === 'cash' ? { ...metric, value: netCash } : metric));
+    const lastUpdate = accounts.map(account => account.updatedAt).filter(Boolean).sort().pop();
+    const metrics: CeoMetric[] = [{
+      id: 'cash',
+      label: 'Caja neta',
+      value: netCash,
+      unit: 'COP',
+      status: lastUpdate ? 'ok' : 'watch',
+      subtitle: lastUpdate
+        ? `Saldos del último extracto (actualizado ${lastUpdate.slice(0, 10)}).`
+        : 'Sin saldos cargados: ingrésalos en Financiero → Cuentas.',
+      action: 'Actualiza los saldos con el extracto de cada cuenta en el cierre mensual.',
+    }];
+    res.json(metrics);
   });
 
   // Tabs
@@ -1857,8 +1855,8 @@ export async function registerRoutes(
         loadLiveShopifyIncomeOrders(),
       ]);
       res.json(addSalesToProducts(productRows, mapOrdersToAccountingLines(orders)));
-    } catch {
-      res.json(products);
+    } catch (error) {
+      res.status(502).json({ error: error instanceof Error ? error.message : 'shopify_products_failed' });
     }
   });
   // Connabis & Co — B2B tier pricing computed from current Shopify retail
@@ -1871,12 +1869,13 @@ export async function registerRoutes(
       ]);
       const enriched = addSalesToProducts(productRows, mapOrdersToAccountingLines(orders));
       res.json(computeB2bPricing(enriched));
-    } catch {
-      res.json(computeB2bPricing(products));
+    } catch (error) {
+      res.status(502).json({ error: error instanceof Error ? error.message : 'b2b_pricing_failed' });
     }
   });
 
-  app.get('/api/materials', (_req, res) => res.json(materials));
+  // Legacy seed materials removed — use /api/material-manager/*.
+  app.get('/api/materials', (_req, res) => res.json([]));
   // Real MM purchase orders — replaces the legacy seed POs entirely.
   app.get('/api/purchase-orders', (_req, res) => {
     const real = listMmPurchaseOrders(sqlite).map(po => {
@@ -2135,36 +2134,84 @@ export async function registerRoutes(
         clasificacion: expense.classification,
         origen: expense.source,
         notas: expense.notes ?? '',
+        marca: (expense as { brand?: string }).brand ?? '',
+        nit_proveedor: (expense as { supplierNit?: string }).supplierNit ?? '',
+        tipo_soporte: (expense as { documentType?: string }).documentType ?? '',
+        numero_documento: (expense as { documentNumber?: string }).documentNumber ?? '',
+        iva_cop: (expense as { iva?: number }).iva ?? '',
+        retencion_cop: (expense as { retefuente?: number }).retefuente ?? '',
+        estado: (expense as { status?: string }).status ?? '',
+        ref_dataico: (expense as { dataicoRef?: string }).dataicoRef ?? '',
       }));
     sendCsv(res, `connabis-gastos-${month ?? year ?? 'all-time'}.csv`, rows, [
       'fecha', 'mes', 'categoria', 'descripcion', 'pagado_a', 'pagado_con',
       'pagado_por', 'moneda', 'monto_original', 'trm', 'impuesto_cop', 'monto_cop', 'clasificacion', 'origen', 'notas',
+      'marca', 'nit_proveedor', 'tipo_soporte', 'numero_documento', 'iva_cop', 'retencion_cop', 'estado', 'ref_dataico',
     ]);
   });
+  // ---------- Expenses ----------
+  // POST /api/expenses → full form, already checked by a person → 'revisado'.
   app.post('/api/expenses', async (req, res) => {
     const parsed = insertExpenseSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ error: 'Invalid expense', details: parsed.error.flatten() });
+      return res.status(400).json({ error: 'Gasto inválido', details: parsed.error.flatten() });
     }
     try {
-      const created = await storage.createManualExpense(parsed.data);
+      const created = await storage.createExpense(parsed.data, {
+        source: 'manual',
+        status: parsed.data.status ?? 'revisado',
+        capturedBy: currentUserName(req),
+      });
       cacheInvalidate('expenses-all');
-      res.status(201).json(created);
+      res.status(201).json(withExpenseClassification(created));
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : 'expense_create_failed' });
     }
   });
+
+  // Quick capture from the phone → review queue.
+  app.post('/api/expenses/capture', async (req, res) => {
+    const parsed = captureExpenseSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Captura inválida', details: parsed.error.flatten() });
+    }
+    const data = parsed.data;
+    try {
+      const created = await storage.createExpense({
+        date: data.date,
+        category: data.category || 'Sin categoría',
+        description: data.description.trim() || data.paidTo || 'Gasto capturado',
+        amount: data.currency === 'USD' ? data.amount * (data.fxRate ?? 0) : data.amount,
+        currency: data.currency,
+        originalAmount: data.currency === 'USD' ? data.amount : undefined,
+        fxRate: data.fxRate,
+        paidTo: data.paidTo,
+        paidWith: data.paidWith,
+        paidBy: currentUserName(req),
+        brand: data.brand,
+      }, { source: 'capture', status: 'capturado', capturedBy: currentUserName(req), hasInvoice: data.hasInvoice });
+      for (const upload of data.attachments) await storage.addAttachment(created.id, upload);
+      res.status(201).json(await storage.getExpense(created.id));
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'capture_failed' });
+    }
+  });
+
+  app.get('/api/expenses/queue', async (_req, res) => {
+    res.json(await storage.listExpenses({ statuses: ['capturado'] }));
+  });
+
+  app.get('/api/expenses/discarded', async (_req, res) => {
+    res.json(await storage.listExpenses({ statuses: ['descartado'] }));
+  });
+
   app.put('/api/expenses/:id', async (req, res) => {
     const parsed = updateExpenseSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ error: 'Invalid expense update', details: parsed.error.flatten() });
+      return res.status(400).json({ error: 'Gasto inválido', details: parsed.error.flatten() });
     }
     try {
-      const existing = (await loadAllExpenses()).find(expense => String(expense.id) === req.params.id);
-      if (!existing) return res.status(404).json({ error: 'expense_not_found' });
-      const updated = req.params.id.startsWith('manual-')
-        ? await storage.updateManualExpense(req.params.id, parsed.data)
-        : await storage.upsertExpenseOverride(req.params.id, parsed.data, existing.source);
+      const updated = await storage.updateExpense(req.params.id, parsed.data);
       if (!updated) return res.status(404).json({ error: 'expense_not_found' });
       cacheInvalidate('expenses-all');
       res.json(withExpenseClassification(updated));
@@ -2172,19 +2219,78 @@ export async function registerRoutes(
       res.status(400).json({ error: error instanceof Error ? error.message : 'expense_update_failed' });
     }
   });
-  app.delete('/api/expenses/:id', async (req, res) => {
-    if (!req.params.id.startsWith('manual-')) {
-      return res.status(400).json({ error: 'Solo se pueden eliminar gastos manuales antes de conectar contabilidad.' });
+
+  app.patch('/api/expenses/:id/status', async (req, res) => {
+    const parsed = updateExpenseStatusSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Estado inválido' });
+    try {
+      const updated = await storage.setExpenseStatus(req.params.id, parsed.data.status as ExpenseStatus);
+      if (!updated) return res.status(404).json({ error: 'expense_not_found' });
+      cacheInvalidate('expenses-all');
+      res.json(updated);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'status_update_failed' });
     }
-    const deleted = await storage.deleteManualExpense(req.params.id);
-    cacheInvalidate('expenses-all');
-    res.json({ deleted });
   });
+
+  // Soft delete: nothing is ever hard-deleted, it moves to 'descartado'.
+  app.delete('/api/expenses/:id', async (req, res) => {
+    const updated = await storage.setExpenseStatus(req.params.id, 'descartado');
+    cacheInvalidate('expenses-all');
+    res.json({ deleted: Boolean(updated) });
+  });
+
+  app.post('/api/expenses/:id/attachments', async (req, res) => {
+    const parsed = attachmentUploadSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Archivo inválido', details: parsed.error.flatten() });
+    const existing = await storage.getExpense(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'expense_not_found' });
+    try {
+      res.status(201).json(await storage.addAttachment(req.params.id, parsed.data));
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'attachment_failed' });
+    }
+  });
+
+  app.get('/api/attachments/:id', async (req, res) => {
+    const file = await storage.getAttachmentFile(req.params.id);
+    if (!file) return res.status(404).json({ error: 'attachment_not_found' });
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.fileName)}"`);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.sendFile(file.path);
+  });
+
+  // Discord export (DiscordChatExporter JSON) → review queue.
+  // ?dryRun=1 returns the parsed preview without writing anything.
+  app.post('/api/expenses/import/discord', async (req, res) => {
+    const payload = req.body as DiscordExport;
+    if (!payload || !Array.isArray(payload.messages)) {
+      return res.status(400).json({ error: 'El archivo no parece un export JSON de DiscordChatExporter (falta "messages").' });
+    }
+    const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
+    res.json(await runDiscordImport(storage, payload, { dryRun, capturedBy: currentUserName(req) }));
+  });
+
+  // Full SQLite backup download (consistent snapshot via the backup API).
+  app.get('/api/backup/db', async (_req, res) => {
+    const tmp = path.join(os.tmpdir(), `accounting-os-${Date.now()}.db`);
+    try {
+      await sqlite.backup(tmp);
+      res.download(tmp, `accounting-os-backup-${new Date().toISOString().slice(0, 10)}.db`, () => {
+        fs.rm(tmp, { force: true }, () => {});
+      });
+    } catch (error) {
+      fs.rm(tmp, { force: true }, () => {});
+      res.status(500).json({ error: error instanceof Error ? error.message : 'backup_failed' });
+    }
+  });
+
   app.get('/api/daily-performance', async (_req, res) => {
     try {
       res.json(await buildDailyPerformanceRows());
-    } catch {
-      res.json(dailyPerformance);
+    } catch (error) {
+      res.status(502).json({ error: error instanceof Error ? error.message : 'daily_performance_failed' });
     }
   });
   app.get('/api/day-details', async (req, res) => {
@@ -2288,8 +2394,8 @@ export async function registerRoutes(
       const orders = await loadLiveShopifyIncomeOrders();
       const allExpenses = await loadAllExpenses();
       res.json(buildRealAlerts(mapOrdersToAccountingLines(orders), allExpenses));
-    } catch {
-      res.json(alerts.map(alert => ({ ...alert, source: 'seed' })));
+    } catch (error) {
+      res.status(502).json({ error: error instanceof Error ? error.message : 'alerts_failed' });
     }
   });
   app.get('/api/integration-phases', (_req, res) => res.json(integrationPhases));
@@ -2299,12 +2405,14 @@ export async function registerRoutes(
       const orders = await loadLiveShopifyIncomeOrders();
       const allExpenses = await loadAllExpenses();
       res.json(buildRealSuggestions(mapOrdersToAccountingLines(orders), allExpenses));
-    } catch {
-      res.json(accountingSuggestions);
+    } catch (error) {
+      res.status(502).json({ error: error instanceof Error ? error.message : 'suggestions_failed' });
     }
   });
-  app.get('/api/restock-plan', (_req, res) => res.json(restockRecommendations));
-  app.get('/api/pnl', (_req, res) => res.json(pnlRows));
+  // Restock plan and P&L rows were demo data. They return empty until they are
+  // rebuilt on real Material Manager + Dataico data (sprint 3-4).
+  app.get('/api/restock-plan', (_req, res) => res.json([]));
+  app.get('/api/pnl', (_req, res) => res.json([]));
   app.get('/api/cash-accounts', async (_req, res) => res.json(await storage.listCashAccounts()));
   app.patch('/api/cash-accounts/:id', async (req, res) => {
     const parsed = updateCashAccountSchema.safeParse(req.body);
@@ -2324,18 +2432,16 @@ export async function registerRoutes(
     const pendingCash = accounts
       .filter(account => account.type === 'pending_asset')
       .reduce((sum, account) => sum + account.amount, 0);
-    res.json(cashFlowSnapshots.map(item => {
-      if (item.id === 'cash-on-hand') {
-        return {
-          ...item,
-          amount: netCash,
-          explanation: `Caja neta editable. Disponible hoy: ${usableCash.toLocaleString('es-CO')} COP; pendiente Mercado Pago: ${pendingCash.toLocaleString('es-CO')} COP.`,
-        };
-      }
-      return item;
-    }));
+    const snapshots: CashFlowSnapshot[] = [{
+      id: 'cash-on-hand',
+      label: 'Caja neta (según extractos)',
+      amount: netCash,
+      status: netCash > 0 ? 'ok' : 'watch',
+      explanation: `Disponible hoy: ${usableCash.toLocaleString('es-CO')} COP; pendiente por desembolsar (Wompi/Mercado Pago): ${pendingCash.toLocaleString('es-CO')} COP.`,
+    }];
+    res.json(snapshots);
   });
-  app.get('/api/inventory-accounting', (_req, res) => res.json(inventoryAccountingRows));
+  app.get('/api/inventory-accounting', (_req, res) => res.json([]));
   app.get('/api/close-checklist', async (_req, res) => {
     res.json(await storage.mergeCloseChecklist(closeChecklist));
   });
@@ -2377,14 +2483,14 @@ export async function registerRoutes(
     } catch (error) {
       res.json({
         connected: false,
-        mode: 'mock-seed',
+        mode: 'disconnected',
         shopDomain: null,
         apiVersion: null,
         lastSync: null,
         scopes: [],
         note: error instanceof Error && error.message === 'missing_shopify_credentials'
-          ? 'Faltan variables Shopify en el servidor. El MVP usa datos sembrados.'
-          : 'Shopify no respondió correctamente. El MVP usa datos sembrados.',
+          ? 'Faltan variables Shopify en el servidor.'
+          : 'Shopify no respondió correctamente.',
       });
     }
   });
