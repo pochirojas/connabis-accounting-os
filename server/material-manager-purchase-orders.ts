@@ -1219,7 +1219,7 @@ export function reversePurchaseOrderReceipt(sqlite: Database.Database, idOrNumbe
 // Order of preference: exact SKU > exact normalized name > fuzzy token-overlap.
 // The matcher NEVER mutates lines on its own — the UI must call the apply
 // endpoint with an explicit lineId + materialId.
-import type { MmMaterialEffective, PoLineMatchSuggestion } from '@shared/schema';
+import type { MmMaterialEffective, MmPoStatus, PoLineMatchSuggestion } from '@shared/schema';
 
 function normalizeNameKey(value: string): string {
   return value

@@ -798,8 +798,9 @@ function classifyExpense(expense: Record<string, unknown>): ExpenseClassificatio
   return 'operating';
 }
 
-function splitOperatingAndInventoryExpenses(expenses: Array<Record<string, unknown>>) {
-  return expenses.reduce((summary, expense) => {
+type ExpenseSplit = { operatingExpenses: number; inventoryPurchases: number; capex: number; uncategorized: number };
+function splitOperatingAndInventoryExpenses(expenses: Array<Record<string, unknown>>): ExpenseSplit {
+  return expenses.reduce<ExpenseSplit>((summary, expense) => {
     const amount = getExpenseAmount(expense);
     const classification = classifyExpense(expense);
     if (classification === 'inventory') {
@@ -1013,7 +1014,12 @@ async function fetchAllShopifyOrdersInPeriod(params: PeriodParams = {}): Promise
   let cursor: string | null = null;
   let hasNextPage = true;
   while (hasNextPage) {
-    const data = await shopifyGraphql<{
+    const data: {
+      orders: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        edges: Array<{ node: LiveIncomeOrder }>;
+      };
+    } = await shopifyGraphql<{
       orders: {
         pageInfo: { hasNextPage: boolean; endCursor: string | null };
         edges: Array<{ node: LiveIncomeOrder }>;
@@ -1087,7 +1093,7 @@ function mapOrdersToAccountingLines(orders: LiveIncomeOrder[]): AccountingLine[]
         date,
         month,
         channel: order.sourceName || 'Shopify',
-        customerType: customerOrders > 1 ? 'recurrente' : 'nuevo',
+        customerType: (customerOrders > 1 ? 'recurrente' : 'nuevo') as 'nuevo' | 'recurrente',
         product: line.title,
         productFamily: inferProductFamily(line.title),
         sku: line.variant?.sku ?? '—',
@@ -1676,7 +1682,12 @@ async function loadLiveShopifyProductsUncached() {
   let cursor: string | null = null;
   let hasNextPage = true;
   while (hasNextPage) {
-    const data = await shopifyGraphql<{
+    const data: {
+      products: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        edges: Array<{ node: LiveProduct }>;
+      };
+    } = await shopifyGraphql<{
       products: {
         pageInfo: { hasNextPage: boolean; endCursor: string | null };
         edges: Array<{ node: LiveProduct }>;
@@ -1687,7 +1698,7 @@ async function loadLiveShopifyProductsUncached() {
     cursor = data.products.pageInfo.endCursor;
   }
 
-  return allProducts.flatMap(product => {
+  return allProducts.flatMap((product): Product[] => {
     const variants = product.variants.edges.map(edge => edge.node);
     const variantGroups = shouldSplitProductVariants(product.title)
       ? Array.from(
@@ -1757,8 +1768,8 @@ async function loadLiveShopifyProductsUncached() {
       fees,
       shippingSubsidy,
       cogsUsed,
-      cogsSource: bom ? 'material_manager' : manualOverride ? 'manual_override' : cogsUsed === 0 ? 'fallback' : 'shopify',
-      marginSource: bom ? 'material_manager' : manualOverride ? 'manual_override' : 'shopify',
+      cogsSource: (bom ? 'material_manager' : manualOverride ? 'manual_override' : cogsUsed === 0 ? 'fallback' : 'shopify') as Product['cogsSource'],
+      marginSource: (bom ? 'material_manager' : manualOverride ? 'manual_override' : 'shopify') as Product['marginSource'],
       dataCompleteness: bom || shopifyCost !== null || manualOverride ? 'real' : 'partial',
       idealPrice,
       competitorPrice: price,
