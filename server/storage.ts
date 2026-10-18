@@ -296,7 +296,7 @@ runOnce('2026-10-unify-expenses', () => {
 
 // Oct 2026 catch-up import. Sheet rows (May 8–Jul 21 2026) are already in
 // the books → 'historico'. The Discord DM expenses (Jul 21–Oct 16 2026) come
-// prefilled but still need brand / document type → 'capturado' (Por revisar).
+// prefilled; complete rows → 'revisado', the rest → 'capturado' (Por revisar).
 runOnce('2026-10-import-sheet-may-jul-discord-jul-oct', () => {
   if (!fs.existsSync(EXPENSES_IMPORT_2026_10_JSON)) return;
   const insert = sqlite.prepare(INSERT_EXPENSE_SQL);
@@ -307,7 +307,14 @@ runOnce('2026-10-import-sheet-may-jul-discord-jul-oct', () => {
     insert.run(toRowParams({ ...(e as ExpenseRowInput), status: 'historico', source: 'sheet', sourceRef: String(e.id) }));
   }
   for (const e of payload.discord ?? []) {
-    insert.run(toRowParams({ ...(e as ExpenseRowInput), status: 'capturado', source: 'discord' }));
+    // Rows already confirmed by the user (brand + category + support) come in
+    // as 'revisado'; the rest land in Por revisar.
+    const status: ExpenseStatus = e.status === 'revisado' ? 'revisado' : 'capturado';
+    const source: ExpenseSource = e.source === 'manual' ? 'manual' : 'discord';
+    insert.run(toRowParams({
+      ...(e as ExpenseRowInput), status, source,
+      reviewedAt: status === 'revisado' ? new Date().toISOString() : null,
+    }));
   }
 });
 
