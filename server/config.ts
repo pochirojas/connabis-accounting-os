@@ -22,6 +22,8 @@ export const PO_CSV_DIR = DATA_DIR;
 
 // Files versioned with the repo.
 export const HISTORICAL_EXPENSES_JSON = path.join(ROOT, 'server', 'data', 'historical-expenses.json');
+// Oct 2026 catch-up: sheet rows May 8–Jul 21 2026 + Discord DM Jul 21–Oct 16 2026.
+export const EXPENSES_IMPORT_2026_10_JSON = path.join(ROOT, 'server', 'data', 'expenses-import-2026-10.json');
 
 // Receipts / invoices uploaded from the capture form.
 export const ATTACHMENTS_DIR = path.join(DATA_DIR, 'attachments');

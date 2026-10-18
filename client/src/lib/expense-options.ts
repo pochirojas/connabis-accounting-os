@@ -11,7 +11,7 @@ export const CATEGORY_OPTIONS = [
 // Payment accounts actually in use (Oct 2026).
 export const PAID_WITH_OPTIONS = [
   'Nequi', 'Nequi Edison (Wompi)', 'Nu Débito', 'Nu Crédito', 'Daviplata', 'Bancolombia',
-  'Efectivo', 'Mercado Pago', 'Otro',
+  'Global66', 'Efectivo', 'Mercado Pago', 'Otro',
 ];
 
 export const BRAND_OPTIONS = (Object.keys(EXPENSE_BRAND_LABELS) as ExpenseBrand[]).map(value => ({ value, label: EXPENSE_BRAND_LABELS[value] }));

@@ -22,7 +22,7 @@ import { BOOKED_EXPENSE_STATUSES } from '@shared/schema';
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
-import { ATTACHMENTS_DIR, DB_PATH, HISTORICAL_EXPENSES_JSON } from './config';
+import { ATTACHMENTS_DIR, DB_PATH, EXPENSES_IMPORT_2026_10_JSON, HISTORICAL_EXPENSES_JSON } from './config';
 import { ensureMaterialManagerMirrorSchema } from './material-manager-mirror';
 import { ensureMmPurchaseOrdersImported } from './material-manager-purchase-orders';
 
@@ -291,6 +291,23 @@ runOnce('2026-10-unify-expenses', () => {
       createdAt: row.created_at,
       reviewedAt: row.created_at,
     }));
+  }
+});
+
+// Oct 2026 catch-up import. Sheet rows (May 8–Jul 21 2026) are already in
+// the books → 'historico'. The Discord DM expenses (Jul 21–Oct 16 2026) come
+// prefilled but still need brand / document type → 'capturado' (Por revisar).
+runOnce('2026-10-import-sheet-may-jul-discord-jul-oct', () => {
+  if (!fs.existsSync(EXPENSES_IMPORT_2026_10_JSON)) return;
+  const insert = sqlite.prepare(INSERT_EXPENSE_SQL);
+  const payload = JSON.parse(fs.readFileSync(EXPENSES_IMPORT_2026_10_JSON, 'utf-8')) as {
+    sheet?: Array<Record<string, any>>; discord?: Array<Record<string, any>>;
+  };
+  for (const e of payload.sheet ?? []) {
+    insert.run(toRowParams({ ...(e as ExpenseRowInput), status: 'historico', source: 'sheet', sourceRef: String(e.id) }));
+  }
+  for (const e of payload.discord ?? []) {
+    insert.run(toRowParams({ ...(e as ExpenseRowInput), status: 'capturado', source: 'discord' }));
   }
 });
 
