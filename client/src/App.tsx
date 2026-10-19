@@ -19,6 +19,8 @@ import Sugerencias from "@/pages/sugerencias";
 import Integracion from "@/pages/integracion";
 import Glosario from "@/pages/glosario";
 import ConnabisCo from "@/pages/connabis-co";
+import Capturar from "@/pages/capturar";
+import { AuthGate } from "@/components/auth-gate";
 
 function AppRouter() {
   return (
@@ -26,6 +28,7 @@ function AppRouter() {
       <Route path="/" component={Dashboard} />
       <Route path="/financiero" component={Financiero} />
       <Route path="/ingresos" component={Ingresos} />
+      <Route path="/capturar" component={Capturar} />
       <Route path="/gastos" component={Gastos} />
       <Route path="/productos" component={Productos} />
       <Route path="/performance" component={Performance} />
@@ -49,9 +52,11 @@ function App() {
       <ThemeProvider>
         <TooltipProvider delayDuration={150}>
           <Toaster />
-          <Router hook={useHashLocation}>
-            <AppRouter />
-          </Router>
+          <AuthGate>
+            <Router hook={useHashLocation}>
+              <AppRouter />
+            </Router>
+          </AuthGate>
         </TooltipProvider>
       </ThemeProvider>
     </QueryClientProvider>

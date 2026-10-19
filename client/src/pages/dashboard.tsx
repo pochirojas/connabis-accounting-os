@@ -67,9 +67,9 @@ export default function Dashboard() {
         <div className="flex gap-3">
           <AlertTriangle className="h-5 w-5 text-amber-300 shrink-0 mt-0.5" />
           <div>
-            <h2 className="text-sm font-semibold text-amber-200">MVP con métricas contables reales en Dashboard</h2>
+            <h2 className="text-sm font-semibold text-amber-200">Solo datos reales</h2>
             <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-              KPIs principales y resultado mensual usan Shopify para ingresos, Material Manager para COGS vendido, y gastos reales desde sheet/manual. Panel CEO secundario, alertas, predicciones, inventario y P&L financiero todavía pueden contener seed/prototipo hasta la siguiente ronda.
+              Ingresos de Shopify, COGS de Material Manager y gastos revisados (sheet histórico + nuevos). Si una fuente no responde se muestra “—”, nunca datos de prueba. Los gastos en “Por revisar” no cuentan hasta aprobarlos.
             </p>
             {k?.dataQualityNote && (
               <p className="text-[11px] text-amber-100/85 mt-2 leading-relaxed" data-testid="text-dashboard-data-quality">

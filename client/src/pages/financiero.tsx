@@ -54,7 +54,7 @@ export default function Financiero() {
   const totalInventoryCapitalized = (inventoryAccounting.data ?? []).reduce((sum, row) => sum + row.capitalizedToInventory, 0);
   const totalCogsRecognized = (inventoryAccounting.data ?? []).reduce((sum, row) => sum + row.cogsRecognized, 0);
   const openChecklist = (checklist.data ?? []).filter(item => item.status !== 'listo').length;
-  const manualExpensesTotal = (expenses.data ?? []).filter(expense => expense.source === 'manual').reduce((sum, expense) => sum + expense.amount, 0);
+  const manualExpensesTotal = (expenses.data ?? []).filter(expense => expense.source !== 'sheet').reduce((sum, expense) => sum + expense.amount, 0);
   const operatingCash = (cashAccounts.data ?? []).reduce((sum, account) => account.type === 'liability' ? sum - account.amount : sum + account.amount, 0);
 
   return (
@@ -74,7 +74,7 @@ export default function Financiero() {
         <KpiCard label="Caja operativa neta" value={formatCOP(operatingCash || cash.data?.[0]?.amount || 0)} icon={Banknote} emphasis="gold" testId="kpi-fin-cash" />
         <KpiCard label="Utilidad contable abril" value={april ? formatCOP(april.netIncomeAccounting) : '—'} icon={TrendingUp} emphasis="emerald" testId="kpi-fin-april-profit" hint="Después de capitalizar inventario" />
         <KpiCard label="Inventario capitalizado" value={formatCOP(totalInventoryCapitalized)} icon={Boxes} testId="kpi-fin-capitalized" />
-        <KpiCard label="Gastos manuales" value={formatCOP(manualExpensesTotal)} icon={ReceiptText} testId="kpi-fin-manual-expenses" hint="Persistente pre-API" />
+        <KpiCard label="Gastos nuevos" value={formatCOP(manualExpensesTotal)} icon={ReceiptText} testId="kpi-fin-manual-expenses" hint="Revisados fuera del sheet histórico" />
         <KpiCard label="Checklist abierto" value={`${openChecklist}`} icon={ClipboardCheck} testId="kpi-fin-checklist" hint="Items no listos" />
       </section>
 
@@ -89,6 +89,11 @@ export default function Financiero() {
             </div>
             <Badge variant="outline" className="text-[11px]">Income statement</Badge>
           </div>
+          {(pnl.data ?? []).length === 0 ? (
+            <p className="mb-2 text-xs text-amber-400" data-testid="text-pnl-pending">
+              Pendiente: este P&L se reconstruye sobre datos reales (Dataico + Material Manager). Mientras tanto usa “Resultado mensual real” en el Dashboard.
+            </p>
+          ) : null}
           <div className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={pnl.data ?? []} margin={{ left: -8, right: 8, top: 8 }}>

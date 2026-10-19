@@ -3,7 +3,7 @@ import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   LayoutDashboard, TrendingUp, Receipt, PackageSearch,
   Boxes, AlertTriangle, Settings, Moon, Sun, RefreshCw,
-  CalendarRange, BookOpen, Brain, Landmark, Menu, X, Sparkles, Handshake,
+  CalendarRange, BookOpen, Brain, Landmark, Menu, X, Sparkles, Handshake, Camera, LogOut,
 } from 'lucide-react';
 import { ConnabisLogo } from './logo';
 import { useTheme } from './theme-provider';
@@ -11,11 +11,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useEffect, useState, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
+import { logout, useSessionUser } from './auth-gate';
 
 const NAV = [
   { href: '/',                  label: 'Dashboard',             icon: LayoutDashboard, testId: 'nav-dashboard' },
   { href: '/financiero',        label: 'Control financiero',    icon: Landmark,        testId: 'nav-financiero' },
   { href: '/ingresos',          label: 'Ingresos',              icon: TrendingUp,      testId: 'nav-ingresos' },
+  { href: '/capturar',          label: 'Capturar gasto',        icon: Camera,          testId: 'nav-capturar' },
   { href: '/gastos',            label: 'Gastos',                icon: Receipt,         testId: 'nav-gastos' },
   { href: '/productos',         label: 'Productos & Márgenes',  icon: PackageSearch,   testId: 'nav-productos' },
   { href: '/performance',       label: 'Performance mensual',   icon: CalendarRange,   testId: 'nav-performance' },
@@ -35,6 +37,7 @@ export function Layout({ children, title, subtitle }: { children: ReactNode; tit
   const { theme, toggle } = useTheme();
   const { data: status } = useQuery<{ connected: boolean; mode: string }>({ queryKey: ['/api/shopify/status'] });
   const queryClient = useQueryClient();
+  const { data: me } = useSessionUser();
   // Global fetching count — non-zero means at least one query is fetching in
   // the background. Used to subtly animate the refresh icon while cached data
   // is already on screen, so the user knows new numbers are on the way.
@@ -117,11 +120,21 @@ export function Layout({ children, title, subtitle }: { children: ReactNode; tit
               )} />
             </div>
             <div className="mt-1 text-[12.5px] text-sidebar-foreground/85" data-testid="text-shopify-mode">
-              {status?.connected ? 'Conectado' : 'Modo prototipo (datos sembrados)'}
+              {status?.connected ? 'Conectado' : 'Desconectado'}
             </div>
           </div>
+          {me ? (
+            <div className="flex items-center justify-between gap-2 px-1">
+              <span className="truncate text-[12px] text-sidebar-foreground/70" data-testid="text-current-user">{me.name}</span>
+              {!me.authDisabled ? (
+                <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[12px]" onClick={() => logout()} data-testid="button-logout">
+                  <LogOut className="h-3.5 w-3.5" /> Salir
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
           <div className="text-[10.5px] uppercase tracking-[0.15em] text-sidebar-foreground/45 px-1">
-            Connabis Colombia • MVP
+            51 Industries • Connabis · Turros
           </div>
         </div>
       </aside>

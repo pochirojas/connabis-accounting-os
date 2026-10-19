@@ -2,6 +2,7 @@ import "dotenv/config";
 import express, { Response, NextFunction } from 'express';
 import type { Request } from 'express';
 import { registerRoutes } from "./routes";
+import { setupAuth } from "./auth";
 import { serveStatic } from "./static";
 import { createServer } from "node:http";
 
@@ -16,6 +17,8 @@ declare module "http" {
 
 app.use(
   express.json({
+    // Large enough for base64 receipts (5 × 10 MB) and Discord JSON exports.
+    limit: '60mb',
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
@@ -23,6 +26,7 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+setupAuth(app);
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

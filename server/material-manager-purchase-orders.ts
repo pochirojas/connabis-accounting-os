@@ -17,7 +17,7 @@ import type {
 import { createInventoryBatch, ensureInventoryBatchSchema, generateTrackingCode } from './inventory-batches';
 import { buildPoBreakdown, ensurePoCostOverrideSchema } from './po-cost-breakdown';
 
-const PO_CSV_DIR = '/home/user/workspace';
+import { PO_CSV_DIR } from './config';
 const PO_CSV_GLOB = /^purchase_order_po(\d+)(?:-\d+)?\.csv$/i;
 // Cancelled / missing POs. They have no CSV but should appear in the UI as
 // cancelled rows so users see the gap. They don't add to totals/stock.
@@ -1219,7 +1219,7 @@ export function reversePurchaseOrderReceipt(sqlite: Database.Database, idOrNumbe
 // Order of preference: exact SKU > exact normalized name > fuzzy token-overlap.
 // The matcher NEVER mutates lines on its own — the UI must call the apply
 // endpoint with an explicit lineId + materialId.
-import type { MmMaterialEffective, PoLineMatchSuggestion } from '@shared/schema';
+import type { MmMaterialEffective, MmPoStatus, PoLineMatchSuggestion } from '@shared/schema';
 
 function normalizeNameKey(value: string): string {
   return value

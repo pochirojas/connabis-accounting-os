@@ -6,12 +6,12 @@ Dashboard interno de contabilidad, margen y operación para Connabis Colombia.
 
 - Shopify: fuente oficial de ingresos y productos activos.
 - Material Manager: fuente oficial actual de BOM y COGS.
-- Sheet/manual: fuente real para gastos históricos y nuevos.
-- No mezclar seed con real sin marcarlo en UI.
+- Gastos: una sola tabla `expenses` (sheet histórico migrado + manuales + captura rápida + Discord). Solo los estados `revisado`, `en_dataico` e `historico` cuentan en KPIs/P&L; `capturado` espera en **Por revisar**.
+- Nunca se muestran datos de prueba: si una fuente falla, la UI muestra "—" o vacío.
 - Phase 2: reemplazar Material Manager dentro del OS. Arranca en Phase 2.1 con un mirror solo lectura (shadow mode) que importa y exporta los CSV de MM con headers exactos para rollback de emergencia, sin escribir en Shopify.
 - Phase 2.1+: el módulo **Inventario & Materiales** ya consolida "MM Mirror" + "Inventario & Compras" y agrega un editor de BOM local (drafts) por variante. Los drafts viven en `material_manager_bom_drafts` y nunca se mezclan con las filas MM importadas. El export CSV (Materials/BOM) sigue siendo bit-exact respecto a MM para preservar el rollback; los drafts se exportarán por separado cuando se habilite `Export drafts preview`.
 - La app correrá eventualmente como Shopify embedded app; antes de habilitar escrituras se probará en una tienda de pruebas separada.
-- Phase 3: Dataico/fiscal futuro, no implementado.
+- Phase 3: Dataico como libro oficial (lectura de facturas, compras y documento soporte) — pendiente de verificar API del plan.
 
 ## Stack
 
@@ -26,10 +26,25 @@ Dashboard interno de contabilidad, margen y operación para Connabis Colombia.
 
 ```bash
 npm install
-npm run dev
-npm run build
-npm start
+cp .env.example .env          # completa AUTH_USERS y SESSION_SECRET
+npm run hash-password -- 'tu-contraseña-larga'
+npm run dev                   # o AUTH_DISABLED=1 npm run dev para saltar login en local
+npm run check                 # TypeScript (0 errores)
+npm test                      # tests unitarios
+npm run build && npm start
 ```
+
+### Datos y despliegue
+- Todo lo que no es código vive en `DATA_DIR` (por defecto `./data`): `data.db`, CSV de Material Manager
+  (`material-manager-export.csv`, `material-manager-export-material-product.csv`, `purchase_order_po*.csv`) y `attachments/`.
+- En hosts con disco efímero (Render, Railway) monta un disco persistente y define `DATA_DIR=/var/data`.
+- Respaldo: `GET /api/backup/db` descarga una copia consistente de la base (hazlo en cada cierre mensual).
+- Login obligatorio en producción (`AUTH_USERS`, `SESSION_SECRET`). Todas las rutas `/api/*` requieren sesión.
+
+### Gastos
+- **Capturar gasto** (`/#/capturar`): foto + monto desde el celular → cola **Por revisar**.
+- **Gastos → Por revisar**: completar marca, categoría, NIT, tipo de soporte DIAN y aprobar.
+- **Importar Discord**: ver [docs/EXPORTAR_DISCORD.md](docs/EXPORTAR_DISCORD.md).
 
 ## Páginas
 
